@@ -136,6 +136,9 @@ struct ncclComm {
   // Global proxy thread
   pthread_t proxyThread;
   struct ncclProxyState proxyState;
+
+  // Whether this communicator uses collNet
+  int collNetSupport;
 };
 
 #endif

@@ -227,13 +227,13 @@ ncclResult_t p2pRecvSetup(struct ncclTopoSystem* topo, struct ncclTopoGraph* gra
 }
 
 /* Connect/Send to this peer */
-static ncclResult_t p2pSendConnect(struct ncclConnect* connectInfo, struct ncclConnector* send) {
+static ncclResult_t p2pSendConnect(struct ncclConnect* connectInfo, int nranks, int rank, struct ncclConnector* send) {
   struct p2pSendResources* resources = (struct p2pSendResources*)send->transportResources;
   struct ncclRecvMem* remDevMem;
   struct p2pConnectInfo* info = (struct p2pConnectInfo*)connectInfo;
   if (info->direct) {
     remDevMem = (struct ncclRecvMem*)(info->directPtr);
-    send->conn.direct = 1;
+    send->conn.direct |= NCCL_DIRECT_GPU;
   } else {
     //TRACE_DUMP_IPC(&info->devIpc);
     cudaError_t err = cudaIpcOpenMemHandle(&resources->ipcPtr, info->devIpc, cudaIpcMemLazyEnablePeerAccess);
@@ -257,13 +257,13 @@ static ncclResult_t p2pSendConnect(struct ncclConnect* connectInfo, struct ncclC
 }
 
 /* Connect/Recv from this peer */
-ncclResult_t p2pRecvConnect(struct ncclConnect* connectInfo, struct ncclConnector* recv) {
+ncclResult_t p2pRecvConnect(struct ncclConnect* connectInfo, int nranks, int rank, struct ncclConnector* recv) {
   struct p2pRecvResources* resources = (struct p2pRecvResources*)recv->transportResources;
   struct ncclSendMem* remDevMem;
   struct p2pConnectInfo* info = (struct p2pConnectInfo*)connectInfo;
   if (info->direct) {
     remDevMem = (struct ncclSendMem*)(info->directPtr);
-    recv->conn.direct = 1;
+    recv->conn.direct |= NCCL_DIRECT_GPU;
     recv->conn.ptrExchange = &remDevMem->ptrExchange;
   } else {
     //TRACE_DUMP_IPC(&info->devIpc);

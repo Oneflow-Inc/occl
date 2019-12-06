@@ -105,4 +105,50 @@ typedef ncclNet_v2_t ncclNet_t;
 
 #define NCCL_PLUGIN_SYMBOL ncclNetPlugin_v2
 
+typedef struct {
+  // Name of the collective network (mainly for logs)
+  const char* name;
+  // Initialize the collective network.
+  ncclResult_t (*init)(ncclDebugLogger_t logFunction);
+  // Return the number of adapters capable of doing collective operations.
+  // If ndev returns 0, all other functions might be set to NULL.
+  ncclResult_t (*devices)(int* ndev);
+  // Return the device path in /sys. NCCL will call free on this path.
+  ncclResult_t (*pciPath)(int dev, char** path);
+  // Return whether this device supports host pointers and/or CUDA pointers
+  // as data from the current GPU. Supported types should be composed with
+  // NCCL_PTR_HOST and NCCL_PTR_CUDA.
+  ncclResult_t (*ptrSupport)(int dev, int* supportedTypes);
+  // Create a receiving object and provide a handle to connect to it. The
+  // handle can be up to NCCL_NET_HANDLE_MAXSIZE bytes and will be exchanged
+  // between ranks to create connections.
+  ncclResult_t (*listen)(int dev, void* handle, void** listenComm);
+  // Create a group for collective operations. handles have been created
+  // using listen() above. rank indicates caller's rank in the collective network.
+  ncclResult_t (*connect)(void* handles[], int nranks, int rank, void* listenComm, void** collComm);
+  // Returns whether a reduction operation on a data type is supported.
+  // 1 for supported, 0 otherwise.
+  ncclResult_t (*reduceSupport)(ncclDataType_t dataType, ncclRedOp_t redOp, int* supported);
+  // Register/Deregister memory. Type is either NCCL_PTR_HOST or NCCL_PTR_CUDA.
+  ncclResult_t (*regMr)(void* collComm, void* data, int size, int type, void** mhandle);
+  ncclResult_t (*deregMr)(void* collComm, void* mhandle);
+  // Performs an asynchronous allreduce operation on the collective group.
+  // May return request == NULL if the call cannot be performed (or would block).
+  ncclResult_t (*iallreduce)(void* collComm, void* sendData, void* recvData, int count,
+      ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request);
+  // Perform a flush/fence to make sure all data received with NCCL_PTR_CUDA is
+  // visible to the GPU
+  ncclResult_t (*flush)(void* collComm, void* data, int size, void* mhandle);
+  // Test whether a request is complete. If size is not NULL, it returns the
+  // number of bytes sent/received.
+  ncclResult_t (*test)(void* request, int* done, int* size);
+  // Close and free collective comm objects
+  ncclResult_t (*closeColl)(void* collComm);
+  ncclResult_t (*closeListen)(void* listenComm);
+} ncclCollNet_v1_t;
+
+typedef ncclCollNet_v1_t ncclCollNet_t;
+
+#define NCCL_COLLNET_PLUGIN_SYMBOL ncclCollNetPlugin_v1
+
 #endif // end include guard

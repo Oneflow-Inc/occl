@@ -54,20 +54,6 @@ NCCL_PARAM(IbRetryCnt, "IB_RETRY_CNT", 7);
 NCCL_PARAM(IbSl, "IB_SL", 0);
 NCCL_PARAM(IbTc, "IB_TC", 0);
 
-// Allocate memory to be potentially ibv_reg_mr'd. This needs to be
-// allocated on separate pages as those pages will be marked DONTFORK
-// and if they are shared, that could cause a crash in a child process
-static ncclResult_t ncclIbMalloc(void** ptr, size_t size) {
-  size_t page_size = sysconf(_SC_PAGESIZE);
-  void* p;
-  int size_aligned = ROUNDUP(size, page_size);
-  int ret = posix_memalign(&p, page_size, size_aligned);
-  if (ret != 0) return ncclSystemError;
-  memset(p, 0, size);
-  *ptr = p;
-  return ncclSuccess;
-}
-
 pthread_t ncclIbAsyncThread;
 static void* ncclIbAsyncThreadMain(void* args) {
   struct ibv_context* context = (struct ibv_context*)args;

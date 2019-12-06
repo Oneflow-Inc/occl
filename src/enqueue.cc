@@ -6,6 +6,7 @@
 
 #include "enqueue.h"
 #include "argcheck.h"
+#include "coll_net.h"
 
 // Only generate inline kernels for LL
 #define NCCL_FUNC5(coll, op, dtype) \
@@ -15,7 +16,8 @@
 
 #define NCCL_FUNC4(coll, op, dtype) \
   (void*)NCCL_FUNC5(coll##Tree, op, dtype), \
-  (void*)NCCL_FUNC5(coll##Ring, op, dtype)
+  (void*)NCCL_FUNC5(coll##Ring, op, dtype), \
+  (void*)NCCL_FUNC5(coll##CollNet, op, dtype)
 
 // Must be consistent with ncclDataType_t
 #define NCCL_FUNCS3A(coll, op) \
@@ -241,7 +243,13 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info) {
   // Find algorithm / protocol.
   info->algorithm = -1;
   info->protocol = -1;
-  for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
+  int nAlgos = NCCL_NUM_ALGORITHMS;
+  // Check collNet support
+  int collNetTypeSupport = 0;
+  if (info->comm->collNetSupport)
+    NCCLCHECK(collNetReduceSupport(info->datatype, info->op, &collNetTypeSupport));
+  if (collNetTypeSupport != 1) nAlgos--;
+  for (int a=0; a<nAlgos; a++) {
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       float bw = comm->bandwidths[info->coll][a][p];
       if (bw == 0) continue;
@@ -259,14 +267,14 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info) {
     WARN("Error : no algorithm/protocol available");
     return ncclInternalError;
   }
-  //if (comm->rank == 0) INFO(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %d", info->nBytes, info->algorithm, info->protocol, minTime);
+  //if (comm->rank == 0) INFO(NCCL_TUNING, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
 
-  int nc = comm->nChannels;
+  int nc = (info->algorithm == NCCL_ALGO_COLLNET) ? comm->nChannels/2 : comm->nChannels; // CollNet uses one channel for up and one channel for down
   int nt = comm->maxThreads[info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
   while (info->nBytes < nc*nt*threadThreshold) {
-    if (nc >= 2) nc--;
+    if (info->algorithm != NCCL_ALGO_COLLNET && nc >= 2) nc--;
     else if ((nt % 128) == 0) nt/=2;
     else break;
   }
@@ -286,7 +294,7 @@ static ncclResult_t getPatternInfo(struct ncclInfo* info) {
     case ncclCollAllGather:
       info->pattern = ncclPatternRing; break;
     case ncclCollAllReduce:
-      info->pattern = info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
+      info->pattern = info->algorithm == NCCL_ALGO_COLLNET ? ncclPatternCollTreeUp : info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
     default:
       WARN("Unknown pattern for collective %d algorithm %d", info->coll, info->algorithm);
       return ncclInternalError;
@@ -301,6 +309,8 @@ static ncclResult_t getLoopInfo(struct ncclInfo* info) {
     case ncclPatternTreeUpDown:
     case ncclPatternPipelineFrom:
     case ncclPatternPipelineTo:
+    case ncclPatternCollTreeUp:
+    case ncclPatternCollTreeDown:
       info->nstepsPerLoop = info-> nchunksPerLoop = 1; break;
     case ncclPatternRing:
       info->nstepsPerLoop = info->comm->nRanks-1; info->nchunksPerLoop = info->comm->nRanks; break;
@@ -345,6 +355,13 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclCo
     }
     // Use lastChunkSize as chunkSize
     coll->args.lastChunkSize = chunkSize / ncclTypeSize(info->datatype);
+  } else if (info->algorithm == NCCL_ALGO_COLLNET && info->protocol == NCCL_PROTO_SIMPLE) {
+    // Optimize chunkSize / nSteps
+    while (info->nBytes / (info->nChannels*chunkSize) < info->comm->channels[0].collTreeUp.depth*16 && chunkSize > 131072) chunkSize /= 2;
+    while (info->nBytes / (info->nChannels*chunkSize) < info->comm->channels[0].collTreeUp.depth*4 && chunkSize > 65536) chunkSize /= 2;
+    while (info->nBytes / (info->nChannels*chunkSize) < info->comm->channels[0].collTreeUp.depth && chunkSize > 32768) chunkSize /= 2;
+    // Use lastChunkSize as chunkSize
+    coll->args.lastChunkSize = chunkSize / ncclTypeSize(info->datatype);
   } else if (info->protocol == NCCL_PROTO_LL) {
     int sliceSize = NCCL_LL_SLICE_LINES * sizeof(uint64_t);
     const ssize_t loopSize = info->nChannels*info->nchunksPerLoop*(ssize_t)sliceSize;
@@ -369,6 +386,8 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclCo
   proxyArgs->chunkSteps = chunkSteps;
   proxyArgs->protocol = info->protocol;
   proxyArgs->opCount = info->comm->opCount;
+  proxyArgs->dtype = info->datatype;
+  proxyArgs->redOp = info->op;
   TRACE(NCCL_NET,"opCount %lx slicesteps %d spl %d cpl %d nbytes %zi -> protocol %d nchannels %d nthreads %d, nloops %d nsteps %d comm %p",
       coll->args.opCount, proxyArgs->sliceSteps, info->nstepsPerLoop, info->nchunksPerLoop, info->nBytes, info->protocol, info->nChannels, info->nThreads,
       nLoops, proxyArgs->nsteps, info->comm);
@@ -395,8 +414,11 @@ static ncclResult_t saveKernel(struct ncclInfo* info) {
     WARN("Error : mixing different streams within a group call is not supported.");
     return ncclInvalidUsage;
   }
-  for (int bid=0; bid<coll.args.nChannels; bid++) {
-    struct ncclChannel* channel = info->comm->channels+(info->comm->myParams->gridDim.x % info->comm->nChannels);
+
+  int nSubChannels = (info->pattern == ncclPatternCollTreeUp || info->pattern == ncclPatternCollTreeDown) ? 2 : 1;
+  for (int bid=0; bid<coll.args.nChannels*nSubChannels; bid++) {
+    int channelId = info->comm->myParams->gridDim.x % info->comm->nChannels;
+    struct ncclChannel* channel = info->comm->channels+channelId;
 
     if (channel->collCount == NCCL_MAX_OPS) {
       WARN("Too many aggregated operations (%d max)", NCCL_MAX_OPS);
@@ -405,6 +427,10 @@ static ncclResult_t saveKernel(struct ncclInfo* info) {
 
     // Proxy
     proxyArgs.channel = channel;
+    // Adjust pattern for CollNet based on channel index
+    if (nSubChannels == 2) {
+      info->pattern = (channelId < info->comm->nChannels/nSubChannels) ? ncclPatternCollTreeUp : ncclPatternCollTreeDown;
+    }
     NCCLCHECK(transportSaveProxies(&proxyArgs, info->pattern, info->root, info->comm->nRanks));
 
     info->comm->myParams->gridDim.x++;
@@ -416,7 +442,7 @@ static ncclResult_t saveKernel(struct ncclInfo* info) {
 
     memcpy(c, &coll, sizeof(struct ncclColl));
 
-    c->args.bid = bid;
+    c->args.bid = bid % coll.args.nChannels;
     c->active = 1;
     opIndex = (opIndex+1)%NCCL_MAX_OPS;
     c->nextIndex = opIndex;
