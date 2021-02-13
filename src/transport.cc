@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2016-2020, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2016-2021, NVIDIA CORPORATION. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -86,16 +86,16 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 
     if (sendPeer == recvPeer) {
       if (recvChannels+sendChannels) {
-         NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
-         NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
+         NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, (i<<8)+graph->id, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
+         NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, (i<<8)+graph->id, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
          sendData = data;
          recvData = data+sendChannels;
       }
     } else {
-      if (recvChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, recvData, sizeof(struct ncclConnect)*recvChannels));
-      if (sendChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, sendPeer, sendData, sizeof(struct ncclConnect)*sendChannels));
-      if (sendChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, sendPeer, sendData, sizeof(struct ncclConnect)*sendChannels));
-      if (recvChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, recvData, sizeof(struct ncclConnect)*recvChannels));
+      if (recvChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, (i<<8)+graph->id, recvData, sizeof(struct ncclConnect)*recvChannels));
+      if (sendChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, sendPeer, (i<<8)+graph->id, sendData, sizeof(struct ncclConnect)*sendChannels));
+      if (sendChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, sendPeer, (i<<8)+graph->id, sendData, sizeof(struct ncclConnect)*sendChannels));
+      if (recvChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, (i<<8)+graph->id, recvData, sizeof(struct ncclConnect)*recvChannels));
     }
 
     for (int c=0; c<MAXCHANNELS; c++) {
