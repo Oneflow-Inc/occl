@@ -63,6 +63,7 @@ void dumpData(struct ncclConnect* data, int ndata) {
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph) {
   struct ncclConnect data[2*MAXCHANNELS];
   for (int i=1; i<comm->nRanks; i++) {
+    int bootstrapTag = (i<<8) + (graph ? graph->id+1 : 0);
     int recvPeer = (comm->rank - i + comm->nRanks) % comm->nRanks;
     int sendPeer = (comm->rank + i) % comm->nRanks;
     uint32_t recvMask = comm->connectRecv[recvPeer];
@@ -86,16 +87,16 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 
     if (sendPeer == recvPeer) {
       if (recvChannels+sendChannels) {
-         NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, (i<<8)+graph->id, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
-         NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, (i<<8)+graph->id, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
+         NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, bootstrapTag, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
+         NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, bootstrapTag, data, sizeof(struct ncclConnect)*(recvChannels+sendChannels)));
          sendData = data;
          recvData = data+sendChannels;
       }
     } else {
-      if (recvChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, (i<<8)+graph->id, recvData, sizeof(struct ncclConnect)*recvChannels));
-      if (sendChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, sendPeer, (i<<8)+graph->id, sendData, sizeof(struct ncclConnect)*sendChannels));
-      if (sendChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, sendPeer, (i<<8)+graph->id, sendData, sizeof(struct ncclConnect)*sendChannels));
-      if (recvChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, (i<<8)+graph->id, recvData, sizeof(struct ncclConnect)*recvChannels));
+      if (recvChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, recvPeer, bootstrapTag, recvData, sizeof(struct ncclConnect)*recvChannels));
+      if (sendChannels) NCCLCHECK(bootstrapSend(comm->bootstrap, sendPeer, bootstrapTag, sendData, sizeof(struct ncclConnect)*sendChannels));
+      if (sendChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, sendPeer, bootstrapTag, sendData, sizeof(struct ncclConnect)*sendChannels));
+      if (recvChannels) NCCLCHECK(bootstrapRecv(comm->bootstrap, recvPeer, bootstrapTag, recvData, sizeof(struct ncclConnect)*recvChannels));
     }
 
     for (int c=0; c<MAXCHANNELS; c++) {
