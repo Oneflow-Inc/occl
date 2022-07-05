@@ -2,3 +2,6 @@
 /build
 *.gcov
 /coverage/
+
+.clangd
+nccl.h
