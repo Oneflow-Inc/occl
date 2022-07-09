@@ -258,6 +258,7 @@ template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>;
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Ring, Simple\n");
     runRing<T, RedOp, Proto>(args);
   }
 };
@@ -265,6 +266,7 @@ struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SI
 template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Tree, Simple\n");
     #if CUDART_VERSION >= 11020 && CUDART_VERSION < 11040 && __CUDA_ARCH__ >= 800
       runTreeUpDown<T, RedOp, ProtoSimple<1, 1>>(args);
     #else
@@ -374,6 +376,7 @@ struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET, NCCL_PROTO
 template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Ring, LL\n");
     runRing<T, RedOp, ProtoLL>(args);
   }
 };
@@ -381,6 +384,7 @@ struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL
 template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Tree, LL\n");
     runTreeSplit<T, RedOp, ProtoLL>(args);
   }
 };
@@ -388,6 +392,7 @@ struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL
 template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Ring, LL128\n");
     runRing<T, RedOp, ProtoLL128>(args);
   }
 };
@@ -395,6 +400,7 @@ struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL
 template<typename T, typename RedOp>
 struct RunWorkElement<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_TREE, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(ncclWorkElem *args) {
+    // OFCCL_LOG1(OFCCL, "RunWorkElement AllReduce, Tree, LL128\n");
     runTreeSplit<T, RedOp, ProtoLL128>(args);
   }
 };

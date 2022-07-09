@@ -697,6 +697,7 @@ reg_fallback:
 // Compute CUDA launch parameters
 // Capture time code in view of CUDA graph
 static ncclResult_t ncclSetupCollKernel(struct ncclInfo* info) {
+  OFCCL_LOG0(OFCCL);
   ncclComm_t comm = info->comm;
   if (comm->nRanks == 1 &&
       // User-defined reduction ops may need alter the data even for unitary reductions
@@ -721,6 +722,7 @@ static ncclResult_t ncclSetupCollKernel(struct ncclInfo* info) {
 
   // Inline the first kernel
   if (params->func == NULL) {
+    // OFCCL_LOG(OFCCL, "funcIndex is %d\n", work->header.funcIndex);
     params->func = ncclKerns[work->header.funcIndex];
     if (work->header.type == ncclWorkTypeColl) {
       // Copy the first operation to the inline argument. Type may be set later to
@@ -777,6 +779,7 @@ static inline int getNextChannel(ncclComm_t comm, int aggMode) {
 // Setup aggregated kernels
 // Op info has been previously saved in comm->asyncOps
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
+  OFCCL_LOG0(OFCCL);
   if (comm->asyncOpCount == 0) {
     return ncclSuccess;
   } else if (comm->asyncOpCount == 1) {
@@ -1322,8 +1325,10 @@ static ncclResult_t hostToDevRedOp(
 }
 
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  OFCCL_LOG0(OFCCL);
   ncclResult_t ret = ncclSuccess;
   bool isAsync = ncclAsyncMode();
+  OFCCL_LOG(OFCCL, "isAsync is %s\n", isAsync ? "true" : "false");
   int savedDev = -1;
   // Check arguments
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
@@ -1344,9 +1349,10 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     NCCLCHECKGOTO(ncclAsyncColl(info->comm), ret, end);
     NCCLCHECKGOTO(checkSetStream(info), ret, end);
 
-    INFO(NCCL_COLL,"%s: opCount %lx sendbuff %p recvbuff %p count %zi datatype %d op %d root %d comm %p [nranks=%d] stream %p",
+    OFCCL_LOG(OFCCL, "%s: opCount %lx sendbuff %p recvbuff %p count %zi datatype %d op %d root %d comm %p [nranks=%d] stream %p\n", 
         info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->count,
         info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream);
+    
 
     if (info->coll == ncclFuncSend || info->coll == ncclFuncRecv) { //p2p stored separately
       NCCLCHECKGOTO(ncclSaveP2p(info), ret, end);

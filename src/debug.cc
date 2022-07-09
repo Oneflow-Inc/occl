@@ -64,6 +64,8 @@ void ncclDebugInit() {
         mask = NCCL_ENV;
       } else if (strcasecmp(subsys, "ALLOC") == 0) {
         mask = NCCL_ALLOC;
+      } else if (strcasecmp(subsys, "LEARN") == 0) {
+        mask = OFCCL_LEARN;
       } else if (strcasecmp(subsys, "ALL") == 0) {
         mask = NCCL_ALL;
       }
