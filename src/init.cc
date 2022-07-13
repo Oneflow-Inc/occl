@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "debug.h"
 #include "nccl.h"
 #include "channel.h"
 #include "nvmlwrap.h"
@@ -243,6 +244,7 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, int rank) {
   CUDACHECK(cudaDriverGetVersion(&comm->driverVersion));
 
   NCCLCHECK(ncclCreateQueueInfo(&comm->enqueueInfo, comm));
+  OFCCL_LOG1(OFCCL, "invoke ncclCreateQueueInfo");
   comm->lastSetupNode = NULL;
   comm->lastCudaGraphId = -1;
   comm->disableGraphHelper = ncclParamDisableGraphHelper();

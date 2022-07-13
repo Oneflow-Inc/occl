@@ -7,6 +7,7 @@
 #include "enqueue.h"
 #include "argcheck.h"
 #include "coll_net.h"
+#include "debug.h"
 #include "gdrwrap.h"
 #include "bootstrap.h"
 #include "channel.h"
@@ -281,6 +282,7 @@ ncclResult_t ncclCpuBarrierOut(struct ncclComm* comm) {
 // Check dependency wrt outside streams or previous launches
 // Launch kernel in GROUP mode
 ncclResult_t ncclLaunchBarrier(struct ncclComm* comm) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct cudaLaunchParams* params = comm->myParams;
   if (params->gridDim.x == 0) return ncclSuccess;
 
@@ -304,6 +306,7 @@ ncclResult_t ncclLaunchBarrier(struct ncclComm* comm) {
   }
 
   if (comm->launchMode == ncclComm::GROUP) {
+    OFCCL_LOG1(OFCCL, "ncclComm::GROUP, launch kernel in ncclLaunchCooperativeKernelMultiDevice");
     int isLast = 0;
     NCCLCHECK(ncclCpuBarrierIn(comm, &isLast));
     if (isLast) {
@@ -317,6 +320,7 @@ ncclResult_t ncclLaunchBarrier(struct ncclComm* comm) {
 
 // Launch kernel in PARALLEL mode
 ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct cudaLaunchParams *params = comm->myParams;
   if (params->gridDim.x == 0) return ncclSuccess;
 
@@ -332,6 +336,7 @@ ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
   if (comm->launchMode == ncclComm::GROUP) {
     NCCLCHECK(ncclCpuBarrierOut(comm));
   } else {
+    OFCCL_LOG1(OFCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");
     CUDACHECK(cudaLaunchKernel(params->func, params->gridDim, params->blockDim, params->args, params->sharedMem, params->stream));
   }
 
@@ -360,6 +365,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
 
 // Record done event for current launch
 ncclResult_t ncclRecordEvents(ncclComm_t comm) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct cudaLaunchParams *params = comm->myParams;
 
   // Enqueue event after NCCL kernel (only in non-graph mode)
@@ -379,6 +385,7 @@ ncclResult_t ncclRecordEvents(ncclComm_t comm) {
 
 // Reset parameter space for launch
 ncclResult_t ncclLaunchReset(ncclComm_t comm) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   comm->userStreamSet = false;
 
   // We are finishing capture of the current launch
@@ -697,7 +704,7 @@ reg_fallback:
 // Compute CUDA launch parameters
 // Capture time code in view of CUDA graph
 static ncclResult_t ncclSetupCollKernel(struct ncclInfo* info) {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   ncclComm_t comm = info->comm;
   if (comm->nRanks == 1 &&
       // User-defined reduction ops may need alter the data even for unitary reductions
@@ -779,7 +786,7 @@ static inline int getNextChannel(ncclComm_t comm, int aggMode) {
 // Setup aggregated kernels
 // Op info has been previously saved in comm->asyncOps
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   if (comm->asyncOpCount == 0) {
     return ncclSuccess;
   } else if (comm->asyncOpCount == 1) {
@@ -999,6 +1006,7 @@ static ncclResult_t enqueueSegOp(enum ncclWorkElemType type, struct ncclWork* el
 
 // Enqueue P2P op
 ncclResult_t ncclEnqueueP2pKernel(struct ncclComm* comm, struct ncclQueueElem* eqElem) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct ncclWorkElemP2p* workElem = eqElem->work.p2pElems;
   struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
 
@@ -1028,6 +1036,7 @@ ncclResult_t ncclEnqueueP2pKernel(struct ncclComm* comm, struct ncclQueueElem* e
 
 // Setup P2P op
 ncclResult_t ncclSetupP2pKernel(struct ncclInfo* info) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   ncclComm* comm = info->comm;
   // Compute cuda kernel arg and proxy arg templates
   struct ncclQueueElem* eqElem;
@@ -1055,6 +1064,7 @@ ncclResult_t ncclSetupP2pKernel(struct ncclInfo* info) {
 // Dynamic enqueue function for collective kernels
 // Supports both aggregated and non-aggregated modes
 ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* eqElem, int aggMode) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct ncclWork* work = &eqElem->work;
   struct ncclWorkElem* elem = work->elems;
   struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
@@ -1325,10 +1335,10 @@ static ncclResult_t hostToDevRedOp(
 }
 
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   ncclResult_t ret = ncclSuccess;
   bool isAsync = ncclAsyncMode();
-  OFCCL_LOG(OFCCL, "isAsync is %s\n", isAsync ? "true" : "false");
+  // OFCCL_LOG(OFCCL, "isAsync is %s\n", isAsync ? "true" : "false");
   int savedDev = -1;
   // Check arguments
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
@@ -1349,9 +1359,9 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
     NCCLCHECKGOTO(ncclAsyncColl(info->comm), ret, end);
     NCCLCHECKGOTO(checkSetStream(info), ret, end);
 
-    OFCCL_LOG(OFCCL, "%s: opCount %lx sendbuff %p recvbuff %p count %zi datatype %d op %d root %d comm %p [nranks=%d] stream %p\n", 
-        info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->count,
-        info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream);
+    // OFCCL_LOG(OFCCL, "%s: opCount %lx sendbuff %p recvbuff %p count %zi datatype %d op %d root %d comm %p [nranks=%d] stream %p", 
+    //     info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->count,
+    //     info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream);
     
 
     if (info->coll == ncclFuncSend || info->coll == ncclFuncRecv) { //p2p stored separately

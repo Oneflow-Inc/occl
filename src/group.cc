@@ -77,7 +77,7 @@ ncclResult_t ncclAsyncInit(ncclInitFunc_t func, ncclComm_t* newcomm, int ndev, n
 }
 
 ncclResult_t ncclAsyncColl(ncclComm_t comm) {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct ncclAsyncArgs* args = ncclGroupArgs;
   for (int i=0; i<ncclGroupIndex; i++) {
     if (args->coll.comm == comm) return ncclSuccess;
@@ -95,7 +95,7 @@ ncclResult_t ncclAsyncColl(ncclComm_t comm) {
 
 NCCL_API(ncclResult_t, ncclGroupStart);
 ncclResult_t ncclGroupStart() {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   NVTX3_FUNC_RANGE_IN(nccl_domain);
   if (ncclGroupMode == 0) {
     memset(ncclGroupArgs, 0, sizeof(struct ncclAsyncArgs)*MAX_ASYNC_OPS);
@@ -105,6 +105,7 @@ ncclResult_t ncclGroupStart() {
 }
 
 static ncclResult_t scheduleSend(struct ncclComm* comm, int peer, int chunk, size_t count, void* buff) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct ncclInfo info = { ncclFuncSend, "Send",
     NULL, buff, count, ncclInt8, ncclSum, peer, comm, comm->userStream, /* Args */
     1, 1 };
@@ -115,6 +116,7 @@ static ncclResult_t scheduleSend(struct ncclComm* comm, int peer, int chunk, siz
   return ncclSuccess;
 }
 static ncclResult_t scheduleRecv(struct ncclComm* comm, int peer, int chunk, size_t count, void* buff) {
+  // OFCCL_LOG1(OFCCL, "Enter");
   struct ncclInfo info = { ncclFuncRecv, "Recv",
     NULL, buff, count, ncclInt8, ncclSum, peer, comm, comm->userStream, /* Args */
     1, 1 };
@@ -147,7 +149,7 @@ static size_t getP2pChunkSize(size_t totalSize, int minChannels, int maxChannels
 
 NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd() {
-  OFCCL_LOG0(OFCCL);
+  // OFCCL_LOG1(OFCCL, "Enter");
   NVTX3_FUNC_RANGE_IN(nccl_domain);
   if (ncclGroupMode == 0) {
     WARN("ncclGroupEnd: not in a group call.");
@@ -307,6 +309,8 @@ sched_delta:
     }
   }
 
+  OFCCL_LOG1(OFCCL, "Prepare channel done");
+
   /* Collectives are done in three steps :
    * 0. Save kernels previously enqueued. Compute channel, algo, proto, etc.
    * 1. Barrier Check In. Only the last call may call cudaLaunchKernel[cooperative]
@@ -351,6 +355,7 @@ sched_delta:
       if (usingCudaGraphAll == 1) {
         NCCLCHECKGOTO(ncclCudaGraphHostSetup(args->coll.comm, graphs[i]), ret, end);
       } else {
+        OFCCL_LOG1(OFCCL, "No cuda Graph");
         ncclEnqueueHostSetup<0>(args->coll.comm->enqueueInfo);
       }
       NCCLCHECKGOTO(ncclLaunchBarrier(args->coll.comm), ret, end);
