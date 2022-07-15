@@ -203,11 +203,11 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     int proto = Proto;
     int fnIndex = FnIndex;
     if (ncclShmem.work.header.funcIndex == FnIndex) {
-      // OFCCL_LOG(OFCCL, "funcIndex match, Fn=%d, Algo=%d, Proto=%d, ncclShmem.work.header.funcIndex=%d, FnIndex=%d\n", fn, algo, proto, ncclShmem.work.header.funcIndex, fnIndex);
+      // OFCCL_LOG(NCCL, "funcIndex match, Fn=%d, Algo=%d, Proto=%d, ncclShmem.work.header.funcIndex=%d, FnIndex=%d\n", fn, algo, proto, ncclShmem.work.header.funcIndex, fnIndex);
       RunWork<Fn, T, RedOp, Algo, Proto>().run(&ncclShmem.work);
     }
     else {
-      // OFCCL_LOG(OFCCL, "funcIndex mismatch, Fn=%d, Algo=%d, Proto=%d, ncclShmem.work.header.funcIndex=%d, FnIndex=%d\n", fn, algo, proto, ncclShmem.work.header.funcIndex, fnIndex);
+      // OFCCL_LOG(NCCL, "funcIndex mismatch, Fn=%d, Algo=%d, Proto=%d, ncclShmem.work.header.funcIndex=%d, FnIndex=%d\n", fn, algo, proto, ncclShmem.work.header.funcIndex, fnIndex);
       ncclFuncs[ncclShmem.work.header.funcIndex]();
     }
 
@@ -220,7 +220,7 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
 #if NCCL_OP == 0
 #define IMPL_COLL_KERN(func, algo, proto, devredop, type, fIndex) \
 __global__ void NCCL_KERN_NAME(func, algo, proto, devredop, type)(struct ncclDevComm* comm, struct ncclWorkElem first) { \
-  /*OFCCL_LOG(OFCCL, "in IMPL_COLL_KERN, %s, %s, %s, %s, %s, %d\n", #func, #algo, #proto, #devredop, #type, fIndex);*/ \
+  /*OFCCL_LOG(NCCL, "in IMPL_COLL_KERN, %s, %s, %s, %s, %s, %d\n", #func, #algo, #proto, #devredop, #type, fIndex);*/ \
   ncclKernel<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto, fIndex>(comm, first); \
 }
 #else
@@ -230,7 +230,7 @@ __global__ void NCCL_KERN_NAME(func, algo, proto, devredop, type)(struct ncclDev
 // Examples :     AllReduce, RING, LL,    Sum,   uint8
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void NCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
-  /*OFCCL_LOG(OFCCL, "in IMPL_COLL_FUNC, %s, %s, %s, %s, %s\n", #func, #algo, #proto, #devredop, #type);*/ \
+  /*OFCCL_LOG(NCCL, "in IMPL_COLL_FUNC, %s, %s, %s, %s, %s\n", #func, #algo, #proto, #devredop, #type);*/ \
   RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&ncclShmem.work); \
 }
 
