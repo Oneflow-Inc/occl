@@ -9,10 +9,11 @@ include ../makefiles/version.mk
 
 ##### src files
 INCEXPORTS  := nccl.h nccl_net.h
-LIBSRCFILES := init.cc channel.cc bootstrap.cc transport.cc enqueue.cc group.cc debug.cc proxy.cc enhcompat.cc net.cc \
+LIBSRCFILES := init.cc channel.cc bootstrap.cc transport.cc enqueue.cc enqueue_ofccl.cc group.cc debug.cc proxy.cc enhcompat.cc net.cc \
 		misc/nvmlwrap.cc misc/ibvwrap.cc misc/gdrwrap.cc misc/utils.cc misc/argcheck.cc misc/socket.cc misc/shmutils.cc misc/profiler.cc misc/param.cc \
 		transport/p2p.cc transport/shm.cc transport/net.cc transport/net_socket.cc transport/net_ib.cc transport/coll_net.cc \
                 collectives/sendrecv.cc collectives/all_reduce.cc collectives/all_gather.cc collectives/broadcast.cc collectives/reduce.cc collectives/reduce_scatter.cc \
+								collectives_ofccl/ofccl_all_reduce.cc \
                 graph/topo.cc graph/paths.cc graph/search.cc graph/connect.cc graph/rings.cc graph/trees.cc graph/tuning.cc graph/xml.cc
 
 ##### lib files
@@ -74,13 +75,14 @@ $(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB)
 	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(LDFLAGS)
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
+	@printf "Link Success    %-35s > %s\n" $(LIBTARGET) $@
 
 null :=
 space := $(null) #
 comma := ,
 
 $(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB)
-	@printf "Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
+	@printf "HELLO Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
 	printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
 
@@ -120,6 +122,7 @@ $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 
 clean :
 	$(MAKE) -C collectives/device clean
+	$(MAKE) -C collectives_ofccl/device clean
 	rm -rf ${INCDIR} ${LIBDIR} ${PKGDIR} ${OBJDIR}
 
 install : build

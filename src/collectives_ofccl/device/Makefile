@@ -18,7 +18,8 @@ STATICLIB  := $(OBJDIR)/colldevice_ofccl.a
 # ↑ 改了名字
 DEVOBJ     := $(OBJDIR)/devlink_ofccl.o
 # ↑ 改了名字
-RULESFILE  := $(OBJDIR)/Makefile.rules
+RULESFILE  := $(OBJDIR)/Makefile_ofccl.rules
+# ↑ 改了名字
 
 NVCUFLAGS  += -I. -I.. -I$(BUILDDIR)/include -I../../include --compiler-options "-fPIC -fvisibility=hidden"
 

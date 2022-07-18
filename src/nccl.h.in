@@ -243,6 +243,23 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
 
 /*
+ * OFCCL All-Reduce
+ *
+ * Reduces data arrays of length count in sendbuff using op operation, and
+ * leaves identical copies of result on each recvbuff.
+ *
+ * In-place operation will happen if sendbuff == recvbuff.
+ * 
+ * OFCCL update: dynamic fusion; more flexible "work fifo queue"
+ * 
+ * 
+ */
+ncclResult_t  ofcclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
+    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t pofcclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
+    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+
+/*
  * Reduce-Scatter
  *
  * Reduces data in sendbuff using op operation and leaves reduced result

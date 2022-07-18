@@ -15,9 +15,19 @@
 
 #include <cstring> // std::memcpy
 
+static void* const ofcclKerns[1] = {
+  (void*)try_make_kern,
+};
+
 namespace {
 void try_make() {
-  try_make_kern<<<8, 4>>>();
+  dim3 gridDim, blockDim;
+  gridDim.x = 8;
+  blockDim.x = 4;
+  int a = 1;
+  int *b = &a;
+  cudaLaunchKernel(ofcclKerns[0], gridDim, blockDim, (void**)&b, 0, NULL);
+  // try_make_kern<<<8, 4>>>();
 }
 
 } // namespace
