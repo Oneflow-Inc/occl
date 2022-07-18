@@ -202,7 +202,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
     eqInfo->maxChannels = params->gridDim.x;
   }
 
-  // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, eqInfo->maxChannels=%d", comm->nRanks, comm->rank, eqInfo->maxChannels);
+  // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
 
   // Set isLast = 1 for the last operation and add a no-op on empty channels (p2p case).
   for (int c=0; c<eqInfo->maxChannels; c++) {
