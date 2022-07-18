@@ -339,7 +339,8 @@ ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
   if (comm->launchMode == ncclComm::GROUP) {
     NCCLCHECK(ncclCpuBarrierOut(comm));
   } else {
-    // OFCCL_LOG1(NCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");
+    // OFCCL_LOG1(NCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");  
+    // OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->args=%p, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->args, params->sharedMem);
     CUDACHECK(cudaLaunchKernel(params->func, params->gridDim, params->blockDim, params->args, params->sharedMem, params->stream));
   }
 
@@ -1397,6 +1398,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
 
     // Common part between graph mode and non-graph mode
     NCCLCHECKGOTO(ncclLaunchBarrier(comm), ret, end);
+    // OFCCL_LOG1(NCCL, "invoke ncclLaunchKernel");
     NCCLCHECKGOTO(ncclLaunchKernel(comm), ret, end);
     NCCLCHECKGOTO(ncclRecordEvents(comm), ret, end);
     NCCLCHECKGOTO(ncclLaunchReset(comm), ret, end);

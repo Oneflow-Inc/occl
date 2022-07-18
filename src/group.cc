@@ -365,6 +365,7 @@ sched_delta:
     struct ncclAsyncArgs* args = ncclGroupArgs+i;
     if (args->funcType == ASYNC_FUNC_COLL) {
       CUDACHECKGOTO(cudaSetDevice(args->coll.comm->cudaDev), ret, end);
+      // OFCCL_LOG(NCCL, "i=%d, ncclGroupIndex=%d, invoke ncclLaunchKernel", i, ncclGroupIndex);
       NCCLCHECKGOTO(ncclLaunchKernel(args->coll.comm), ret, end);
     }
   }
