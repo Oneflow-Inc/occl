@@ -8,6 +8,7 @@
 #define NCCL_DEVICE_COMMON_H_
 
 #include "collectives.h"
+#include "debug.h"
 #include "devcomm.h"
 #include "op128.h"
 
@@ -99,6 +100,9 @@ struct RunWork {
     for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && w->elems[e].header.type != ncclWorkTypeUnused; e += inc) {
       if (wid < w->header.nWarps)
         RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[e]);
+        // if (threadIdx.x == 0) {
+        //   OFCCL_LOG(NCCL, "bid(%d), blockDim.x(%d), ncclWorkElem(%d)(with %d channels, %lu bytes each, lastChunkSize=%lu) done", blockIdx.x, blockDim.x, e, w->elems[e].nChannels, w->elems[e].count, w->elems[e].lastChunkSize);
+        // }
     }
   }
 };
@@ -198,10 +202,10 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     }
     __syncthreads();
 
-    int fn = Fn;
-    int algo = Algo;
-    int proto = Proto;
-    int fnIndex = FnIndex;
+    // int fn = Fn;
+    // int algo = Algo;
+    // int proto = Proto;
+    // int fnIndex = FnIndex;
     if (ncclShmem.work.header.funcIndex == FnIndex) {
       // OFCCL_LOG(NCCL, "funcIndex match, Fn=%d, Algo=%d, Proto=%d, ncclShmem.work.header.funcIndex=%d, FnIndex=%d\n", fn, algo, proto, ncclShmem.work.header.funcIndex, fnIndex);
       RunWork<Fn, T, RedOp, Algo, Proto>().run(&ncclShmem.work);

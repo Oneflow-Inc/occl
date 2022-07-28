@@ -202,7 +202,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
     eqInfo->maxChannels = params->gridDim.x;
   }
 
-  // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
+  // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d, sizeof(struct ncclWorkElem)=%lu", comm->nRanks, comm->rank, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x, sizeof(struct ncclWorkElem));
 
   // Set isLast = 1 for the last operation and add a no-op on empty channels (p2p case).
   for (int c=0; c<eqInfo->maxChannels; c++) {
@@ -1346,6 +1346,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   int savedDev = -1;
   // Check arguments
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
+  // OFCCL_LOG(NCCL, "info->comm->checkPointers is %s, info->comm->cudaDev is %d", info->comm->checkPointers ? "ture" : "false", info->comm->cudaDev);
   if (isAsync && info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&savedDev), ret, end);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, end);

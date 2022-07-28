@@ -159,6 +159,7 @@ ncclResult_t ncclGroupEnd() {
   if (ncclGroupMode > 0) return ncclSuccess;
   int savedDev;
   CUDACHECK(cudaGetDevice(&savedDev));
+  // OFCCL_LOG(NCCL, "savedDev is %d", savedDev);
   int activeThreads = 0;
   int doneArray[MAX_ASYNC_OPS];
   for (int i=0; i<ncclGroupIndex; i++) doneArray[i] = 1;
@@ -193,7 +194,9 @@ ncclResult_t ncclGroupEnd() {
 
   for (int i=0; i<ncclGroupIndex; i++) {
     struct ncclAsyncArgs* args = ncclGroupArgs+i;
+    OFCCL_LOG(NCCL, "i=%d, ncclGroupIndex=%d, args->funcType=%d, args->coll.comm->connect=%d, args->coll.comm->nRanks=%d", i, ncclGroupIndex, args->funcType, args->coll.comm->connect, args->coll.comm->nRanks);
     if (args->funcType == ASYNC_FUNC_COLL && args->coll.comm->connect) {
+      OFCCL_LOG1(NCCL, "ENTER HRER");
       pthread_create(ncclGroupThreads+i, NULL, ncclAsyncThreadPreconnect, args);
     }
   }

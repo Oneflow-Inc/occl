@@ -16,6 +16,7 @@ namespace {
     const int nthreads = args->header.nWarps*WARP_SIZE;
     const int bid = args->bid;
     const int nChannels = args->nChannels;
+    // OFCCL_LOG(NCCL, "nChannels=%d, blockDim.x=%d, bid=%d, tid=%d", nChannels, blockDim.x, bid, tid);
     ncclRing *ring = &ncclShmem.channel.ring;
     int ringIx = ring->index;
     const ssize_t chunkSize = int(Proto::calcBytePerStep()/sizeof(T) * (Proto::Id == NCCL_PROTO_SIMPLE ? ALLREDUCE_CHUNKSTEPS : 1));

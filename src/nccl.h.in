@@ -186,6 +186,26 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
  */
 
 /*
+ * OFCCL prepare collective
+ *
+ * Calculate nChannels, gridDim, blockDim, etc given count
+ *
+ *
+ */
+ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
+ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
+
+/*
+ * OFCCL prepare done, just like ncclGroupEnd()
+ *
+ *
+ *
+ *
+ */
+ncclResult_t  ofcclPrepareDone();
+ncclResult_t pofcclPrepareDone();
+
+/*
  * Reduce
  *
  * Reduces data arrays of length count in sendbuff into recvbuff using op
@@ -254,10 +274,8 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
  * 
  * 
  */
-ncclResult_t  ofcclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
-ncclResult_t pofcclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
+ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
 
 /*
  * Reduce-Scatter

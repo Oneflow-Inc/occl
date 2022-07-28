@@ -10,5 +10,6 @@
 #include "nvtx3.hpp"
 
 struct nccl_domain{static constexpr char const* name{"NCCL"};};
+struct ofccl_domain{static constexpr char const* name{"OFCCL"};};
 
 #endif
