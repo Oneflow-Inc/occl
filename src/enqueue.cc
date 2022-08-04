@@ -205,9 +205,9 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
     eqInfo->maxChannels = params->gridDim.x;
   }
 
-  // if (comm->rank==0)
-  //   // comm->asyncTotalSize=0, because it has been cleared in ncclSetupAsyncKernels
-  //   OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, comm->asyncTotalSize=%lu, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, comm->asyncTotalSize, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
+  if (comm->rank==0)
+    // comm->asyncTotalSize=0, because it has been cleared in ncclSetupAsyncKernels
+    // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, comm->asyncTotalSize=%lu, comm->nChannels=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, comm->asyncTotalSize, comm->nChannels, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
 
   // struct ncclWorkElem nwe = comm->channels->workFifo->elems[0];
   // OFCCL_LOG(NCCL, "sizeof(struct ncclWorkElem)=%lu， sizeof(nwe.header)=%lu, <sizeof(nwe.header.funcIndex)=%lu, sizeof(nwe.header.type)=%lu>, sizeof(nwe.regUsed)=%lu, sizeof(nwe.direct)=%lu, sizeof(nwe.redOpArgIsPtr)=%lu, sizeof(nwe.sendbuff)=%lu, sizeof(nwe.recvbuff)=%lu, sizeof(nwe.count)=%lu, sizeof(nwe.lastChunkSize)=%lu, sizeof(nwe.root)=%lu, sizeof(nwe.bid)=%lu, sizeof(nwe.nChannels)=%lu, sizeof(nwe.redOpArg)=%lu, sizeof(nwe.pad)=%lu", sizeof(struct ncclWorkElem), sizeof(nwe.header), sizeof(nwe.header.funcIndex), sizeof(nwe.header.type), sizeof(nwe.regUsed), sizeof(nwe.direct), sizeof(nwe.redOpArgIsPtr), sizeof(nwe.sendbuff), sizeof(nwe.recvbuff), sizeof(nwe.count), sizeof(nwe.lastChunkSize), sizeof(nwe.root), sizeof(nwe.bid), sizeof(nwe.nChannels), sizeof(nwe.redOpArg), sizeof(nwe.pad));
@@ -216,6 +216,13 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
   for (int c=0; c<eqInfo->maxChannels; c++) {
     struct ncclChannel* channel = comm->channels+c;
     // OFCCL_LOG(NCCL, "c=%d, channel->id=%d, channel->workCount=%d", c, channel->id, channel->workCount);
+    for (int l = 0; l < channel->workFifoTail; l++) {
+      ncclWork *work = channel->workFifo + l;
+      
+      for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
+        // OFCCL_LOG(NCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
+      }
+    }
     if (channel->workCount == 0) {
       struct ncclWork* w;
       NCCLCHECK(getNextOp(channel, &w, NULL));
@@ -362,7 +369,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
   // Also, starting the proxies after the CUDA launch seems to be better for
   // performance (latency).
   ncclComm_t comm = eqInfo->comm;
-  OFCCL_LOG(NCCL, "eqInfo->maxChannels=%d", eqInfo->maxChannels);
+  // OFCCL_LOG(NCCL, "eqInfo->maxChannels=%d", eqInfo->maxChannels);
   if (eqInfo->maxChannels == 0) return ncclSuccess;
 
   for (int r=0; r<eqInfo->maxChannels; r++) {
@@ -371,7 +378,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
     channel->totalSize = 0;
   }
   comm->lastChannel = 0;
-  OFCCL_LOG1(NCCL, "invoke ncclProxyStart");
+  // OFCCL_LOG1(NCCL, "invoke ncclProxyStart");
   NCCLCHECK(ncclProxyStart(comm));
   return ncclSuccess;
 }

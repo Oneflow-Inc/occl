@@ -658,16 +658,29 @@ ncclResult_t ofcclPrepareDone() {
     }
   }
 
-  // ***** print prepared colls *****
+  // ***** check & print prepared colls *****
   for (int i = 0; i <= ofcclCommListPanel; i++) {
     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
     for (int j = 0; j < front_of_panel; j++) {
       ofcclCommArgs args = ofcclCommList[i][j];
       ncclComm_t comm = args.comm;
-      for (int k = 0; k < comm->nChannels; k++) {
+      struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
+      if (eqInfo->elemList->count() > 1) {
+        ret = ncclInvalidUsage;
+        WARN("eqInfo->elemList->count() shouldn't be larger than 1");
+        goto end;
+      }
+      for (int k = 0; k < eqInfo->maxChannels; k++) {
         struct ncclChannel channel = comm->channels[k];
         // %NCCL_MAX_OPS
-        OFCCL_LOG(OFCCL, "%dth channel from %dth comm, channel.workFifoTail=%lu, channel.index=%u", k, j, channel.workFifoTail, channel.index);
+        // OFCCL_LOG(OFCCL, "pthread_id=%lu, %dth comm(comm->nChannels=%d), %dth channel, channel.workCount=%d, channel.workFifoTail=%lu, channel.index=%u", pthread_self(), j, comm->nChannels, k, channel.workCount, channel.workFifoTail, channel.index);
+        for (int l = 0; l < channel.workFifoTail; l++) {
+          ncclWork *work = channel.workFifo + l;
+          
+          for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
+            // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
+          }
+        }
       }
     }
   }
