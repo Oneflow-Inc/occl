@@ -169,15 +169,18 @@ static ncclResult_t getNextOp(struct ncclChannel* channel, struct ncclWork** wor
     WARN("Too many aggregated operations on channel %d (%d max)", channel->id, NCCL_MAX_OPS);
     return ncclInvalidUsage;
   }
+  // OFCCL_LOG(NCCL, "parameter ncclWork** work=%p, ncclWorkElem* base=%p", work, base);
   int opIndex = channel->workFifoTail%NCCL_MAX_OPS;
   struct ncclWork* w = channel->workFifo+opIndex;
   volatile uint8_t* typePtr = (volatile uint8_t*)&w->header.type;
+  // OFCCL_LOG(NCCL, "typePtr[0]=%d, channel->opIndex=%d, channel->workCount=%d", typePtr[0],  opIndex, channel->workCount);
   while (typePtr[0] != ncclWorkTypeUnused) sched_yield();
   memset(w, 0, sizeof(struct ncclWork));
   // Initialize with work elem if provided
   if (base) memcpy(w->elems, base, sizeof(struct ncclWorkElem));
   channel->workFifoTail++;
   channel->workCount++;
+  // OFCCL_LOG(NCCL, "after++ channel->workFifoTail=%lu, channel->workCount=%d", channel->workFifoTail, channel->workCount);
   if (work) *work = w;
   return ncclSuccess;
 }
@@ -202,7 +205,12 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
     eqInfo->maxChannels = params->gridDim.x;
   }
 
-  // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d, sizeof(struct ncclWorkElem)=%lu", comm->nRanks, comm->rank, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x, sizeof(struct ncclWorkElem));
+  // if (comm->rank==0)
+  //   // comm->asyncTotalSize=0, because it has been cleared in ncclSetupAsyncKernels
+  //   OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, comm->asyncTotalSize=%lu, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, comm->asyncTotalSize, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
+
+  // struct ncclWorkElem nwe = comm->channels->workFifo->elems[0];
+  // OFCCL_LOG(NCCL, "sizeof(struct ncclWorkElem)=%lu， sizeof(nwe.header)=%lu, <sizeof(nwe.header.funcIndex)=%lu, sizeof(nwe.header.type)=%lu>, sizeof(nwe.regUsed)=%lu, sizeof(nwe.direct)=%lu, sizeof(nwe.redOpArgIsPtr)=%lu, sizeof(nwe.sendbuff)=%lu, sizeof(nwe.recvbuff)=%lu, sizeof(nwe.count)=%lu, sizeof(nwe.lastChunkSize)=%lu, sizeof(nwe.root)=%lu, sizeof(nwe.bid)=%lu, sizeof(nwe.nChannels)=%lu, sizeof(nwe.redOpArg)=%lu, sizeof(nwe.pad)=%lu", sizeof(struct ncclWorkElem), sizeof(nwe.header), sizeof(nwe.header.funcIndex), sizeof(nwe.header.type), sizeof(nwe.regUsed), sizeof(nwe.direct), sizeof(nwe.redOpArgIsPtr), sizeof(nwe.sendbuff), sizeof(nwe.recvbuff), sizeof(nwe.count), sizeof(nwe.lastChunkSize), sizeof(nwe.root), sizeof(nwe.bid), sizeof(nwe.nChannels), sizeof(nwe.redOpArg), sizeof(nwe.pad));
 
   // Set isLast = 1 for the last operation and add a no-op on empty channels (p2p case).
   for (int c=0; c<eqInfo->maxChannels; c++) {
@@ -229,8 +237,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
       // GDRCOPY support
       uint64_t first = (channel->workFifoTail-channel->workCount)%NCCL_MAX_OPS;
       uint64_t nelems = channel->workCount;
-      TRACE(NCCL_INIT, "GDRCOPY : copy workFifo %p to %p first %ld nelems %zi",
-            channel->workFifo, channel->workFifoGdr, first, nelems);
+      // OFCCL_LOG(NCCL, "GDRCOPY : copy workFifo %p to %p first %ld nelems %zi", channel->workFifo, channel->workFifoGdr, first, nelems);
 
       for (int i = 0; i < nelems; i++) {
         int elem = (first+i) % NCCL_MAX_OPS;
@@ -355,6 +362,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
   // Also, starting the proxies after the CUDA launch seems to be better for
   // performance (latency).
   ncclComm_t comm = eqInfo->comm;
+  OFCCL_LOG(NCCL, "eqInfo->maxChannels=%d", eqInfo->maxChannels);
   if (eqInfo->maxChannels == 0) return ncclSuccess;
 
   for (int r=0; r<eqInfo->maxChannels; r++) {
@@ -363,6 +371,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
     channel->totalSize = 0;
   }
   comm->lastChannel = 0;
+  OFCCL_LOG1(NCCL, "invoke ncclProxyStart");
   NCCLCHECK(ncclProxyStart(comm));
   return ncclSuccess;
 }
@@ -739,6 +748,7 @@ static ncclResult_t ncclSetupCollKernel(struct ncclInfo* info) {
       // Copy the first operation to the inline argument. Type may be set later to
       // ncclWorkTypeUnused if we have more than one coll element.
       memcpy(&comm->args, work->elems, sizeof(struct ncclWorkElem));
+      // OFCCL_LOG(NCCL, "comm->args.header.type is %d", comm->args.header.type);
       comm->args.bid = 0;    // Only inline for channel 0
       comm->args.header.isLast = 1; // I am so far the last element
     }
@@ -790,7 +800,7 @@ static inline int getNextChannel(ncclComm_t comm, int aggMode) {
 // Setup aggregated kernels
 // Op info has been previously saved in comm->asyncOps
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
-  // OFCCL_LOG1(NCCL, "Enter");
+  // OFCCL_LOG(NCCL, "comm->asyncOpCount=%d", comm->asyncOpCount);
   if (comm->asyncOpCount == 0) {
     return ncclSuccess;
   } else if (comm->asyncOpCount == 1) {
@@ -974,6 +984,8 @@ static ncclResult_t enqueueSegOp(enum ncclWorkElemType type, struct ncclWork* el
 
   memcpy(work->elems+s, elem, sizeof(struct ncclWorkElem));
 
+  // OFCCL_LOG(NCCL, "regInfo->nBuffs=%d", regInfo->nBuffs);
+
   if (regInfo->nBuffs == 0) return ncclSuccess;
 
   // Copy registered buffer addresses into ncclWork
@@ -1068,7 +1080,7 @@ ncclResult_t ncclSetupP2pKernel(struct ncclInfo* info) {
 // Dynamic enqueue function for collective kernels
 // Supports both aggregated and non-aggregated modes
 ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* eqElem, int aggMode) {
-  // OFCCL_LOG1(NCCL, "Enter");
+  // OFCCL_LOG(NCCL, "aggMode=%d", aggMode);
   struct ncclWork* work = &eqElem->work;
   struct ncclWorkElem* elem = work->elems;
   struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
@@ -1076,14 +1088,17 @@ ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* 
   int nChannels = elem->nChannels;
   size_t channelSize = elem->count*ncclTypeSize(proxyOp->dtype)/elem->nChannels;
   enum ncclWorkElemType workElemType = proxyOp->redOp == ncclNumOps ? ncclWorkTypeColl : ncclWorkTypeRegColl;  // redOp is only set when using CollNet
+  // OFCCL_LOG(NCCL, "workElemType=%d, proxyOp->redOp=%d", workElemType, proxyOp->redOp);
 
   for (int bid=0; bid<nChannels; bid++) {
     int channelId = getNextChannel(comm, aggMode);
+    // OFCCL_LOG(NCCL, "channelIdId=%d", channelId);
     struct ncclChannel* channel = comm->channels+channelId;
 
     // Proxy
     proxyOp->channelId = channelId;
     proxyOp->opCount = comm->collOpCount;
+    // OFCCL_LOG(NCCL, "comm->rank=%d, comm->collOpCount=%lu", comm->rank, comm->collOpCount);
     if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
 
     elem->bid = bid % nChannels;
@@ -1101,6 +1116,7 @@ ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* 
       }
     }
     if (segment == -1) {
+      // OFCCL_LOG1(NCCL, "getNextOp here");
       NCCLCHECK(getNextOp(channel, &w, NULL));
       segment = 0;
     }
@@ -1110,6 +1126,7 @@ ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* 
     channel->totalSize += channelSize;
   }
   comm->collOpCount++;
+  // OFCCL_LOG(NCCL, "after comm->collOpCount++, comm->rank=%d, comm->collOpCount=%lu", comm->rank, comm->collOpCount);
   return ncclSuccess;
 }
 

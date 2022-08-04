@@ -194,9 +194,9 @@ ncclResult_t ncclGroupEnd() {
 
   for (int i=0; i<ncclGroupIndex; i++) {
     struct ncclAsyncArgs* args = ncclGroupArgs+i;
-    OFCCL_LOG(NCCL, "i=%d, ncclGroupIndex=%d, args->funcType=%d, args->coll.comm->connect=%d, args->coll.comm->nRanks=%d", i, ncclGroupIndex, args->funcType, args->coll.comm->connect, args->coll.comm->nRanks);
+    // OFCCL_LOG(NCCL, "i=%d, ncclGroupIndex=%d, args->funcType=%d, args->coll.comm->connect=%d, args->coll.comm->nRanks=%d", i, ncclGroupIndex, args->funcType, args->coll.comm->connect, args->coll.comm->nRanks);
     if (args->funcType == ASYNC_FUNC_COLL && args->coll.comm->connect) {
-      OFCCL_LOG1(NCCL, "ENTER HRER");
+      OFCCL_LOG1(NCCL, "ENTER HERE");
       pthread_create(ncclGroupThreads+i, NULL, ncclAsyncThreadPreconnect, args);
     }
   }
