@@ -18,7 +18,8 @@
 #include "transport.h"
 
 #include <cstring> // std::memcpy
-#include <pthread.h>
+#include <pthread.h> // pthread_self()
+#include <math.h> // floor()
 
 static void *const ofcclKerns[1] = {
     (void *)try_make_kern,
@@ -110,6 +111,7 @@ static ncclResult_t ofcclGetAlgoInfo(struct ncclInfo* info, int collNetTypeSuppo
   }
   info->nChannels = nc;
   info->nThreads = nt;
+  OFCCL_LOG(OFCCL, "info->algorithm=%d, info->protocol=%d", info->algorithm, info->protocol);
   return ncclSuccess;
 }
 
@@ -531,7 +533,7 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
   return args;
 }
 
-NCCL_API(ncclResult_t, ofcclPrepareCollComm, struct ncclInfo *info, int collId);
+// NCCL_API(ncclResult_t, ofcclPrepareCollComm, struct ncclInfo *info, int collId);
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   if (ofcclCommListPanel == 0 && ofcclCommListFront == 0) {
     memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_ASYNC_PANELS * MAX_ASYNC_OPS); // legacy in ncclGroupStart
@@ -675,9 +677,19 @@ ncclResult_t ofcclPrepareDone() {
         // %NCCL_MAX_OPS
         // OFCCL_LOG(OFCCL, "pthread_id=%lu, %dth comm(comm->nChannels=%d), %dth channel, channel.workCount=%d, channel.workFifoTail=%lu, channel.index=%u", pthread_self(), j, comm->nChannels, k, channel.workCount, channel.workFifoTail, channel.index);
         for (int l = 0; l < channel.workFifoTail; l++) {
+          if (l > 1) {
+            ret = ncclInvalidUsage;
+            WARN("channel.workFifoTail shouldn't be larger than 1");
+            goto end;
+          }
           ncclWork *work = channel.workFifo + l;
           
           for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
+            if (e > 1) {
+              ret = ncclInvalidUsage;
+              WARN("channel.workFifo[0].elems's count shouldn't be larger than 1");
+              goto end;
+            }
             // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
           }
         }
@@ -703,7 +715,7 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
 
 
 
-
+ 
 
 
 

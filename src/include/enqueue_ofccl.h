@@ -12,5 +12,6 @@
 #include "collectives_ofccl.h"
 
 ncclResult_t ofcclEnqueueCheck(struct ncclInfo* info);
+ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #endif // End include guard

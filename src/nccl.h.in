@@ -189,11 +189,12 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
  * OFCCL prepare collective
  *
  * Calculate nChannels, gridDim, blockDim, etc given count
- *
+ * 
+ * Should not expose to clients.
  *
  */
-ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
-ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
+// ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
+// ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
 
 /*
  * OFCCL prepare done, just like ncclGroupEnd()
@@ -263,12 +264,7 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, cudaStream_t stream);
 
 /*
- * OFCCL All-Reduce
- *
- * Reduces data arrays of length count in sendbuff using op operation, and
- * leaves identical copies of result on each recvbuff.
- *
- * In-place operation will happen if sendbuff == recvbuff.
+ * OFCCL Prepare All-Reduce
  * 
  * OFCCL update: dynamic fusion; more flexible "work fifo queue"
  * 
@@ -276,6 +272,20 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
  */
 ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
 ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
+
+/*
+ * OFCCL Run All-Reduce
+ *
+ * Reduces data arrays of length count in sendbuff using op operation, and
+ * leaves identical copies of result on each recvbuff.
+ *
+ * In-place operation will happen if sendbuff == recvbuff.
+ *
+ * OFCCL manages the stream itself, client does not need to provide one.
+ *
+ */
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId);
+ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId);
 
 /*
  * Reduce-Scatter

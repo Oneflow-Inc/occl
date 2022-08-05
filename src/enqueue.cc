@@ -378,7 +378,7 @@ static ncclResult_t ncclLaunchProxy(struct ncclQueueInfo* eqInfo) {
     channel->totalSize = 0;
   }
   comm->lastChannel = 0;
-  // OFCCL_LOG1(NCCL, "invoke ncclProxyStart");
+  OFCCL_LOG1(NCCL, "invoke ncclProxyStart");
   NCCLCHECK(ncclProxyStart(comm));
   return ncclSuccess;
 }
@@ -509,6 +509,7 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
   }
   info->nChannels = nc;
   info->nThreads = nt;
+  OFCCL_LOG(NCCL, "info->algorithm=%d, info->protocol=%d", info->algorithm, info->protocol);
   return ncclSuccess;
 }
 
