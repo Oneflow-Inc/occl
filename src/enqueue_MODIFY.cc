@@ -205,7 +205,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
     eqInfo->maxChannels = params->gridDim.x;
   }
 
-  // if (comm->rank==0)
+  if (comm->rank==0)
     // comm->asyncTotalSize=0, because it has been cleared in ncclSetupAsyncKernels
     // OFCCL_LOG(NCCL, "comm->nRanks=%d, comm->rank=%d, comm->asyncTotalSize=%lu, comm->nChannels=%d, eqInfo->maxChannels=%d, params->gridDim.x=%d, params->blockDim.x=%d", comm->nRanks, comm->rank, comm->asyncTotalSize, comm->nChannels, eqInfo->maxChannels, params->gridDim.x, params->blockDim.x);
 
