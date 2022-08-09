@@ -584,10 +584,9 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
 
   // ***** ncclSaveAsyncColl(info) *****
 
-  if (info->comm->asyncOpCount >= NCCL_MAX_OPS) {
-    OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d", NCCL_MAX_OPS);
+  if (info->comm->asyncOpCount > 1) {
+    OFCCL_LOG1(OFCCL_WARN, "comm->asyncOpCount shouldn't be larger than 1");
     ret = ncclInvalidUsage;
-    goto end;
   }
 
   memcpy(info->comm->asyncOps + info->comm->asyncOpCount, info,
@@ -670,7 +669,7 @@ ncclResult_t ofcclPrepareDone() {
     }
   }
 
-  // ***** check & print prepared colls *****
+  // ***** check & 构建任务列表 *****
   for (int i = 0; i <= ofcclCommListPanel; i++) {
     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
     for (int j = 0; j < front_of_panel; j++) {
@@ -701,6 +700,7 @@ ncclResult_t ofcclPrepareDone() {
               goto end;
             }
             // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
+            // TODO: 构建任务列表
           }
         }
       }
@@ -717,23 +717,7 @@ ncclResult_t ofcclDestroy() {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
-  int front_of_panel = -1;
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      ncclComm_t comm = args.comm;
-
-      // ***** free ncclInfo *****
-      if (comm->asyncOpCount > 1) {
-        OFCCL_LOG1(OFCCL_WARN, "comm->asyncOpCount shouldn't be larger than 1");
-        ret = ncclInvalidUsage;
-      }
-      OFCCL_LOG(OFCCL, "tid(%lu) free ncclInfo(%p) for collId(%d)", pthread_self(), comm->asyncOps, i * MAX_ASYNC_OPS + j);
-      free(comm->asyncOps);
-    }
-  }
-  
+  // ***** seems do not need to transverse ofcclCommList *****
   
   ofcclCommListPanel = 0;
   ofcclCommListFront = 0;
