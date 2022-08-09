@@ -17,9 +17,11 @@
 #include "nccl.h"
 #include "transport.h"
 
+#include <cstdlib>
 #include <cstring> // std::memcpy
 #include <pthread.h> // pthread_self()
 #include <math.h> // floor()
+#include <unordered_set>
 
 static void *const ofcclKerns[1] = {
     (void *)try_make_kern,
@@ -74,7 +76,7 @@ static ncclResult_t ofcclGetAlgoInfo(struct ncclInfo* info, int collNetTypeSuppo
       }
     }
     if (info->algorithm == -1 || info->protocol == -1) {
-      WARN("Error : no algorithm/protocol available");
+      OFCCL_LOG1(OFCCL_WARN, "Error : no algorithm/protocol available");
       return ncclInternalError;
     }
     //if (comm->rank == 0) INFO(NCCL_TUNING, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
@@ -111,7 +113,7 @@ static ncclResult_t ofcclGetAlgoInfo(struct ncclInfo* info, int collNetTypeSuppo
   }
   info->nChannels = nc;
   info->nThreads = nt;
-  OFCCL_LOG(OFCCL, "info->algorithm=%d, info->protocol=%d", info->algorithm, info->protocol);
+  // OFCCL_LOG(OFCCL, "info->algorithm=%d, info->protocol=%d", info->algorithm, info->protocol);
   return ncclSuccess;
 }
 
@@ -127,7 +129,7 @@ static ncclResult_t ofcclGetPatternInfo(struct ncclInfo* info) {
     case ncclFuncAllReduce:
       info->pattern = info->algorithm == NCCL_ALGO_COLLNET ? ncclPatternCollTreeUpDown : info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
     default:
-      WARN("Unknown pattern for collective %d algorithm %d", info->coll, info->algorithm);
+      OFCCL_LOG(OFCCL_WARN, "Unknown pattern for collective %d algorithm %d", info->coll, info->algorithm);
       return ncclInternalError;
   }
   return ncclSuccess;
@@ -148,7 +150,7 @@ static ncclResult_t ofcclGetLoopInfo(struct ncclInfo* info) {
     case ncclPatternRingTwice:
       info->nstepsPerLoop = 2*(info->comm->nRanks-1); info->nchunksPerLoop = info->comm->nRanks; break;
     default:
-      WARN("Unknown pattern %d", info->pattern);
+      OFCCL_LOG(OFCCL_WARN, "Unknown pattern %d", info->pattern);
       return ncclInternalError;
   }
   return ncclSuccess;
@@ -300,7 +302,7 @@ static inline int ofGetNextChannel(ncclComm_t comm) {
 
 static ncclResult_t ofGetNextOp(struct ncclChannel* channel, struct ncclWork** work, struct ncclWorkElem* base) {
   if (channel->workCount == NCCL_MAX_OPS) {
-    WARN("Too many aggregated operations on channel %d (%d max)", channel->id, NCCL_MAX_OPS);
+    OFCCL_LOG(OFCCL_WARN, "Too many aggregated operations on channel %d (%d max)", channel->id, NCCL_MAX_OPS);
     return ncclInvalidUsage;
   }
   int opIndex = channel->workFifoTail%NCCL_MAX_OPS;
@@ -338,7 +340,7 @@ static ncclResult_t ofEnqueueSegOp(enum ncclWorkElemType type, struct ncclWork* 
     // Get intra-node slot
     int j = comm->rankToLocalRank[peer];
     if (j < 0) {
-      WARN("Invalid intra-node rank %d for peer %d", j, peer);
+      OFCCL_LOG(OFCCL_WARN, "Invalid intra-node rank %d for peer %d", j, peer);
       return ncclInternalError;
     }
     // Input buffer of leaf peer
@@ -351,7 +353,7 @@ static ncclResult_t ofEnqueueSegOp(enum ncclWorkElemType type, struct ncclWork* 
     if (peer == -1) break;
     int j = comm->rankToLocalRank[peer];
     if (j < 0) {
-      WARN("Invalid intra-node rank %d for peer %d", j, peer);
+      OFCCL_LOG(OFCCL_WARN, "Invalid intra-node rank %d for peer %d", j, peer);
       return ncclInternalError;
     }
     // Output buffer of root peer
@@ -490,7 +492,7 @@ static void CUDART_CB ofcclEnqueueHostSetup(void* arg) {
   struct ncclQueueElem* eqElem = eqInfo->elemList->begin();
 
   if (eqInfo->elemList->count() > 1) {
-    WARN("eqInfo->elemList->count()=%d, but should not > 1", eqInfo->elemList->count());
+    OFCCL_LOG(OFCCL_WARN, "eqInfo->elemList->count()=%d, but should not > 1", eqInfo->elemList->count());
     goto cb_end;
   }
 
@@ -504,7 +506,7 @@ static void CUDART_CB ofcclEnqueueHostSetup(void* arg) {
   
 cb_end:
   if (ret != ncclSuccess) {
-    WARN("Failure in host setup : %s", ncclGetErrorString(ret));
+    OFCCL_LOG(OFCCL_WARN, "Failure in host setup : %s", ncclGetErrorString(ret));
   }
   eqInfo->ret = ret;
 }
@@ -520,6 +522,7 @@ struct ofcclCommArgs {
 };
 
 static thread_local ofcclCommArgs ofcclCommList[MAX_ASYNC_PANELS][MAX_ASYNC_OPS];
+static thread_local std::unordered_set<ncclComm_t> seenComms;
 static thread_local pthread_t ofcclPrepareThreads[MAX_ASYNC_PANELS][MAX_ASYNC_OPS];
 static thread_local int ofcclCommListPanel = 0;
 static thread_local int ofcclCommListFront = 0;
@@ -553,6 +556,13 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
 
   // ***** ncclAsyncColl(info->comm) *****
 
+  if (seenComms.find(info->comm) != seenComms.end()) {
+    OFCCL_LOG1(OFCCL_WARN, "Reuse ncclComm is not allowed");
+    ret = ncclInvalidUsage;
+    goto end;
+  }
+  seenComms.insert(info->comm);
+
   ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm = info->comm;
   // OFCCL_LOG(OFCCL, "i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", ofcclCommListPanel, ofcclCommListFront, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm, &(ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm), info->comm, &(info->comm), ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->nRanks, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->connect);
   // OFCCL_LOG(OFCCL, "pthread_id=%lu, i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", pthread_self(), ofcclCommListPanel, ofcclCommListFront, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm, &(ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm), info->comm, &(info->comm), ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->nRanks, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->connect);
@@ -562,7 +572,7 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
     ofcclCommListFront = 0;
     ofcclCommListPanel++;
     if (ofcclCommListPanel >= MAX_ASYNC_PANELS) {
-      WARN("Too many async operations in progress, max is %d",
+      OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d",
            MAX_ASYNC_PANELS * MAX_ASYNC_OPS);
       ret = ncclInvalidUsage;
       goto end;
@@ -575,7 +585,7 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   // ***** ncclSaveAsyncColl(info) *****
 
   if (info->comm->asyncOpCount >= NCCL_MAX_OPS) {
-    WARN("Too many async operations in progress, max is %d", NCCL_MAX_OPS);
+    OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d", NCCL_MAX_OPS);
     ret = ncclInvalidUsage;
     goto end;
   }
@@ -621,7 +631,7 @@ ncclResult_t ofcclPrepareDone() {
       if (args.comm->connect) {
         int err = pthread_join(ofcclPrepareThreads[i][j], NULL);
         if (err != 0) {
-          WARN("Error waiting for pthread_join : %s", strerror(errno));
+          OFCCL_LOG(OFCCL_WARN, "Error waiting for pthread_join : %s", strerror(errno));
           return ncclSystemError;
         }
         NCCLCHECKGOTO(args.ret, ret, end);
@@ -669,7 +679,7 @@ ncclResult_t ofcclPrepareDone() {
       struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
       if (eqInfo->elemList->count() > 1) {
         ret = ncclInvalidUsage;
-        WARN("eqInfo->elemList->count() shouldn't be larger than 1");
+        OFCCL_LOG1(OFCCL_WARN, "eqInfo->elemList->count() shouldn't be larger than 1");
         goto end;
       }
       for (int k = 0; k < eqInfo->maxChannels; k++) {
@@ -679,7 +689,7 @@ ncclResult_t ofcclPrepareDone() {
         for (int l = 0; l < channel.workFifoTail; l++) {
           if (l > 1) {
             ret = ncclInvalidUsage;
-            WARN("channel.workFifoTail shouldn't be larger than 1");
+            OFCCL_LOG1(OFCCL_WARN, "channel.workFifoTail shouldn't be larger than 1");
             goto end;
           }
           ncclWork *work = channel.workFifo + l;
@@ -687,7 +697,7 @@ ncclResult_t ofcclPrepareDone() {
           for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
             if (e > 1) {
               ret = ncclInvalidUsage;
-              WARN("channel.workFifo[0].elems's count shouldn't be larger than 1");
+              OFCCL_LOG1(OFCCL_WARN, "channel.workFifo[0].elems's count shouldn't be larger than 1");
               goto end;
             }
             // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
@@ -704,10 +714,31 @@ end:
   return ret;
 }
 
-ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
-  try_make();
-  return ncclSuccess;
+NCCL_API(ncclResult_t, ofcclDestroy);
+ncclResult_t ofcclDestroy() {
+  ncclResult_t ret = ncclSuccess;
+
+  int front_of_panel = -1;
+  for (int i = 0; i <= ofcclCommListPanel; i++) {
+    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
+    for (int j = 0; j < front_of_panel; j++) {
+      ofcclCommArgs args = ofcclCommList[i][j];
+      ncclComm_t comm = args.comm;
+
+      // ***** free ncclInfo *****
+      if (comm->asyncOpCount > 1) {
+        OFCCL_LOG1(OFCCL_WARN, "comm->asyncOpCount shouldn't be larger than 1");
+        ret = ncclInvalidUsage;
+      }
+      OFCCL_LOG(OFCCL, "free ncclInfo for collId(%d)", i * MAX_ASYNC_OPS + j);
+      free(comm->asyncOps);
+    }
+  }
+  
+
+  return ret;
 }
+
 
 
 
@@ -730,6 +761,10 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
 
 
 
+ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
+  try_make();
+  return ncclSuccess;
+}
 
 //   for (int i = 0; i <= ofcclCommListPanel; i++) {
 //     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_PANELS : ofcclCommListFront;
@@ -776,9 +811,9 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
 //               if (recv) comm->p2pRecvCount--;
 //               if (send) comm->p2pSendCount--;
 //               if (recvPeer == comm->rank) { // Check self send/recv
-//                 if (sendPeer != comm->rank) { WARN("Sendrecv schedule not aligned for self"); ret = ncclInternalError; goto group_cleanup; }
-//                 if (send && recv == NULL) { WARN("Trying to send to self without a matching recv"); ret = ncclInvalidUsage; goto group_cleanup; }
-//                 if (send == NULL && recv) { WARN("Trying to recv to self without a matching send"); ret = ncclInvalidUsage; goto group_cleanup; }
+//                 if (sendPeer != comm->rank) { OFCCL_LOG1(OFCCL_WARN, "Sendrecv schedule not aligned for self"); ret = ncclInternalError; goto group_cleanup; }
+//                 if (send && recv == NULL) { OFCCL_LOG1(OFCCL_WARN, "Trying to send to self without a matching recv"); ret = ncclInvalidUsage; goto group_cleanup; }
+//                 if (send == NULL && recv) { OFCCL_LOG1(OFCCL_WARN, "Trying to recv to self without a matching send"); ret = ncclInvalidUsage; goto group_cleanup; }
 //               }
 //               void* recvBuff = recv ? recv->buff : NULL;
 //               void* sendBuff = send ? send->buff : NULL;

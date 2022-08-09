@@ -206,6 +206,17 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 ncclResult_t  ofcclPrepareDone();
 ncclResult_t pofcclPrepareDone();
 
+
+/*
+ * OFCCL Destroy
+ *
+ * Clean up data structures, free pointers.
+ *
+ *
+ */
+ncclResult_t  ofcclDestroy();
+ncclResult_t pofcclDestroy();
+
 /*
  * Reduce
  *
