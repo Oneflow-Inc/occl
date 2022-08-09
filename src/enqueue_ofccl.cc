@@ -708,14 +708,13 @@ ncclResult_t ofcclPrepareDone() {
   }
 
 end:
-  ofcclCommListPanel = 0;
-  ofcclCommListFront = 0;
   CUDACHECK(cudaSetDevice(savedDev)); // do other clean-ups first before calling
   return ret;
 }
 
 NCCL_API(ncclResult_t, ofcclDestroy);
 ncclResult_t ofcclDestroy() {
+  // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
   int front_of_panel = -1;
@@ -730,12 +729,14 @@ ncclResult_t ofcclDestroy() {
         OFCCL_LOG1(OFCCL_WARN, "comm->asyncOpCount shouldn't be larger than 1");
         ret = ncclInvalidUsage;
       }
-      OFCCL_LOG(OFCCL, "free ncclInfo for collId(%d)", i * MAX_ASYNC_OPS + j);
+      OFCCL_LOG(OFCCL, "tid(%lu) free ncclInfo(%p) for collId(%d)", pthread_self(), comm->asyncOps, i * MAX_ASYNC_OPS + j);
       free(comm->asyncOps);
     }
   }
   
-
+  
+  ofcclCommListPanel = 0;
+  ofcclCommListFront = 0;
   return ret;
 }
 
