@@ -35,19 +35,19 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 #define RingBuffer_commit_write(B, A) ((B)->tail = ((B)->tail + (A)) % (B)->length)
 
 // Configs
-// static int gridDimx = -1;
-// static int blockDimx = -1;
 static dim3 deamonKernelGridDim;
 static dim3 deamonKernelBlockDim;
 static int queueLength = -1;
 static int collCount = -1;
 
-static int CPUSleep = 0;
-__device__ static int GPUSleep = 0;
-static int CpuSleepUs = 1e6;
-__device__ static clock_t GpuSpin = 1e9 * 2;
-#define GpuSpin4Bid(i) (1 + i) * 1e9
-#define GpuSpin4BidSmall(i) (6 + i) * 1e6
+#define testBlkCnt4Coll(i) i % 2 == 0 ? deamonKernelGridDim.x : deamonKernelGridDim.x - 1
+
+// static int CPUSleep = 0;
+// __device__ static int GPUSleep = 0;
+// static int CpuSleepUs = 1e6;
+// __device__ static clock_t GpuSpin = 1e9 * 2;
+// #define GpuSpin4Bid(i) (1 + i) * 1e9
+// #define GpuSpin4BidSmall(i) (6 + i) * 1e6
 
 typedef struct {
   int collId;

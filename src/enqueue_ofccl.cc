@@ -832,11 +832,11 @@ ncclResult_t ofcclPrepareDone() {
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
   // TODO: 指定参数
-  queueLength = -1;
-  collCount = -1;
+  queueLength = 4;
+  collCount = ofcclCommListFront + ofcclCommListPanel * MAX_ASYNC_OPS;
 
   checkRuntime(cudaGetDevice(&cudaDev));
-  OFCCL_LOG(OFCCL, "<%lu> work on device %d", pthread_self(), cudaDev);
+  OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls", pthread_self(), cudaDev, collCount);
   
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
@@ -853,7 +853,7 @@ ncclResult_t ofcclPrepareDone() {
   tempBlkCount4Coll = (int *)malloc(collCount * sizeof(int));
   for (int i = 0; i < collCount; i++) {
     // TODO: 需要和实际的集合通信的解析结果联动
-    tempBlkCount4Coll[i] = -1;
+    tempBlkCount4Coll[i] = testBlkCnt4Coll(i);
     OFCCL_LOG(OFCCL, "tempBlkCount4Coll[%d] = %d", i, tempBlkCount4Coll[i]);
   }
   checkRuntime(cudaMemcpy(BlkCount4Coll, tempBlkCount4Coll, collCount * sizeof(int), cudaMemcpyHostToDevice));

@@ -51,6 +51,7 @@ void *startClient(void *args) {
   return nullptr;
 }
 
+NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId);
 ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId) {
   pthread_t clientThrd;
   // cudaStream_t clientStream;
