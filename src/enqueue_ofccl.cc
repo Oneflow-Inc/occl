@@ -37,8 +37,6 @@ void try_make() {
   cudaLaunchKernel(ofcclKerns[0], gridDim, blockDim, (void **)&b, 0, NULL);
 }
 
-
-
 static inline ncclResult_t ofcclGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
   if (info->comm->collNetSupport > 0) {
     // Translate ncclAvg and PreMulSum
@@ -513,6 +511,91 @@ cb_end:
 
 } // namespace
 
+// TODO: still use 同步的Malloc吗？
+SQ *sqCreate(int length) {
+  SQ *sq = nullptr;
+  checkRuntime(cudaMallocHost((void **)&sq, sizeof(SQ)));
+  sq->length = length + 1;
+  sq->head = 0;
+  sq->tail = 0;
+  checkRuntime(cudaMallocHost((void **)&(sq->buffer), sq->length));
+  pthread_mutex_init(&sq->mutex, nullptr);
+
+  return sq;
+}
+
+void sqDestroy(SQ *sq) {
+  if (sq) {
+    checkRuntime(cudaFreeHost(sq->buffer));
+    checkRuntime(cudaFreeHost(sq));
+  }
+}
+
+int sqWrite(SQ *sq, SQE *sqe) {
+  pthread_mutex_lock(&sq->mutex);
+
+  if (RingBuffer_full(sq)) {
+    // not an error; caller keeps trying.
+    pthread_mutex_unlock(&sq->mutex);
+    return -1;
+  }
+  sqe->logicHead = (int)RingBuffer_logic_tail(sq);
+  *RingBuffer_get_tail(sq) = *sqe;
+  OFCCL_LOG(TESTQ, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+
+  __sync_synchronize();
+
+  sq->tail += 1;
+  OFCCL_LOG(TESTQ, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+
+  pthread_mutex_unlock(&sq->mutex);
+
+  return 0;
+}
+
+CQ *cqCreate(int length) {
+  CQ *cq = nullptr;
+  checkRuntime(cudaMallocHost((void **)&cq, sizeof(CQ)));
+  cq->length = length + 1;
+  cq->head = 0;
+  cq->tail = 0;
+  checkRuntime(cudaMallocHost((void **)&(cq->buffer), cq->length));
+  pthread_mutex_init(&cq->mutex, nullptr);
+
+  return cq;
+}
+
+void cqDestroy(CQ *cq) {
+  if (cq) {
+    checkRuntime(cudaFreeHost(cq->buffer));
+    checkRuntime(cudaFreeHost(cq));
+  }
+}
+
+int cqRead(CQ *cq, CQE *target, int collId) {
+  pthread_mutex_lock(&cq->mutex);
+  // OFCCL_LOG(TESTQ, "<%lu> enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu, headCollId=%d, wait for %d", pthread_self(), RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq), RingBuffer_get_head(cq)->collId, collId);
+
+  if (RingBuffer_empty(cq)) {
+    pthread_mutex_unlock(&cq->mutex);
+    return -1;
+  }
+  if (RingBuffer_get_head(cq)->collId != collId) {
+    pthread_mutex_unlock(&cq->mutex);
+    return -1;
+  }
+  // checkRuntime(cudaMemcpy(target, RingBuffer_get_head(cq), sizeof(CQE), cudaMemcpyHostToHost));
+  *target = *RingBuffer_get_head(cq);
+
+  __sync_synchronize();
+
+  cq->head += 1;
+
+  pthread_mutex_unlock(&cq->mutex);
+
+  return 0;
+}
+
 #define MAX_ASYNC_PANELS 32
 #define MAX_ASYNC_OPS 128
 
@@ -599,6 +682,40 @@ end:
   return ret;
 }
 
+void *startKernel(void *args) {
+  SQ *sq = ((ThrdArgs *)args)->sq;
+  CQ *cq = ((ThrdArgs *)args)->cq;
+  CQE *cqes = ((ThrdArgs *)args)->cqes;
+  int *BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
+  cudaStream_t stream = ((ThrdArgs *)args)->stream;
+  // OFCCL_LOG(TESTQ, "<%lu> KernelThrd starts, gridDimx=%d, blockDimx=%d", pthread_self(), gridDimx, blockDimx);
+
+  // TODO: 之后考虑按需启停kernel
+  struct cudaLaunchParams daemonKernelParam;
+  daemonKernelParam.func = (void *)deamonKernel;
+  deamonKernelGridDim.x = 4;
+  deamonKernelBlockDim.x = 8;
+  daemonKernelParam.gridDim = deamonKernelGridDim;
+  daemonKernelParam.blockDim = deamonKernelBlockDim;
+  daemonKernelParam.sharedMem = 0;
+  daemonKernelParam.stream = stream;
+
+  void *argsptrs[4];
+  argsptrs[0] = &sq;
+  argsptrs[1] = &cq;
+  argsptrs[2] = &cqes;
+  argsptrs[3] = &BlkCount4Coll;
+  daemonKernelParam.args = argsptrs;
+
+  cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream);
+
+  // deamonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, BlkCount4Coll);
+  
+  cudaStreamSynchronize(stream);
+
+  return NULL;
+}
+
 NCCL_API(ncclResult_t, ofcclPrepareDone);
 ncclResult_t ofcclPrepareDone() {
   // ***** ncclGroupEnd() *****
@@ -609,6 +726,10 @@ ncclResult_t ofcclPrepareDone() {
   ncclResult_t ret = ncclSuccess;
 
   int front_of_panel = -1;
+
+  int cudaDev;
+  cudaStream_t kernelStream;
+  ThrdArgs thrdArgs = { sq, cq, cqes, BlkCount4Coll, kernelStream };
 
   // ***** ncclAsyncThreadPreconnect threads *****
   for (int i = 0; i <= ofcclCommListPanel; i++) {
@@ -707,6 +828,42 @@ ncclResult_t ofcclPrepareDone() {
     }
   }
 
+  // ***** 在独立的线程中启动守护者kernel *****
+  // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
+
+  // TODO: 指定参数
+  queueLength = -1;
+  collCount = -1;
+
+  checkRuntime(cudaGetDevice(&cudaDev));
+  OFCCL_LOG(OFCCL, "<%lu> work on device %d", pthread_self(), cudaDev);
+  
+  sq = sqCreate(queueLength);
+  cq = cqCreate(queueLength);
+
+  checkRuntime(cudaMalloc(&cqes, collCount * sizeof(CQE)));
+  tempCqes = (CQE *)calloc(collCount, sizeof(CQE));
+  for (int i = 0; i < collCount; i++) {
+    // TODO: 需要和传进来的comm的id联动。
+    tempCqes[i].collId = i;
+  }
+  checkRuntime(cudaMemcpy(cqes, tempCqes, collCount * sizeof(CQE), cudaMemcpyHostToDevice));
+
+  checkRuntime(cudaMalloc(&BlkCount4Coll, collCount * sizeof(int)));
+  tempBlkCount4Coll = (int *)malloc(collCount * sizeof(int));
+  for (int i = 0; i < collCount; i++) {
+    // TODO: 需要和实际的集合通信的解析结果联动
+    tempBlkCount4Coll[i] = -1;
+    OFCCL_LOG(OFCCL, "tempBlkCount4Coll[%d] = %d", i, tempBlkCount4Coll[i]);
+  }
+  checkRuntime(cudaMemcpy(BlkCount4Coll, tempBlkCount4Coll, collCount * sizeof(int), cudaMemcpyHostToDevice));
+
+  // make sure Memcpy to BlkCount4Coll finish
+  checkRuntime(cudaDeviceSynchronize());
+  
+  cudaStreamCreate(&kernelStream);
+  pthread_create(&kernelThrd, NULL, startKernel, &thrdArgs);
+
 end:
   CUDACHECK(cudaSetDevice(savedDev)); // do other clean-ups first before calling
   return ret;
@@ -716,6 +873,18 @@ NCCL_API(ncclResult_t, ofcclDestroy);
 ncclResult_t ofcclDestroy() {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
+
+  // TODO: 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
+  SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
+  sqWrite(sq, &sqe);
+
+  pthread_join(kernelThrd, nullptr);
+  checkRuntime(cudaFree(cqes));
+  free(tempCqes);
+  checkRuntime(cudaFree(BlkCount4Coll));
+  free(tempBlkCount4Coll);
+  sqDestroy(sq);
+  cqDestroy(cq);
 
   // ***** seems do not need to transverse ofcclCommList *****
   

@@ -20,6 +20,25 @@
 #define OFCCL_LOG1(PRE, FMT) printf("\n[%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__)
 #define OFCCL_LOG0(PRE) printf("\n[%s:%d] <%s> " #PRE, __FILE__, __LINE__, __func__)
 
+// #define OFCCL_LOG(PRE, FMT, args...) do {} while (0)
+// #define OFCCL_LOG1(PRE, FMT) do {} while (0)
+// #define OFCCL_LOG0(PRE) do {} while (0)
+
+#define checkRuntime(op) __check_cuda_runtime((op), #op, __FILE__, __LINE__)
+
+inline bool __check_cuda_runtime(cudaError_t code, const char *op, const char *file,
+                          int line) {
+  if (code != cudaSuccess) {
+    const char *err_name = cudaGetErrorName(code);
+    const char *err_message = cudaGetErrorString(code);
+    printf("runtime error %s:%d  %s failed. \n  code = %s, message = %s\n",
+           file, line, op, err_name, err_message);
+    cudaGetLastError();
+    return false;
+  }
+  return true;
+}
+
 // Conform to pthread and NVTX standard
 #define NCCL_THREAD_NAMELEN 16
 

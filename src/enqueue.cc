@@ -354,7 +354,7 @@ ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
     NCCLCHECK(ncclCpuBarrierOut(comm));
   } else {
     // OFCCL_LOG1(NCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");  
-    // OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->args=%p, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->args, params->sharedMem);
+    OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->args=%p, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->args, params->sharedMem);
     CUDACHECK(cudaLaunchKernel(params->func, params->gridDim, params->blockDim, params->args, params->sharedMem, params->stream));
   }
 

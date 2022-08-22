@@ -14,8 +14,8 @@ LIBSRCFILES := all_reduce.cu broadcast.cu reduce.cu all_gather.cu reduce_scatter
 
 LIBSRCFILES += functions.cu
 
-DEPFILES   := $(patsubst %.cu, $(OBJDIR)/%.d, $(LIBSRCFILES))
-DEPENDFILES:= $(DEPFILES:%.d=%.dep)
+DEPFILES   := $(patsubst %.cu, $(OBJDIR)/%.d, $(LIBSRCFILES)) # 产生一个OBJDIR里的.d文件名列表
+DEPENDFILES:= $(DEPFILES:%.d=%.dep) # 再替换成.dep文件
 STATICLIB  := $(OBJDIR)/colldevice.a
 DEVOBJ     := $(OBJDIR)/devlink.o
 RULESFILE  := $(OBJDIR)/Makefile.rules

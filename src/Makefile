@@ -16,6 +16,7 @@ LIBSRCFILES := init.cc channel.cc bootstrap.cc transport.cc enqueue.cc enqueue_o
 								collectives_ofccl/ofccl_all_reduce.cc \
                 graph/topo.cc graph/paths.cc graph/search.cc graph/connect.cc graph/rings.cc graph/trees.cc graph/tuning.cc graph/xml.cc
 
+ENQ_DEVSRC 	:= enqueue_ofccl_dev.cu
 ##### lib files
 LIBNAME     := libnccl.so
 STATICLIBNAME := libnccl_static.a
@@ -29,17 +30,22 @@ OBJDIR := $(BUILDDIR)/obj
 PKGDIR := $(BUILDDIR)/lib/pkgconfig
 ##### target files
 CUDARTLIB  ?= cudart_static
-INCTARGETS := $(INCEXPORTS:%=$(INCDIR)/%)
+INCTARGETS := $(INCEXPORTS:%=$(INCDIR)/%) # 替换出来include的目标，即incdir下的相应文件。
 LIBSONAME  := $(LIBNAME:%=%.$(NCCL_MAJOR))
-LIBTARGET  := $(LIBNAME:%=%.$(NCCL_MAJOR).$(NCCL_MINOR).$(NCCL_PATCH))
+LIBTARGET  := $(LIBNAME:%=%.$(NCCL_MAJOR).$(NCCL_MINOR).$(NCCL_PATCH)) # 替换libname，加了后缀
 STATICLIBTARGET := $(STATICLIBNAME)
 PKGTARGET  := $(PKGCONFIGFILE)
-LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o)
-DEPFILES   := $(LIBOBJ:%.o=%.d)
+LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o) # 替换出来libobj的target，objdir下的.o文件。这里我们需要加一个cu文件编译出来的obj，即enqueue_ofccl.cu的编译结果。
+DEPFILES   := $(LIBOBJ:%.o=%.d) # 为了解决include依赖，对所有.o文件生成.d文件来记录相应的依赖
 LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
 
-DEVICELIB  := $(BUILDDIR)/obj/collectives/device/colldevice.a $(BUILDDIR)/obj/collectives_ofccl/device/colldevice_ofccl.a
+DEVICELIB  := $(BUILDDIR)/obj/collectives/device/colldevice.a $(BUILDDIR)/obj/collectives_ofccl/device/colldevice_ofccl.a # device的相关函数，做一个静态库就够了。
 
+ENQ_DEVOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.o)
+ENQ_DEVDEP := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
+
+ENQ_NVCUFLAGS = $(NVCUFLAGS)
+ENQ_NVCUFLAGS += -I. -I.. -Iinclude -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
 ##### rules
 build : lib staticlib
 
@@ -69,10 +75,11 @@ $(INCDIR)/nccl.h : nccl.h.in
 	    -e "s/\$${nccl:Version}/$(NCCL_VERSION)/g" \
 	    $< > $@
 
-$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB)
+$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
 	@printf "Linking    %-35s > %s\n" $(LIBTARGET) $@
 	mkdir -p $(LIBDIR)
-	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ) $(LDFLAGS)
+# ln [OPTION]... [-T] TARGET LINK_NAME, 下边这两行不用动。
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
 	@printf "Link Success    %-35s > %s\n" $(LIBTARGET) $@
@@ -81,10 +88,24 @@ null :=
 space := $(null) #
 comma := ,
 
-$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB)
+$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
 	@printf "HELLO Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
 	printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
+
+$(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
+	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
+	mkdir -p $(OBJDIR)
+	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
+
+$(ENQ_DEVDEP) : $(ENQ_DEVSRC)
+	mkdir -p $(OBJDIR)
+	@$(NVCC) $(ENQ_NVCUFLAGS) -M $< -o $@.tmp
+	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $@.tmp > $@
+	@sed -e 's/.*://' -e 's/\\$$//' < $@.tmp | fmt -1 | \
+                sed -e 's/^ *//' -e 's/$$/:/' >> $@
+	@rm -f $@.tmp
+	@cp $@ $(@:.dep=.d)
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
 	mkdir -p $(PKGDIR)
