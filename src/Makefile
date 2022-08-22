@@ -95,6 +95,7 @@ $(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
 
 $(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
 	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
+	@printf "NVCC_GENCODE is %s\\n" $(NVCC_GENCODE)
 	mkdir -p $(OBJDIR)
 	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
 
