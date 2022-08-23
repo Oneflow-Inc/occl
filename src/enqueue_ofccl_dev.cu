@@ -1,21 +1,4 @@
 #include "enqueue_ofccl.h"
-#include "devcomm.h"
-#include "enqueue.h" // struct ncclQueueInfo
-#include "argcheck.h"
-#include "bootstrap.h"
-#include "channel.h"
-#include "coll_net.h"
-#include "debug.h"
-#include "gdrwrap.h"
-#include "group.h"
-#include "nccl.h"
-#include "transport.h"
-
-#include <cstdlib>
-#include <cstring> // std::memcpy
-#include <pthread.h> // pthread_self()
-#include <math.h> // floor()
-#include <unordered_set>
 
 
 __device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll) {

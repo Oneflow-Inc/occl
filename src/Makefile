@@ -91,13 +91,8 @@ comma := ,
 $(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
 	@printf "HELLO Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
-	printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
-
-$(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
-	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
-	@printf "NVCC_GENCODE is %s\\n" $(NVCC_GENCODE)
-	mkdir -p $(OBJDIR)
-	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
+# printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
+	printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\naddmod $(ENQ_DEVOBJ)\nsave\nend" | ar -M
 
 $(ENQ_DEVDEP) : $(ENQ_DEVSRC)
 	mkdir -p $(OBJDIR)
@@ -107,6 +102,13 @@ $(ENQ_DEVDEP) : $(ENQ_DEVSRC)
                 sed -e 's/^ *//' -e 's/$$/:/' >> $@
 	@rm -f $@.tmp
 	@cp $@ $(@:.dep=.d)
+
+-include $(ENQ_DEVDEP)
+$(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
+	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
+	@printf "NVCC_GENCODE is %s\\n" $(NVCC_GENCODE)
+	mkdir -p $(OBJDIR)
+	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
 	mkdir -p $(PKGDIR)
