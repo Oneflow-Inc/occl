@@ -41,8 +41,10 @@ LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
 
 DEVICELIB  := $(BUILDDIR)/obj/collectives/device/colldevice.a $(BUILDDIR)/obj/collectives_ofccl/device/colldevice_ofccl.a # device的相关函数，做一个静态库就够了。
 
-ENQ_DEVOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.o)
-ENQ_DEVDEP := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
+ENQ_DEVOBJ 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.o)
+ENQ_DEVDEP 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
+ENQ_DEV_LINKOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%_link.o)
+ENQ_DEVSTATIC			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.a)
 
 ENQ_NVCUFLAGS = $(NVCUFLAGS)
 ENQ_NVCUFLAGS += -I. -I.. -Iinclude -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
@@ -75,10 +77,10 @@ $(INCDIR)/nccl.h : nccl.h.in
 	    -e "s/\$${nccl:Version}/$(NCCL_VERSION)/g" \
 	    $< > $@
 
-$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
+$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC)
 	@printf "Linking    %-35s > %s\n" $(LIBTARGET) $@
 	mkdir -p $(LIBDIR)
-	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC) $(LDFLAGS)
 # ln [OPTION]... [-T] TARGET LINK_NAME, 下边这两行不用动。
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
@@ -88,11 +90,11 @@ null :=
 space := $(null) #
 comma := ,
 
-$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVOBJ)
+$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC)
 	@printf "HELLO Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
 # printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
-	printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\naddmod $(ENQ_DEVOBJ)\nsave\nend" | ar -M
+	printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddlib $(ENQ_DEVSTATIC)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
 
 $(ENQ_DEVDEP) : $(ENQ_DEVSRC)
 	mkdir -p $(OBJDIR)
@@ -109,6 +111,14 @@ $(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
 	@printf "NVCC_GENCODE is %s\\n" $(NVCC_GENCODE)
 	mkdir -p $(OBJDIR)
 	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
+
+# TODO: 看看能不能把-dc -dlink放在一起，只做一个.o
+$(ENQ_DEV_LINKOBJ) : $(ENQ_DEVOBJ)
+	$(NVCC) $(NVCUFLAGS) -dlink $^ -o $@
+
+$(ENQ_DEVSTATIC) : $(ENQ_DEVOBJ) $(ENQ_DEV_LINKOBJ)
+	@printf "Archiving  %-35s > %s\n" enqueue_dev_objects $@
+	ar cr $@ $^
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
 	mkdir -p $(PKGDIR)
