@@ -10,6 +10,9 @@
 #include "nccl.h"
 #include <pthread.h>
 
+extern thread_local SQ *sq;
+extern thread_local CQ *cq;
+
 NCCL_API(ncclResult_t, ofcclPrepareAllReduce, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId);
 ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId) {
   NVTX3_FUNC_RANGE_IN(ofccl_domain);

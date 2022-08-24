@@ -34,12 +34,6 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #define RingBuffer_commit_write(B, A) ((B)->tail = ((B)->tail + (A)) % (B)->length)
 
-// Configs
-static thread_local dim3 deamonKernelGridDim;
-static thread_local dim3 deamonKernelBlockDim;
-static thread_local int queueLength = -1;
-static thread_local int collCount = -1;
-
 #define testBlkCnt4Coll(i) i % 2 == 0 ? deamonKernelGridDim.x : deamonKernelGridDim.x - 1
 
 // static thread_local int CPUSleep = 0;
@@ -112,19 +106,6 @@ typedef struct {
   cudaStream_t stream;
 } ClientThrdArgs;
 
-static __shared__ int quit;
-
-static thread_local pthread_t kernelThrd;
-static thread_local CQE *cqes = nullptr;
-static thread_local CQE *tempCqes = nullptr;
-static thread_local int *BlkCount4Coll = nullptr;
-static thread_local int *tempBlkCount4Coll = nullptr;
-static thread_local SQ *sq;
-static thread_local CQ *cq;
-static thread_local void *argsptrs[4];
-static thread_local int thrdCudaDev;
-static thread_local cudaStream_t kernelStream;
-static thread_local ThrdArgs thrdArgs;
 
 // TODO: 需要thread local？
 

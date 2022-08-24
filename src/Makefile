@@ -108,7 +108,7 @@ $(ENQ_DEVDEP) : $(ENQ_DEVSRC)
 -include $(ENQ_DEVDEP)
 $(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
 	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
-	@printf "NVCC_GENCODE is %s\\n" $(NVCC_GENCODE)
+	@printf "ENQ_NVCUFLAGS is %s\\n" $(ENQ_NVCUFLAGS)
 	mkdir -p $(OBJDIR)
 	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
 
