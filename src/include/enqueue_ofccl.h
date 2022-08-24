@@ -65,8 +65,8 @@ typedef struct {
 SQ *sqCreate(int length);
 void sqDestroy(SQ *sq);
 // SQ read by device, written by host;
-__device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll); // read 1 element each time
-int sqWrite(SQ *sq, SQE *sqe);
+__device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev);
 
 typedef struct {
   int collId;
@@ -84,8 +84,8 @@ typedef struct {
 CQ *cqCreate(int length);
 void cqDestroy(CQ *cq);
 // CQ read by host, written by device; TODO: return ncclResult_t
-int cqRead(CQ *cq, CQE *target, int collId); // read 1 element each time
-__device__ int cqWrite(CQ *cq, CQE *cqe);
+int cqRead(CQ *cq, CQE *target, int collId, int thrdCudaDev); // read 1 element each time
+__device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev);
 
 typedef struct {
   SQ *sq;
@@ -109,7 +109,7 @@ typedef struct {
 
 // TODO: 需要thread local？
 
-__global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll);
+__global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
 
 
 

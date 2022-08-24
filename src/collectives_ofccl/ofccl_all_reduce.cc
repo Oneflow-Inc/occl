@@ -32,14 +32,14 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   
   OFCCL_LOG(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), cudaDev);
 
-  while (sqWrite(sq, &sqe) == -1) {
+  while (sqWrite(sq, &sqe, cudaDev) == -1) {
 
   }
   OFCCL_LOG(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), cudaDev, collId);
 
   while (true) {
     CQE target;
-    if (cqRead(cq, &target, collId) == -1) {
+    if (cqRead(cq, &target, collId, cudaDev) == -1) {
 
     } else {
       OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), cudaDev, collId);

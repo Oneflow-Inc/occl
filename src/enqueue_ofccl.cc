@@ -529,15 +529,15 @@ static thread_local int ofcclCommListFront = 0;
 static thread_local pthread_t kernelThrd;
 static thread_local CQE *tempCqes = nullptr;
 static thread_local int *tempBlkCount4Coll = nullptr;
-static thread_local void *argsptrs[4];
+static thread_local void *argsptrs[5];
 static thread_local cudaStream_t kernelStream;
 static thread_local ThrdArgs thrdArgs;
+static thread_local int thrdCudaDev;
 
 thread_local CQE *cqes;
 thread_local int *BlkCount4Coll;
 thread_local SQ *sq;
 thread_local CQ *cq;
-thread_local int thrdCudaDev;
 
 // Configs
 static thread_local dim3 deamonKernelGridDim;
@@ -624,18 +624,21 @@ void *startKernel(void *args) {
   CQE *cqes = ((ThrdArgs *)args)->cqes;
   int *BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
   cudaStream_t stream = ((ThrdArgs *)args)->stream;
-  int cudaDev = ((ThrdArgs *)args)->cudaDev;
 
-  checkRuntime(cudaSetDevice(cudaDev));
+  OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev in new thread is %d", pthread_self(), thrdCudaDev);
+  thrdCudaDev = ((ThrdArgs *)args)->cudaDev;
+
+  checkRuntime(cudaSetDevice(thrdCudaDev));
 
   // TODO: 之后考虑按需启停kernel
   
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set deamonKernelGridDim, ((ThrdArgs *)args)->cudaDev=%d, gridDimx=%d, blockDimx=%d", pthread_self(), cudaDev, ((ThrdArgs *)args)->cudaDev, deamonKernelGridDim.x, deamonKernelBlockDim.x);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set deamonKernelGridDim, ((ThrdArgs *)args)->cudaDev=%d, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, ((ThrdArgs *)args)->cudaDev, deamonKernelGridDim.x, deamonKernelBlockDim.x);
 
   argsptrs[0] = &sq;
   argsptrs[1] = &cq;
   argsptrs[2] = &cqes;
   argsptrs[3] = &BlkCount4Coll;
+  argsptrs[4] = &thrdCudaDev;
   
   // checkRuntime(cudaLaunchKernel((void *)deamonKernel, deamonKernelGridDim, deamonKernelBlockDim, argsptrs, 0, stream));
 
@@ -647,7 +650,7 @@ void *startKernel(void *args) {
   daemonKernelParam.stream = stream;
   daemonKernelParam.args = argsptrs;
 
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), cudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
@@ -805,7 +808,7 @@ ncclResult_t ofcclPrepareDone() {
   
   thrdArgs = { sq, cq, cqes, BlkCount4Coll, kernelStream, thrdCudaDev };
   pthread_create(&kernelThrd, NULL, startKernel, &thrdArgs);
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
 
 end:
   CUDACHECK(cudaSetDevice(thrdCudaDev)); // do other clean-ups first before calling
@@ -819,7 +822,7 @@ ncclResult_t ofcclDestroy() {
 
   // TODO: 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
-  sqWrite(sq, &sqe);
+  sqWrite(sq, &sqe, thrdCudaDev);
 
   pthread_join(kernelThrd, nullptr);
   checkRuntime(cudaFree(cqes));
