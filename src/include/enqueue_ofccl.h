@@ -34,7 +34,7 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #define RingBuffer_commit_write(B, A) ((B)->tail = ((B)->tail + (A)) % (B)->length)
 
-#define testBlkCnt4Coll(i) i % 2 == 0 ? deamonKernelGridDim.x : deamonKernelGridDim.x - 1
+#define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
@@ -94,6 +94,8 @@ typedef struct {
   int *BlkCount4Coll;
   cudaStream_t stream;
   int cudaDev;
+  dim3 gridDim;
+  dim3 blockDim;
 } ThrdArgs;
 
 typedef struct {
@@ -109,7 +111,7 @@ typedef struct {
 
 // TODO: 需要thread local？
 
-__global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
+__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
 
 
 

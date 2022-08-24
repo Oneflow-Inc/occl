@@ -30,7 +30,7 @@ __host__ void sqDestroy(SQ *sq) {
 }
 
 __host__ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev) {
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
   pthread_mutex_lock(&sq->mutex);
 
   if (RingBuffer_full(sq)) {
@@ -40,12 +40,12 @@ __host__ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev) {
   }
   sqe->logicHead = (int)RingBuffer_logic_tail(sq);
   *RingBuffer_get_tail(sq) = *sqe;
-  OFCCL_LOG(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
 
   __sync_synchronize();
 
   sq->tail += 1;
-  OFCCL_LOG(OFCCL, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -56,14 +56,14 @@ __device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, 
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int sqeCollId;
-  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> enter sqRead, sqHead=%llu, sqTail=%llu, empty=%d, RingBuffer_get(sq, readFrontier)->counter=%d, RingBuffer_get(sq, readFrontier)->collId=%d, RingBuffer_get(sq, readFrontier)->quit=%d, RingBuffer_get(sq, readFrontier)->logicHead=%d, GetLogicFrontier(sq, readFrontier)=%llu", thrdCudaDev, bid, tid, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), RingBuffer_empty(sq), RingBuffer_get(sq, readFrontier)->counter, RingBuffer_get(sq, readFrontier)->collId, RingBuffer_get(sq, readFrontier)->quit, RingBuffer_get(sq, readFrontier)->logicHead, GetLogicFrontier(sq, readFrontier));
+  OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> enter sqRead, sqHead=%llu, sqTail=%llu, empty=%d, RingBuffer_get(sq, readFrontier)->counter=%d, RingBuffer_get(sq, readFrontier)->collId=%d, RingBuffer_get(sq, readFrontier)->quit=%d, RingBuffer_get(sq, readFrontier)->logicHead=%d, GetLogicFrontier(sq, readFrontier)=%llu", thrdCudaDev, bid, tid, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), RingBuffer_empty(sq), RingBuffer_get(sq, readFrontier)->counter, RingBuffer_get(sq, readFrontier)->collId, RingBuffer_get(sq, readFrontier)->quit, RingBuffer_get(sq, readFrontier)->logicHead, GetLogicFrontier(sq, readFrontier));
   if (RingBuffer_empty(sq)) {
     return -1;
   }
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
   *target = *RingBuffer_get(sq, readFrontier);
   if (target->quit) {
-    OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, tid);
+    OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, tid);
     return 0;
   }
 
@@ -79,14 +79,14 @@ __device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, 
     int old_counter = atomicAdd(&(RingBuffer_get(sq, readFrontier)->counter), 1);
     // RingBuffer_get(sq, readFrontier)->counter += 1;
     __threadfence_system();
-    OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
+    OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
     // if (RingBuffer_get(sq, readFrontier)->counter == BlkCount4Coll[sqeCollId]) {
     if (old_counter + 1 == BlkCount4Coll[sqeCollId]) {
       // RingBuffer_commit_read(sq, 1);
       unsigned long long int old_head = atomicAdd(&sq->head, 1);
 
       __threadfence_system();
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sqe of collId %d commit read, new sqHead is %llu", thrdCudaDev, bid, tid, sqeCollId, old_head + 1);
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sqe of collId %d commit read, new sqHead is %llu", thrdCudaDev, bid, tid, sqeCollId, old_head + 1);
     }
     
     // 修改了GPU和CPU都关心的sq.counter
@@ -158,7 +158,7 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 
-__global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev) {
   uint64_t round = 0;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
@@ -186,7 +186,7 @@ __global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get collId %d, readFrontier updates to %llu", thrdCudaDev, bid, tid, target.collId, GetLogicFrontier(sq, readFrontier));
         if (target.quit) {
           quit = 1;
-          OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
+          OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
           goto thrd_common;
         }
 
@@ -213,7 +213,7 @@ __global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
           while (cqWrite(cq, cqes + target.collId, thrdCudaDev) == -1) {
 
           }
-          OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+          OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
           __threadfence();
         }
       }
@@ -222,7 +222,7 @@ __global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
 thrd_common:
     __syncthreads();
     if (quit == 1) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
       return;
     }
   }

@@ -540,8 +540,8 @@ thread_local SQ *sq;
 thread_local CQ *cq;
 
 // Configs
-static thread_local dim3 deamonKernelGridDim;
-static thread_local dim3 deamonKernelBlockDim;
+static thread_local dim3 daemonKernelGridDim;
+static thread_local dim3 daemonKernelBlockDim;
 static thread_local int queueLength = -1;
 static thread_local int collCount = -1;
 
@@ -625,36 +625,37 @@ void *startKernel(void *args) {
   int *BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
   cudaStream_t stream = ((ThrdArgs *)args)->stream;
 
-  OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev in new thread is %d", pthread_self(), thrdCudaDev);
+  // Setup thread_local variables using values from parent thread.
+  // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev in new thread is %d", pthread_self(), thrdCudaDev);
   thrdCudaDev = ((ThrdArgs *)args)->cudaDev;
+  daemonKernelGridDim = ((ThrdArgs *)args)->gridDim;
+  daemonKernelBlockDim = ((ThrdArgs *)args)->blockDim;
 
   checkRuntime(cudaSetDevice(thrdCudaDev));
 
   // TODO: 之后考虑按需启停kernel
   
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set deamonKernelGridDim, ((ThrdArgs *)args)->cudaDev=%d, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, ((ThrdArgs *)args)->cudaDev, deamonKernelGridDim.x, deamonKernelBlockDim.x);
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
 
   argsptrs[0] = &sq;
   argsptrs[1] = &cq;
   argsptrs[2] = &cqes;
   argsptrs[3] = &BlkCount4Coll;
   argsptrs[4] = &thrdCudaDev;
-  
-  // checkRuntime(cudaLaunchKernel((void *)deamonKernel, deamonKernelGridDim, deamonKernelBlockDim, argsptrs, 0, stream));
 
   struct cudaLaunchParams daemonKernelParam;
-  daemonKernelParam.func = (void *)deamonKernel;
-  daemonKernelParam.gridDim = deamonKernelGridDim;
-  daemonKernelParam.blockDim = deamonKernelBlockDim;
+  daemonKernelParam.func = (void *)daemonKernel;
+  daemonKernelParam.gridDim = daemonKernelGridDim;
+  daemonKernelParam.blockDim = daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
   daemonKernelParam.stream = stream;
   daemonKernelParam.args = argsptrs;
 
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
-  // deamonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, BlkCount4Coll);
+  // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, BlkCount4Coll);
   
   cudaStreamSynchronize(stream);
 
@@ -666,7 +667,7 @@ ncclResult_t ofcclPrepareDone() {
   // ***** ncclGroupEnd() *****
 
   CUDACHECK(cudaGetDevice(&thrdCudaDev));
-  OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev is %d", pthread_self(), thrdCudaDev);
+  // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev is %d", pthread_self(), thrdCudaDev);
   ncclResult_t ret = ncclSuccess;
 
   int front_of_panel = -1;
@@ -789,8 +790,8 @@ ncclResult_t ofcclPrepareDone() {
   }
   checkRuntime(cudaMemcpy(cqes, tempCqes, collCount * sizeof(CQE), cudaMemcpyHostToDevice));
   
-  deamonKernelGridDim.x = 4;
-  deamonKernelBlockDim.x = 8;
+  daemonKernelGridDim.x = 4;
+  daemonKernelBlockDim.x = 8;
 
   checkRuntime(cudaMalloc(&BlkCount4Coll, collCount * sizeof(int)));
   tempBlkCount4Coll = (int *)malloc(collCount * sizeof(int));
@@ -806,9 +807,9 @@ ncclResult_t ofcclPrepareDone() {
 
   checkRuntime(cudaDeviceSynchronize());
   
-  thrdArgs = { sq, cq, cqes, BlkCount4Coll, kernelStream, thrdCudaDev };
+  thrdArgs = { sq, cq, cqes, BlkCount4Coll, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim };
   pthread_create(&kernelThrd, NULL, startKernel, &thrdArgs);
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
 
 end:
   CUDACHECK(cudaSetDevice(thrdCudaDev)); // do other clean-ups first before calling

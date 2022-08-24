@@ -27,22 +27,22 @@ NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, 
 ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId) {
 
   SQE sqe = { collId, 0, -1, sendbuff, recvbuff, false };
-  int cudaDev;
-  checkRuntime(cudaGetDevice(&cudaDev));
+  int thrdCudaDev;
+  checkRuntime(cudaGetDevice(&thrdCudaDev));
   
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), cudaDev);
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
-  while (sqWrite(sq, &sqe, cudaDev) == -1) {
+  while (sqWrite(sq, &sqe, thrdCudaDev) == -1) {
 
   }
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), cudaDev, collId);
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);
 
   while (true) {
     CQE target;
-    if (cqRead(cq, &target, collId, cudaDev) == -1) {
+    if (cqRead(cq, &target, collId, thrdCudaDev) == -1) {
 
     } else {
-      OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), cudaDev, collId);
+      OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), thrdCudaDev, collId);
       break;
     }
   }
