@@ -16,9 +16,9 @@
 #include <string.h>
 #include <pthread.h>
 
-#define OFCCL_LOG(PRE, FMT, args...) printf("\n[%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__, args)
-#define OFCCL_LOG1(PRE, FMT) printf("\n[%s:%d] <%s> " #PRE " " FMT, __FILE__, __LINE__, __func__)
-#define OFCCL_LOG0(PRE) printf("\n[%s:%d] <%s> " #PRE, __FILE__, __LINE__, __func__)
+#define OFCCL_LOG(PRE, FMT, args...) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
+#define OFCCL_LOG1(PRE, FMT) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__)
+#define OFCCL_LOG0(PRE) printf("[%s:%d] <%s> " #PRE, __FILE "\n"__, __LINE__, __func__)
 
 // #define OFCCL_LOG(PRE, FMT, args...) do {} while (0)
 // #define OFCCL_LOG1(PRE, FMT) do {} while (0)

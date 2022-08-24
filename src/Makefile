@@ -112,7 +112,7 @@ $(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
 	mkdir -p $(OBJDIR)
 	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
 
-# TODO: 看看能不能把-dc -dlink放在一起，只做一个.o
+# 经过尝试，发现不能把-dc -dlink放在一起，只做一个.o
 $(ENQ_DEV_LINKOBJ) : $(ENQ_DEVOBJ)
 	$(NVCC) $(NVCUFLAGS) -dlink $^ -o $@
 

@@ -35,17 +35,17 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 #define RingBuffer_commit_write(B, A) ((B)->tail = ((B)->tail + (A)) % (B)->length)
 
 // Configs
-static dim3 deamonKernelGridDim;
-static dim3 deamonKernelBlockDim;
-static int queueLength = -1;
-static int collCount = -1;
+static thread_local dim3 deamonKernelGridDim;
+static thread_local dim3 deamonKernelBlockDim;
+static thread_local int queueLength = -1;
+static thread_local int collCount = -1;
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? deamonKernelGridDim.x : deamonKernelGridDim.x - 1
 
-// static int CPUSleep = 0;
-// __device__ static int GPUSleep = 0;
-// static int CpuSleepUs = 1e6;
-// __device__ static clock_t GpuSpin = 1e9 * 2;
+// static thread_local int CPUSleep = 0;
+// __device__ static thread_local int GPUSleep = 0;
+// static thread_local int CpuSleepUs = 1e6;
+// __device__ static thread_local clock_t GpuSpin = 1e9 * 2;
 // #define GpuSpin4Bid(i) (1 + i) * 1e9
 // #define GpuSpin4BidSmall(i) (6 + i) * 1e6
 
@@ -99,6 +99,7 @@ typedef struct {
   CQE *cqes;
   int *BlkCount4Coll;
   cudaStream_t stream;
+  int cudaDev;
 } ThrdArgs;
 
 typedef struct {
@@ -113,13 +114,19 @@ typedef struct {
 
 static __shared__ int quit;
 
-static pthread_t kernelThrd;
-static CQE *cqes = nullptr;
-static CQE *tempCqes = nullptr;
-static int *BlkCount4Coll = nullptr;
-static int *tempBlkCount4Coll = nullptr;
-static SQ *sq;
-static CQ *cq;
+static thread_local pthread_t kernelThrd;
+static thread_local CQE *cqes = nullptr;
+static thread_local CQE *tempCqes = nullptr;
+static thread_local int *BlkCount4Coll = nullptr;
+static thread_local int *tempBlkCount4Coll = nullptr;
+static thread_local SQ *sq;
+static thread_local CQ *cq;
+static thread_local void *argsptrs[4];
+static thread_local int thrdCudaDev;
+static thread_local cudaStream_t kernelStream;
+static thread_local ThrdArgs thrdArgs;
+
+// TODO: 需要thread local？
 
 __global__ void deamonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll);
 
