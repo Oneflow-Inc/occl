@@ -46,7 +46,17 @@ ENQ_DEVDEP 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
 ENQ_DEV_LINKOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%_link.o)
 ENQ_DEVSTATIC			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.a)
 
-ENQ_NVCUFLAGS = $(NVCUFLAGS)
+ENQ_NVCUFLAGS := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11 --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
+ENQ_NVCUFLAGS += ${GCOV_FLAGS:%=-Xcompiler %}
+ENQ_NVCUFLAGS += -O0 -G -g
+ifneq ($(VERBOSE), 0)
+ENQ_NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra,-Wno-unused-parameter
+else
+.SILENT:
+endif
+ifneq ($(KEEP), 0)
+ENQ_NVCUFLAGS += -keep
+endif
 ENQ_NVCUFLAGS += -I. -I.. -Iinclude -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
 ##### rules
 build : lib staticlib
