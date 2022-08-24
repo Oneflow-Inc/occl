@@ -14,7 +14,6 @@
 #include "debug.h"
 #include "gdrwrap.h"
 #include "group.h"
-#include "nccl.h"
 #include "transport.h"
 
 #include <cstdlib>
