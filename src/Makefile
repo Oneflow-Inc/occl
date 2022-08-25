@@ -46,9 +46,14 @@ ENQ_DEVDEP 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
 ENQ_DEV_LINKOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%_link.o)
 ENQ_DEVSTATIC			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.a)
 
+DEBUG_ENQ ?= 1
 ENQ_NVCUFLAGS := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11 --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
 ENQ_NVCUFLAGS += ${GCOV_FLAGS:%=-Xcompiler %}
+ifeq ($(DEBUG_ENQ), 0)
+ENQ_NVCUFLAGS += -O3
+else
 ENQ_NVCUFLAGS += -O0 -G -g
+endif
 ifneq ($(VERBOSE), 0)
 ENQ_NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra,-Wno-unused-parameter
 else
@@ -118,6 +123,7 @@ $(ENQ_DEVDEP) : $(ENQ_DEVSRC)
 -include $(ENQ_DEVDEP)
 $(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
 	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
+	@printf "DEBUG_ENQ is %s\\n" $(DEBUG_ENQ)
 	@printf "ENQ_NVCUFLAGS is %s\\n" $(ENQ_NVCUFLAGS)
 	mkdir -p $(OBJDIR)
 	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
