@@ -544,6 +544,92 @@ static thread_local dim3 daemonKernelBlockDim;
 static thread_local int queueLength = -1;
 static thread_local int collCount = -1;
 
+// TODO: still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
+SQ *sqCreate(int length) {
+  SQ *sq = nullptr;
+  checkRuntime(cudaMallocHost((void **)&sq, sizeof(SQ)));
+  sq->length = length + 1;
+  sq->head = 0;
+  sq->tail = 0;
+  checkRuntime(cudaMallocHost((void **)&(sq->buffer), sq->length));
+  pthread_mutex_init(&sq->mutex, nullptr);
+
+  return sq;
+}
+
+void sqDestroy(SQ *sq) {
+  if (sq) {
+    checkRuntime(cudaFreeHost(sq->buffer));
+    checkRuntime(cudaFreeHost(sq));
+  }
+}
+
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev) {
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
+  pthread_mutex_lock(&sq->mutex);
+
+  if (RingBuffer_full(sq)) {
+    // not an error; caller keeps trying.
+    pthread_mutex_unlock(&sq->mutex);
+    return -1;
+  }
+  sqe->logicHead = (int)RingBuffer_logic_tail(sq);
+  *RingBuffer_get_tail(sq) = *sqe;
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+
+  __sync_synchronize();
+
+  sq->tail += 1;
+  OFCCL_LOG_RANK_0(OFCCL, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+
+  pthread_mutex_unlock(&sq->mutex);
+
+  return 0;
+}
+
+CQ *cqCreate(int length) {
+  CQ *cq = nullptr;
+  checkRuntime(cudaMallocHost((void **)&cq, sizeof(CQ)));
+  cq->length = length + 1;
+  cq->head = 0;
+  cq->tail = 0;
+  checkRuntime(cudaMallocHost((void **)&(cq->buffer), cq->length));
+  pthread_mutex_init(&cq->mutex, nullptr);
+
+  return cq;
+}
+
+void cqDestroy(CQ *cq) {
+  if (cq) {
+    checkRuntime(cudaFreeHost(cq->buffer));
+    checkRuntime(cudaFreeHost(cq));
+  }
+}
+
+int cqRead(CQ *cq, CQE *target, int collId, int thrdCudaDev) {
+  pthread_mutex_lock(&cq->mutex);
+  // OFCCL_LOG(OFCCL, "<%lu> enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu, headCollId=%d, wait for %d", pthread_self(), RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq), RingBuffer_get_head(cq)->collId, collId);
+
+  if (RingBuffer_empty(cq)) {
+    pthread_mutex_unlock(&cq->mutex);
+    return -1;
+  }
+  if (RingBuffer_get_head(cq)->collId != collId) {
+    pthread_mutex_unlock(&cq->mutex);
+    return -1;
+  }
+  // checkRuntime(cudaMemcpy(target, RingBuffer_get_head(cq), sizeof(CQE), cudaMemcpyHostToHost));
+  *target = *RingBuffer_get_head(cq);
+
+  __sync_synchronize();
+
+  cq->head += 1;
+
+  pthread_mutex_unlock(&cq->mutex);
+
+  return 0;
+}
+
 void *ofcclAsyncThreadPreconnect(void* args_) {
   struct ofcclCommArgs* args = (struct ofcclCommArgs*)args_;
   CUDACHECKTHREAD(cudaSetDevice(args->comm->cudaDev));
