@@ -542,10 +542,10 @@ static thread_local PollerArgs pollerArgs;
 static thread_local int *poll_start;
 static thread_local int *poll_stop;
 // 之后主线程里sqWrite对这个的修改，希望poller线程可以看到
-static thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
+// static thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
 // 不能使用静态分配的数组，否则无法赋值，需要动态分配，跨线程传递。
 static thread_local void **callbackArgList;
-// thread_local CallbackFunc *callbacks;
+thread_local CallbackFunc *callbacks;
 
 // Configs
 static thread_local dim3 daemonKernelGridDim;
@@ -593,9 +593,8 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *call
   pthread_mutex_unlock(&sq->mutex);
 
   if (sqe->collId != -1) {
-    (*collId2callback)[sqe->collId] = callback;
+    callbacks[sqe->collId] = callback;
     callbackArgList[sqe->collId] = callbackArgs;
-    // callbacks[sqe->collId] = callback;
   }
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
   if (*poll_start == 0) {
@@ -766,8 +765,7 @@ void *startKernel(void *args) {
 void *startPoller(void *args) {
   poll_start = ((PollerArgs *)args)->poll_start;
   poll_stop = ((PollerArgs *)args)->poll_stop;
-  collId2callback = ((PollerArgs *)args)->collId2callback;
-  // callbacks = ((PollerArgs *)args)->callbacks;
+  callbacks = ((PollerArgs *)args)->callbacks;
   thrdCudaDev = ((PollerArgs *)args)->cudaDev;
   checkRuntime(cudaSetDevice(thrdCudaDev));
   cq = ((PollerArgs *)args)->cq;
@@ -783,8 +781,7 @@ void *startPoller(void *args) {
     } else {
       int collId = target.collId;
       OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), thrdCudaDev, collId);
-      (*collId2callback)[collId](collId, callbackArgList[collId]);
-      // callbacks[collId](collId);
+      callbacks[collId](collId, callbackArgList[collId]);
     }
   }
 
@@ -924,9 +921,9 @@ ncclResult_t ofcclPrepareDone() {
 
   poll_start = (int *)calloc(1, sizeof(int));
   poll_stop = (int *)calloc(1, sizeof(int));
-  collId2callback = new std::unordered_map<int, CallbackFunc>();
+  callbacks = (CallbackFunc *)calloc(MAX_LENGTH, sizeof(CallbackFunc));
   callbackArgList = (void **)calloc(MAX_LENGTH, sizeof(void *));
-  pollerArgs = { poll_start, poll_stop, collId2callback, thrdCudaDev, cq, callbackArgList };
+  pollerArgs = { poll_start, poll_stop, callbacks, thrdCudaDev, cq, callbackArgList };
   pthread_create(&poller, nullptr, startPoller, &pollerArgs);
 
 end:
@@ -956,7 +953,7 @@ ncclResult_t ofcclDestroy() {
 
   free(poll_start);
   free(poll_stop);
-  delete collId2callback;
+  free(callbacks);
   free(callbackArgList);
 
   // ***** seems do not need to transverse ofcclCommList *****

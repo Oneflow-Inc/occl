@@ -113,8 +113,8 @@ typedef struct {
 typedef struct {
   int *poll_start;
   int *poll_stop;
-  std::unordered_map<int, CallbackFunc> *collId2callback;
-  // CallbackFunc *callbacks;
+  // std::unordered_map<int, CallbackFunc> *collId2callback;
+  CallbackFunc *callbacks;
   int cudaDev;
   CQ *cq;
   void **callbackArgList;
