@@ -16,7 +16,7 @@
 
 #define MAX_ASYNC_PANELS 32
 #define MAX_ASYNC_OPS 128
-// 10000应该是小于大多数任务中会使用的集合通信的数目了。
+// 10000应该是大于大多数任务中会使用的集合通信的数目了。
 #define MAX_LENGTH 10000
 
 struct ofcclCommArgs {

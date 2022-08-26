@@ -533,16 +533,15 @@ thread_local int *BlkCount4Coll;
 thread_local SQ *sq;
 thread_local CQ *cq;
 
-// TODO: static?
+// for poller thread
 static thread_local pthread_t poller;
 static thread_local PollerArgs pollerArgs;
-thread_local int *poll_start;
-thread_local int *poll_stop;
+static thread_local int *poll_start;
+static thread_local int *poll_stop;
 // 之后主线程里sqWrite对这个的修改，希望poller线程可以看到
-// TODO: 指向map的指针，感觉怪怪的。
-thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
+static thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
 // 不能使用静态分配的数组，否则无法赋值，需要动态分配，跨线程传递。
-thread_local void **callbackArgList;
+static thread_local void **callbackArgList;
 // thread_local CallbackFunc *callbacks;
 
 // Configs
