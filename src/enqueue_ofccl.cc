@@ -14,12 +14,15 @@
 #include "debug.h"
 #include "gdrwrap.h"
 #include "group.h"
+#include "nccl.h"
 #include "transport.h"
 
 #include <cstdlib>
 #include <cstring> // std::memcpy
 #include <pthread.h> // pthread_self()
 #include <math.h> // floor()
+#include <sched.h>
+#include <unordered_map>
 #include <unordered_set>
 
 static void *const ofcclKerns[1] = {
@@ -538,13 +541,23 @@ thread_local int *BlkCount4Coll;
 thread_local SQ *sq;
 thread_local CQ *cq;
 
+// TODO: static?
+static thread_local pthread_t poller;
+static thread_local PollerArgs pollerArgs;
+thread_local int *poll_start;
+thread_local int *poll_stop;
+// 之后主线程里sqWrite对这个的修改，希望poller线程可以看到
+// TODO: 指向map的指针，感觉怪怪的。
+thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
+// thread_local CallbackFunc *callbacks;
+
 // Configs
 static thread_local dim3 daemonKernelGridDim;
 static thread_local dim3 daemonKernelBlockDim;
 static thread_local int queueLength = -1;
 static thread_local int collCount = -1;
 
-// TODO: still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
+// still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 SQ *sqCreate(int length) {
   SQ *sq = nullptr;
   checkRuntime(cudaMallocHost((void **)&sq, sizeof(SQ)));
@@ -564,7 +577,7 @@ void sqDestroy(SQ *sq) {
   }
 }
 
-int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev) {
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback) {
   OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
   pthread_mutex_lock(&sq->mutex);
 
@@ -584,6 +597,15 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev) {
 
   pthread_mutex_unlock(&sq->mutex);
 
+  if (sqe->collId != -1) {
+    (*collId2callback)[sqe->collId] = callback;
+    // callbacks[sqe->collId] = callback;
+  }
+  // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
+  if (*poll_start == 0) {
+    *poll_start = 1;
+  }
+  
   return 0;
 }
 
@@ -606,15 +628,11 @@ void cqDestroy(CQ *cq) {
   }
 }
 
-int cqRead(CQ *cq, CQE *target, int collId, int thrdCudaDev) {
+int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
   pthread_mutex_lock(&cq->mutex);
   // OFCCL_LOG(OFCCL, "<%lu> enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu, headCollId=%d, wait for %d", pthread_self(), RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq), RingBuffer_get_head(cq)->collId, collId);
 
   if (RingBuffer_empty(cq)) {
-    pthread_mutex_unlock(&cq->mutex);
-    return -1;
-  }
-  if (RingBuffer_get_head(cq)->collId != collId) {
     pthread_mutex_unlock(&cq->mutex);
     return -1;
   }
@@ -639,7 +657,7 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
   return args;
 }
 
-// NCCL_API(ncclResult_t, ofcclPrepareCollComm, struct ncclInfo *info, int collId);
+// TODO: 需要好好利用这里的collId，维护一个map，而不是列表。
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   if (ofcclCommListPanel == 0 && ofcclCommListFront == 0) {
     memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_ASYNC_PANELS * MAX_ASYNC_OPS); // legacy in ncclGroupStart
@@ -704,11 +722,11 @@ end:
 
 void *startKernel(void *args) {
 
-  SQ *sq = ((ThrdArgs *)args)->sq;
-  CQ *cq = ((ThrdArgs *)args)->cq;
-  CQE *cqes = ((ThrdArgs *)args)->cqes;
-  int *BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
-  cudaStream_t stream = ((ThrdArgs *)args)->stream;
+  sq = ((ThrdArgs *)args)->sq;
+  cq = ((ThrdArgs *)args)->cq;
+  cqes = ((ThrdArgs *)args)->cqes;
+  BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
+  kernelStream = ((ThrdArgs *)args)->stream;
 
   // Setup thread_local variables using values from parent thread.
   // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev in new thread is %d", pthread_self(), thrdCudaDev);
@@ -733,7 +751,7 @@ void *startKernel(void *args) {
   daemonKernelParam.gridDim = daemonKernelGridDim;
   daemonKernelParam.blockDim = daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
-  daemonKernelParam.stream = stream;
+  daemonKernelParam.stream = kernelStream;
   daemonKernelParam.args = argsptrs;
 
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
@@ -742,9 +760,36 @@ void *startKernel(void *args) {
 
   // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, BlkCount4Coll);
   
-  cudaStreamSynchronize(stream);
+  cudaStreamSynchronize(kernelStream);
 
   return NULL;
+}
+
+void *startPoller(void *args) {
+  poll_start = ((PollerArgs *)args)->poll_start;
+  poll_stop = ((PollerArgs *)args)->poll_stop;
+  collId2callback = ((PollerArgs *)args)->collId2callback;
+  cq = ((PollerArgs *)args)->cq;
+  // callbacks = ((PollerArgs *)args)->callbacks;
+  thrdCudaDev = ((PollerArgs *)args)->cudaDev;
+  checkRuntime(cudaSetDevice(thrdCudaDev));
+  while (*poll_start == 0) {
+    sched_yield();
+  }
+
+  while (*poll_stop == 0) {
+    CQE target;
+    if (cqRead(cq, &target, thrdCudaDev) == -1) {
+      sched_yield();
+    } else {
+      int collId = target.collId;
+      OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), thrdCudaDev, collId);
+      (*collId2callback)[collId](collId);
+      // callbacks[collId](collId);
+    }
+  }
+
+  return nullptr;
 }
 
 NCCL_API(ncclResult_t, ofcclPrepareDone);
@@ -896,6 +941,12 @@ ncclResult_t ofcclPrepareDone() {
   pthread_create(&kernelThrd, NULL, startKernel, &thrdArgs);
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
 
+  poll_start = (int *)calloc(1, sizeof(int));
+  poll_stop = (int *)calloc(1, sizeof(int));
+  collId2callback = new std::unordered_map<int, CallbackFunc>();
+  pollerArgs = { poll_start, poll_stop, collId2callback, thrdCudaDev, cq };
+  pthread_create(&poller, nullptr, startPoller, &pollerArgs);
+
 end:
   CUDACHECK(cudaSetDevice(thrdCudaDev)); // do other clean-ups first before calling
   return ret;
@@ -906,9 +957,14 @@ ncclResult_t ofcclDestroy() {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
+  CallbackFunc dummy = [](int noUse) {
+    OFCCL_LOG1(OFCCL_ERROR, "should not be used");
+    return -1;
+  };
+
   // TODO: 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
-  sqWrite(sq, &sqe, thrdCudaDev);
+  sqWrite(sq, &sqe, thrdCudaDev, dummy);
 
   pthread_join(kernelThrd, nullptr);
   checkRuntime(cudaFree(cqes));
@@ -917,6 +973,13 @@ ncclResult_t ofcclDestroy() {
   free(tempBlkCount4Coll);
   sqDestroy(sq);
   cqDestroy(cq);
+
+  *poll_stop = 1;
+  pthread_join(poller, nullptr);
+
+  free(poll_start);
+  free(poll_stop);
+  delete collId2callback;
 
   // ***** seems do not need to transverse ofcclCommList *****
   

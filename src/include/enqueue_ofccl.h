@@ -8,9 +8,11 @@
 #define OFCCL_ENQUEUE_H_
 
 #include "comm.h"
+#include "nccl.h"
 #include "group.h"
 #include "collectives_ofccl.h"
 #include <cuda_runtime.h>
+#include <unordered_map>
 
 ncclResult_t ofcclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
@@ -66,7 +68,7 @@ SQ *sqCreate(int length);
 void sqDestroy(SQ *sq);
 // SQ read by device, written by host;
 __device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
-int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev);
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback);
 
 typedef struct {
   int collId;
@@ -83,8 +85,8 @@ typedef struct {
 
 CQ *cqCreate(int length);
 void cqDestroy(CQ *cq);
-// CQ read by host, written by device; TODO: return ncclResult_t
-int cqRead(CQ *cq, CQE *target, int collId, int thrdCudaDev); // read 1 element each time
+// CQ read by host, written by device;
+int cqRead(CQ *cq, CQE *target, int thrdCudaDev); // read 1 element each time
 __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev);
 
 typedef struct {
@@ -99,17 +101,14 @@ typedef struct {
 } ThrdArgs;
 
 typedef struct {
-  SQ *sq;
+  int *poll_start;
+  int *poll_stop;
+  std::unordered_map<int, CallbackFunc> *collId2callback;
+  // CallbackFunc *callbacks;
+  int cudaDev;
   CQ *cq;
-  int collId;
-  const void *send_buffer;
-  void *recv_buffer;
-  int requestCount;
-  cudaStream_t stream;
-} ClientThrdArgs;
+} PollerArgs;
 
-
-// TODO: 需要thread local？
 
 __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
 

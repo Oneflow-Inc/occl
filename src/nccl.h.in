@@ -7,6 +7,7 @@
 #ifndef NCCL_H_
 #define NCCL_H_
 
+#include <functional>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #if CUDART_VERSION >= 11000
@@ -27,6 +28,9 @@ extern "C" {
 
 /* Opaque handle to communicator */
 typedef struct ncclComm* ncclComm_t;
+
+// poller调用的时候把collId穿进去，lambda里边判断一下是不是自己等的。
+using CallbackFunc = std::function<int(int)>;
 
 #define NCCL_UNIQUE_ID_BYTES 128
 typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
@@ -295,8 +299,8 @@ ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclR
  * OFCCL manages the stream itself, client does not need to provide one.
  *
  */
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId);
-ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback);
+ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback);
 
 /*
  * Reduce-Scatter

@@ -18,7 +18,7 @@
 
 #define OFCCL_LOG(PRE, FMT, args...) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
 #define OFCCL_LOG1(PRE, FMT) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__)
-#define OFCCL_LOG0(PRE) printf("[%s:%d] <%s> " #PRE, __FILE "\n"__, __LINE__, __func__)
+#define OFCCL_LOG0(PRE) printf("[%s:%d] <%s> " #PRE "\n", __FILE__, __LINE__, __func__)
 
 #define OFCCL_LOG_RANK_0(PRE, FMT, args...) do { if (thrdCudaDev==0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
