@@ -14,6 +14,16 @@
 #include <cuda_runtime.h>
 #include <unordered_map>
 
+#define MAX_ASYNC_PANELS 32
+#define MAX_ASYNC_OPS 128
+// 10000应该是小于大多数任务中会使用的集合通信的数目了。
+#define MAX_LENGTH 10000
+
+struct ofcclCommArgs {
+  ncclResult_t ret;
+  ncclComm_t comm;
+};
+
 ncclResult_t ofcclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
@@ -68,7 +78,7 @@ SQ *sqCreate(int length);
 void sqDestroy(SQ *sq);
 // SQ read by device, written by host;
 __device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
-int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback);
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs);
 
 typedef struct {
   int collId;
@@ -107,8 +117,13 @@ typedef struct {
   // CallbackFunc *callbacks;
   int cudaDev;
   CQ *cq;
+  void **callbackArgList;
 } PollerArgs;
 
+// typedef struct {
+//   int collId;
+//   int gotCqe;
+// } CallBackArgs;
 
 __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
 

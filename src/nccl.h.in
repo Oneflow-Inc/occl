@@ -30,7 +30,8 @@ extern "C" {
 typedef struct ncclComm* ncclComm_t;
 
 // poller调用的时候把collId穿进去，lambda里边判断一下是不是自己等的。
-using CallbackFunc = std::function<int(int)>;
+// using CallbackFunc = std::function<int(int)>;
+typedef int (*CallbackFunc)(int, void *);
 
 #define NCCL_UNIQUE_ID_BYTES 128
 typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; } ncclUniqueId;
@@ -299,8 +300,8 @@ ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclR
  * OFCCL manages the stream itself, client does not need to provide one.
  *
  */
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback);
-ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
+ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
 
 /*
  * Reduce-Scatter

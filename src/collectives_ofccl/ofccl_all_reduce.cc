@@ -23,8 +23,8 @@ ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRe
   
 }
 
-NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback);
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback) {
+NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs) {
 
   SQE sqe = { collId, 0, -1, sendbuff, recvbuff, false };
   int thrdCudaDev;
@@ -32,7 +32,7 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   
   OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
-  while (sqWrite(sq, &sqe, thrdCudaDev, callback) == -1) {
+  while (sqWrite(sq, &sqe, thrdCudaDev, callback, callbackArgs) == -1) {
 
   }
   OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);

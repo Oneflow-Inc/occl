@@ -513,14 +513,6 @@ cb_end:
 
 } // namespace
 
-#define MAX_ASYNC_PANELS 32
-#define MAX_ASYNC_OPS 128
-
-struct ofcclCommArgs {
-  ncclResult_t ret;
-  ncclComm_t comm;
-};
-
 // TODO: 之后考虑搞一个Context整理起来。
 static thread_local ofcclCommArgs ofcclCommList[MAX_ASYNC_PANELS][MAX_ASYNC_OPS];
 static thread_local std::unordered_set<ncclComm_t> seenComms;
@@ -549,6 +541,8 @@ thread_local int *poll_stop;
 // 之后主线程里sqWrite对这个的修改，希望poller线程可以看到
 // TODO: 指向map的指针，感觉怪怪的。
 thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
+// 不能使用静态分配的数组，否则无法赋值，需要动态分配，跨线程传递。
+thread_local void **callbackArgList;
 // thread_local CallbackFunc *callbacks;
 
 // Configs
@@ -577,7 +571,7 @@ void sqDestroy(SQ *sq) {
   }
 }
 
-int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback) {
+int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs) {
   OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
   pthread_mutex_lock(&sq->mutex);
 
@@ -599,6 +593,7 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback) {
 
   if (sqe->collId != -1) {
     (*collId2callback)[sqe->collId] = callback;
+    callbackArgList[sqe->collId] = callbackArgs;
     // callbacks[sqe->collId] = callback;
   }
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
@@ -769,10 +764,11 @@ void *startPoller(void *args) {
   poll_start = ((PollerArgs *)args)->poll_start;
   poll_stop = ((PollerArgs *)args)->poll_stop;
   collId2callback = ((PollerArgs *)args)->collId2callback;
-  cq = ((PollerArgs *)args)->cq;
   // callbacks = ((PollerArgs *)args)->callbacks;
   thrdCudaDev = ((PollerArgs *)args)->cudaDev;
   checkRuntime(cudaSetDevice(thrdCudaDev));
+  cq = ((PollerArgs *)args)->cq;
+  callbackArgList = ((PollerArgs *)args)->callbackArgList;
   while (*poll_start == 0) {
     sched_yield();
   }
@@ -784,7 +780,7 @@ void *startPoller(void *args) {
     } else {
       int collId = target.collId;
       OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), thrdCudaDev, collId);
-      (*collId2callback)[collId](collId);
+      (*collId2callback)[collId](collId, callbackArgList[collId]);
       // callbacks[collId](collId);
     }
   }
@@ -944,7 +940,8 @@ ncclResult_t ofcclPrepareDone() {
   poll_start = (int *)calloc(1, sizeof(int));
   poll_stop = (int *)calloc(1, sizeof(int));
   collId2callback = new std::unordered_map<int, CallbackFunc>();
-  pollerArgs = { poll_start, poll_stop, collId2callback, thrdCudaDev, cq };
+  callbackArgList = (void **)calloc(MAX_LENGTH, sizeof(void *));
+  pollerArgs = { poll_start, poll_stop, collId2callback, thrdCudaDev, cq, callbackArgList };
   pthread_create(&poller, nullptr, startPoller, &pollerArgs);
 
 end:
@@ -957,14 +954,9 @@ ncclResult_t ofcclDestroy() {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
-  CallbackFunc dummy = [](int noUse) {
-    OFCCL_LOG1(OFCCL_ERROR, "should not be used");
-    return -1;
-  };
-
   // TODO: 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
-  sqWrite(sq, &sqe, thrdCudaDev, dummy);
+  sqWrite(sq, &sqe, thrdCudaDev, nullptr, nullptr);
 
   pthread_join(kernelThrd, nullptr);
   checkRuntime(cudaFree(cqes));
@@ -980,6 +972,7 @@ ncclResult_t ofcclDestroy() {
   free(poll_start);
   free(poll_stop);
   delete collId2callback;
+  free(callbackArgList);
 
   // ***** seems do not need to transverse ofcclCommList *****
   
