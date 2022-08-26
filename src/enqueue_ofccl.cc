@@ -514,9 +514,12 @@ cb_end:
 } // namespace
 
 // TODO: 之后考虑搞一个Context整理起来。
-static thread_local ofcclCommArgs ofcclCommList[MAX_ASYNC_PANELS][MAX_ASYNC_OPS];
+// TODO: ofcclCommList看看情况是不是需要声明成指针，动态分配。
+static thread_local ofcclCommArgs ofcclCommList[MAX_LENGTH];
+static thread_local pthread_t ofcclPrepareThreads[MAX_LENGTH];
+static thread_local int localCollIds[MAX_LENGTH];
+static thread_local int collCount = 0;
 static thread_local std::unordered_set<ncclComm_t> seenComms;
-static thread_local pthread_t ofcclPrepareThreads[MAX_ASYNC_PANELS][MAX_ASYNC_OPS];
 static thread_local int ofcclCommListPanel = 0;
 static thread_local int ofcclCommListFront = 0;
 
@@ -548,7 +551,6 @@ static thread_local void **callbackArgList;
 static thread_local dim3 daemonKernelGridDim;
 static thread_local dim3 daemonKernelBlockDim;
 static thread_local int queueLength = -1;
-static thread_local int collCount = -1;
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 SQ *sqCreate(int length) {
@@ -654,7 +656,7 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
 // TODO: 需要好好利用这里的collId，维护一个map，而不是列表。
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   if (ofcclCommListPanel == 0 && ofcclCommListFront == 0) {
-    memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_ASYNC_PANELS * MAX_ASYNC_OPS); // legacy in ncclGroupStart
+    memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_LENGTH); // legacy in ncclGroupStart
   }
   
   ncclResult_t ret = ncclSuccess;  
@@ -678,9 +680,11 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   }
   seenComms.insert(info->comm);
 
-  ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm = info->comm;
-  // OFCCL_LOG(OFCCL, "i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", ofcclCommListPanel, ofcclCommListFront, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm, &(ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm), info->comm, &(info->comm), ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->nRanks, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->connect);
-  // OFCCL_LOG(OFCCL, "pthread_id=%lu, i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", pthread_self(), ofcclCommListPanel, ofcclCommListFront, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm, &(ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm), info->comm, &(info->comm), ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->nRanks, ofcclCommList[ofcclCommListPanel][ofcclCommListFront].comm->connect);
+  // 调整为插到相应的collId那里。
+  ofcclCommList[collId].comm = info->comm;
+  localCollIds[collCount++] = collId;
+  // OFCCL_LOG(OFCCL, "i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", ofcclCommListPanel, ofcclCommListFront, ofcclCommList[collId].comm, &(ofcclCommList[collId].comm), info->comm, &(info->comm), ofcclCommList[collId].comm->nRanks, ofcclCommList[collId].comm->connect);
+  // OFCCL_LOG(OFCCL, "pthread_id=%lu, i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", pthread_self(), ofcclCommListPanel, ofcclCommListFront, ofcclCommList[collId].comm, &(ofcclCommList[collId].comm), info->comm, &(info->comm), ofcclCommList[collId].comm->nRanks, ofcclCommList[collId].comm->connect);
 
   ofcclCommListFront++;
   if (ofcclCommListFront >= MAX_ASYNC_OPS) {
@@ -795,34 +799,26 @@ ncclResult_t ofcclPrepareDone() {
   // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev is %d", pthread_self(), thrdCudaDev);
   ncclResult_t ret = ncclSuccess;
 
-  int front_of_panel = -1;
+  // int front_of_panel = -1;
 
   // ***** ncclAsyncThreadPreconnect threads *****
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      // OFCCL_LOG(OFCCL, "i=%d, j=%d, ofcclCommListPanel=%d, ofcclCommListFront=%d, tempcomm=%p(at %p), args.comm->connect=%d", i, j, ofcclCommListPanel, ofcclCommListFront, ofcclCommList[i][j].comm, &(ofcclCommList[i][j].comm), args.comm->connect);
-      // OFCCL_LOG(OFCCL, "i=%d, j=%d, ofcclCommListPanel=%d, ofcclCommListFront=%d, tempcomm=%p(at %p)", i, j, ofcclCommListPanel, ofcclCommListFront, ofcclCommList[i][j].comm, &(ofcclCommList[i][j].comm));
-      // ***** 目前应该是不会执行 *****
-      if (args.comm->connect) {
-        pthread_create(&ofcclPrepareThreads[i][j], NULL, ofcclAsyncThreadPreconnect, &args);
-      }
+  for (int i = 0; i < collCount; i++) {
+    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    // ***** 目前应该是不会执行 *****
+    if (args.comm->connect) {
+      pthread_create(&ofcclPrepareThreads[localCollIds[i]], NULL, ofcclAsyncThreadPreconnect, &args);
     }
   }
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      if (args.comm->connect) {
-        int err = pthread_join(ofcclPrepareThreads[i][j], NULL);
-        if (err != 0) {
-          OFCCL_LOG(OFCCL_WARN, "Error waiting for pthread_join : %s", strerror(errno));
-          return ncclSystemError;
-        }
-        NCCLCHECKGOTO(args.ret, ret, end);
-        args.comm->connect = 0;
-        }
+  for (int i = 0; i < collCount; i++) {
+    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    if (args.comm->connect) {
+      int err = pthread_join(ofcclPrepareThreads[localCollIds[i]], NULL);
+      if (err != 0) {
+        OFCCL_LOG(OFCCL_WARN, "Error waiting for pthread_join : %s", strerror(errno));
+        return ncclSystemError;
+      }
+      NCCLCHECKGOTO(args.ret, ret, end);
+      args.comm->connect = 0;
     }
   }
 
@@ -830,65 +826,56 @@ ncclResult_t ofcclPrepareDone() {
   // ***** Skip related methods like scheduleRecv(), ncclSetupP2pKernel(), etc *****
 
   // ***** first for loop *****
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      ncclComm_t comm = args.comm;
-      NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
-    }
+  for (int i = 0; i < collCount; i++) {
+    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    ncclComm_t comm = args.comm;
+    NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
   }
   
   // ***** second for loop *****
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      ncclComm_t comm = args.comm;
+  for (int i = 0; i < collCount; i++) {
+    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    ncclComm_t comm = args.comm;
 
-      // ***** omit cudaSetDevice related to stream *****
-      // ***** omit ncclCudaGraphHostSetup *****
+    // ***** omit cudaSetDevice related to stream *****
+    // ***** omit ncclCudaGraphHostSetup *****
 
-      // ***** ncclEnqueueHostSetup<0> *****
-      ofcclEnqueueHostSetup(comm->enqueueInfo);
+    // ***** ncclEnqueueHostSetup<0> *****
+    ofcclEnqueueHostSetup(comm->enqueueInfo);
 
-      // ***** omit ncclLaunchBarrier *****
-    }
+    // ***** omit ncclLaunchBarrier *****
   }
 
   // ***** check & 构建任务列表 *****
-  for (int i = 0; i <= ofcclCommListPanel; i++) {
-    front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_OPS : ofcclCommListFront;
-    for (int j = 0; j < front_of_panel; j++) {
-      ofcclCommArgs args = ofcclCommList[i][j];
-      ncclComm_t comm = args.comm;
-      struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
-      if (eqInfo->elemList->count() > 1) {
-        ret = ncclInvalidUsage;
-        OFCCL_LOG1(OFCCL_WARN, "eqInfo->elemList->count() shouldn't be larger than 1");
-        goto end;
-      }
-      for (int k = 0; k < eqInfo->maxChannels; k++) {
-        struct ncclChannel channel = comm->channels[k];
-        // %NCCL_MAX_OPS
-        // OFCCL_LOG(OFCCL, "pthread_id=%lu, %dth comm(comm->nChannels=%d), %dth channel, channel.workCount=%d, channel.workFifoTail=%lu, channel.index=%u", pthread_self(), j, comm->nChannels, k, channel.workCount, channel.workFifoTail, channel.index);
-        for (int l = 0; l < channel.workFifoTail; l++) {
-          if (l > 1) {
+  for (int i = 0; i < collCount; i++) {
+    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    ncclComm_t comm = args.comm;
+    struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
+    if (eqInfo->elemList->count() > 1) {
+      ret = ncclInvalidUsage;
+      OFCCL_LOG1(OFCCL_WARN, "eqInfo->elemList->count() shouldn't be larger than 1");
+      goto end;
+    }
+    for (int k = 0; k < eqInfo->maxChannels; k++) {
+      struct ncclChannel channel = comm->channels[k];
+      // %NCCL_MAX_OPS
+      // OFCCL_LOG(OFCCL, "pthread_id=%lu, %dth comm(comm->nChannels=%d), %dth channel, channel.workCount=%d, channel.workFifoTail=%lu, channel.index=%u", pthread_self(), j, comm->nChannels, k, channel.workCount, channel.workFifoTail, channel.index);
+      for (int l = 0; l < channel.workFifoTail; l++) {
+        if (l > 1) {
+          ret = ncclInvalidUsage;
+          OFCCL_LOG1(OFCCL_WARN, "channel.workFifoTail shouldn't be larger than 1");
+          goto end;
+        }
+        ncclWork *work = channel.workFifo + l;
+        
+        for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
+          if (e > 1) {
             ret = ncclInvalidUsage;
-            OFCCL_LOG1(OFCCL_WARN, "channel.workFifoTail shouldn't be larger than 1");
+            OFCCL_LOG1(OFCCL_WARN, "channel.workFifo[0].elems's count shouldn't be larger than 1");
             goto end;
           }
-          ncclWork *work = channel.workFifo + l;
-          
-          for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && work->elems[e].header.type != ncclWorkTypeUnused; e += 1) {
-            if (e > 1) {
-              ret = ncclInvalidUsage;
-              OFCCL_LOG1(OFCCL_WARN, "channel.workFifo[0].elems's count shouldn't be larger than 1");
-              goto end;
-            }
-            // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
-            // TODO: 构建任务列表
-          }
+          // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
+          // TODO: 构建任务列表
         }
       }
     }
@@ -1010,7 +997,7 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
 //   for (int i = 0; i <= ofcclCommListPanel; i++) {
 //     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_PANELS : ofcclCommListFront;
 //     for (int j = 0; j < front_of_panel; j++) {
-//       ofcclCommArgs args = ofcclCommList[i][j];
+//       ofcclCommArgs args = ofcclCommList[localCollIds[i]];
 //       ncclComm_t comm = args.comm;
 //       int node = comm->node;
 //       int nNodes = comm->nNodes;
