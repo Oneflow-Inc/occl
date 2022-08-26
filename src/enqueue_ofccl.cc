@@ -886,33 +886,32 @@ ncclResult_t ofcclPrepareDone() {
 
   // TODO: 指定参数
   queueLength = 4;
-  collCount = ofcclCommListFront + ofcclCommListPanel * MAX_ASYNC_OPS;
 
   // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls", pthread_self(), thrdCudaDev, collCount);
   
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
 
-  checkRuntime(cudaMalloc(&cqes, collCount * sizeof(CQE)));
-  tempCqes = (CQE *)calloc(collCount, sizeof(CQE));
-  // TODO: ！！！！！在复杂场景中，每个rank看到的collId未必是连续的！！！！
+  checkRuntime(cudaMalloc(&cqes, MAX_LENGTH * sizeof(CQE)));
+  tempCqes = (CQE *)calloc(MAX_LENGTH, sizeof(CQE));
   for (int i = 0; i < collCount; i++) {
-    // TODO: 需要和传进来的comm的id联动。
-    tempCqes[i].collId = i;
+    int collId = localCollIds[i];
+    tempCqes[collId].collId = collId;
   }
-  checkRuntime(cudaMemcpy(cqes, tempCqes, collCount * sizeof(CQE), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMemcpy(cqes, tempCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
   
   daemonKernelGridDim.x = 4;
   daemonKernelBlockDim.x = 8;
 
-  checkRuntime(cudaMalloc(&BlkCount4Coll, collCount * sizeof(int)));
-  tempBlkCount4Coll = (int *)malloc(collCount * sizeof(int));
+  checkRuntime(cudaMalloc(&BlkCount4Coll, MAX_LENGTH * sizeof(int)));
+  tempBlkCount4Coll = (int *)malloc(MAX_LENGTH * sizeof(int));
   for (int i = 0; i < collCount; i++) {
     // TODO: 需要和实际的集合通信的解析结果联动
-    tempBlkCount4Coll[i] = testBlkCnt4Coll(i);
-    // OFCCL_LOG(OFCCL, "<%lu> rank=%d tempBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, i, tempBlkCount4Coll[i]);
+    int collId = localCollIds[i];
+    tempBlkCount4Coll[collId] = testBlkCnt4Coll(collId);
+    // OFCCL_LOG(OFCCL, "<%lu> rank=%d tempBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, tempBlkCount4Coll[collId]);
   }
-  checkRuntime(cudaMemcpy(BlkCount4Coll, tempBlkCount4Coll, collCount * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMemcpy(BlkCount4Coll, tempBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
   // make sure Memcpy to BlkCount4Coll finish
   checkRuntime(cudaStreamCreate(&kernelStream));
