@@ -48,6 +48,8 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
+#define tempPrintRound 100000
+
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
 // static thread_local int CpuSleepUs = 1e6;
@@ -77,7 +79,7 @@ typedef struct {
 SQ *sqCreate(int length);
 void sqDestroy(SQ *sq);
 // SQ read by device, written by host;
-__device__ int sqRead(SQ *sq, unsigned long long int readFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
+__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
 int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs);
 
 typedef struct {

@@ -573,7 +573,7 @@ void sqDestroy(SQ *sq) {
 }
 
 int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs) {
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
   pthread_mutex_lock(&sq->mutex);
 
   if (RingBuffer_full(sq)) {
@@ -583,12 +583,12 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *call
   }
   sqe->logicHead = (int)RingBuffer_logic_tail(sq);
   *RingBuffer_get_tail(sq) = *sqe;
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
 
   __sync_synchronize();
 
   sq->tail += 1;
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -622,10 +622,11 @@ void cqDestroy(CQ *cq) {
     checkRuntime(cudaFreeHost(cq));
   }
 }
-
+// thread_local static int tempRound = 0;
 int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
   pthread_mutex_lock(&cq->mutex);
-  // OFCCL_LOG(OFCCL, "<%lu> enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu, headCollId=%d, wait for %d", pthread_self(), RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq), RingBuffer_get_head(cq)->collId, collId);
+  // tempRound++;
+  // if(tempRound % tempPrintRound == 0) OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), thrdCudaDev, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
 
   if (RingBuffer_empty(cq)) {
     pthread_mutex_unlock(&cq->mutex);
@@ -735,7 +736,7 @@ void *startKernel(void *args) {
 
   // TODO: 之后考虑按需启停kernel
   
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
 
   argsptrs[0] = &sq;
   argsptrs[1] = &cq;
@@ -780,7 +781,8 @@ void *startPoller(void *args) {
       sched_yield();
     } else {
       int collId = target.collId;
-      OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d", pthread_self(), thrdCudaDev, collId);
+      // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
+      OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
       callbacks[collId](collId, callbackArgList[collId]);
     }
   }

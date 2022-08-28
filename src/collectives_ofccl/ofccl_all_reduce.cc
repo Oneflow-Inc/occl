@@ -30,12 +30,12 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   int thrdCudaDev;
   checkRuntime(cudaGetDevice(&thrdCudaDev));
   
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
   while (sqWrite(sq, &sqe, thrdCudaDev, callback, callbackArgs) == -1) {
 
   }
-  OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);
 
   return ncclSuccess;
 }
