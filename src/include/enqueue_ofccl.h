@@ -18,6 +18,9 @@
 #define MAX_ASYNC_OPS 128
 // 10000应该是大于大多数任务中会使用的集合通信的数目了。
 #define MAX_LENGTH 10000
+// 队列长度搞大些，反正目前也不缺这点显存。
+#define QLen 10000
+#define tempPrintRound 100000
 
 struct ofcclCommArgs {
   ncclResult_t ret;
@@ -48,7 +51,6 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
-#define tempPrintRound 100000
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;

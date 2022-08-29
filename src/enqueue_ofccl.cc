@@ -386,6 +386,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     elem->bid = bid % nChannels;
     struct ncclWork* w = NULL;
     int segment = -1;
+    // 原来的nccl代码中，这里会尝试设置一个更大的segment：Try to pack more segments into a single operation
     if (segment == -1) {
       NCCLCHECK(ofGetNextOp(channel, &w, NULL));
       segment = 0;
@@ -493,6 +494,7 @@ static void CUDART_CB ofcclEnqueueHostSetup(void* arg) {
 
   if (eqInfo->elemList->count() > 1) {
     OFCCL_LOG(OFCCL_WARN, "eqInfo->elemList->count()=%d, but should not > 1", eqInfo->elemList->count());
+    ret = ncclInvalidUsage;
     goto cb_end;
   }
 
@@ -514,7 +516,6 @@ cb_end:
 } // namespace
 
 // TODO: 之后考虑搞一个Context整理起来。
-// TODO: ofcclCommList看看情况是不是需要声明成指针，动态分配。
 static thread_local ofcclCommArgs ofcclCommList[MAX_LENGTH];
 static thread_local pthread_t ofcclPrepareThreads[MAX_LENGTH];
 static thread_local int localCollIds[MAX_LENGTH];
@@ -550,7 +551,7 @@ thread_local CallbackFunc *callbacks;
 // Configs
 static thread_local dim3 daemonKernelGridDim;
 static thread_local dim3 daemonKernelBlockDim;
-static thread_local int queueLength = -1;
+static thread_local int queueLength = QLen;
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 SQ *sqCreate(int length) {
@@ -653,7 +654,6 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
   return args;
 }
 
-// TODO: 需要好好利用这里的collId，维护一个map，而不是列表。
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   if (ofcclCommListPanel == 0 && ofcclCommListFront == 0) {
     memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_LENGTH); // legacy in ncclGroupStart
@@ -883,9 +883,6 @@ ncclResult_t ofcclPrepareDone() {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  // TODO: 指定参数
-  queueLength = 4;
-
   // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls", pthread_self(), thrdCudaDev, collCount);
   
   sq = sqCreate(queueLength);
@@ -899,14 +896,15 @@ ncclResult_t ofcclPrepareDone() {
   }
   checkRuntime(cudaMemcpy(cqes, tempCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
   
+  // TODO: 需要和实际的集合通信的解析结果联动
   daemonKernelGridDim.x = 4;
   daemonKernelBlockDim.x = 8;
 
   checkRuntime(cudaMalloc(&BlkCount4Coll, MAX_LENGTH * sizeof(int)));
   tempBlkCount4Coll = (int *)malloc(MAX_LENGTH * sizeof(int));
   for (int i = 0; i < collCount; i++) {
-    // TODO: 需要和实际的集合通信的解析结果联动
     int collId = localCollIds[i];
+    // TODO: 需要和实际的集合通信的解析结果联动
     tempBlkCount4Coll[collId] = testBlkCnt4Coll(collId);
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d tempBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, tempBlkCount4Coll[collId]);
   }
@@ -938,7 +936,7 @@ ncclResult_t ofcclDestroy() {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
-  // TODO: 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
+  // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
   sqWrite(sq, &sqe, thrdCudaDev, nullptr, nullptr);
 
@@ -992,6 +990,7 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
   return ncclSuccess;
 }
 
+// 下边这部分主要是和单点的send、recv相关，所以目前没有支持。
 //   for (int i = 0; i <= ofcclCommListPanel; i++) {
 //     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_PANELS : ofcclCommListFront;
 //     for (int j = 0; j < front_of_panel; j++) {

@@ -120,7 +120,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
 
         // 等待所有线程报告工作完成，0线程可以报告当前blk工作完成。
         // 然后协调所有blk，发现所有blk都完成，最后一个blk发送CQE
-        // TODO: 需要一个localCollIndex和CollId的对应关系
         int old_counter = atomicAdd(&(cqes[target.collId].counter), 1);
         __threadfence(); // cqes在global memory里边，全部thread关心。
 
