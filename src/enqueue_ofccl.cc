@@ -22,7 +22,7 @@
 #include <pthread.h> // pthread_self()
 #include <math.h> // floor()
 #include <sched.h>
-#include <unordered_map>
+#include <algorithm> // max
 #include <unordered_set>
 
 static void *const ofcclKerns[1] = {
@@ -435,7 +435,7 @@ static ncclResult_t ofcclSetupLaunch(struct ncclQueueInfo* eqInfo) {
     // }
     channel->workFifo[(channel->workFifoTail-1)%NCCL_MAX_OPS].header.isLast = 1;
 
-    // ***** 把第一个channel里的“正常操作”清零了，我们应该不需要这样。 *****
+    // ***** 把最后一个channel里的“正常操作”清零了，我们应该不需要这样。 *****
     // if (c == 0) {
     //   // As we inline the first coll directly, we can free it immediately.
     //   // Except P2P or aggregation or registration cases
@@ -521,19 +521,25 @@ static thread_local pthread_t ofcclPrepareThreads[MAX_LENGTH];
 static thread_local int localCollIds[MAX_LENGTH];
 static thread_local int collCount = 0;
 static thread_local std::unordered_set<ncclComm_t> seenComms;
-static thread_local int ofcclCommListPanel = 0;
-static thread_local int ofcclCommListFront = 0;
+
+static thread_local dim3 daemonKernelGridDim;
+static thread_local dim3 daemonKernelBlockDim;
+static thread_local int queueLength = QLen;
+static thread_local dim3 gridDim4Coll[MAX_LENGTH];
+static thread_local dim3 blockDim4Coll[MAX_LENGTH];
 
 static thread_local pthread_t kernelThrd;
 static thread_local CQE *tempCqes = nullptr;
 static thread_local int *tempBlkCount4Coll = nullptr;
-static thread_local void *argsptrs[5];
+static thread_local int *tempThrdCount4Coll = nullptr;
+static thread_local void *argsptrs[6];
 static thread_local cudaStream_t kernelStream;
 static thread_local ThrdArgs thrdArgs;
 static thread_local int thrdCudaDev;
+static thread_local CQE *cqes;
+static thread_local int *blkCount4Coll;
+static thread_local int *thrdCount4Coll;
 
-thread_local CQE *cqes;
-thread_local int *BlkCount4Coll;
 thread_local SQ *sq;
 thread_local CQ *cq;
 
@@ -548,10 +554,6 @@ static thread_local int *poll_stop;
 static thread_local void **callbackArgList;
 thread_local CallbackFunc *callbacks;
 
-// Configs
-static thread_local dim3 daemonKernelGridDim;
-static thread_local dim3 daemonKernelBlockDim;
-static thread_local int queueLength = QLen;
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 SQ *sqCreate(int length) {
@@ -655,11 +657,19 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
 }
 
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
-  if (ofcclCommListPanel == 0 && ofcclCommListFront == 0) {
+  if (collCount == 0) {
     memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_LENGTH); // legacy in ncclGroupStart
   }
   
-  ncclResult_t ret = ncclSuccess;  
+  ncclResult_t ret = ncclSuccess;
+  
+  if (collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
+    OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d",
+          MAX_LENGTH);
+    ret = ncclInvalidUsage;
+    goto end;
+  }
+
   // Check arguments
   info->comm->checkPointers = false; // we do not assign buff pointers yet.
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
@@ -683,20 +693,6 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
   // 调整为插到相应的collId那里。
   ofcclCommList[collId].comm = info->comm;
   localCollIds[collCount++] = collId;
-  // OFCCL_LOG(OFCCL, "i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", ofcclCommListPanel, ofcclCommListFront, ofcclCommList[collId].comm, &(ofcclCommList[collId].comm), info->comm, &(info->comm), ofcclCommList[collId].comm->nRanks, ofcclCommList[collId].comm->connect);
-  // OFCCL_LOG(OFCCL, "pthread_id=%lu, i = %d, j = %d, tempcomm=%p(at %p), info->comm=%p(at %p), tempcomm->nRanks = %d, tempcomm->connect=%d", pthread_self(), ofcclCommListPanel, ofcclCommListFront, ofcclCommList[collId].comm, &(ofcclCommList[collId].comm), info->comm, &(info->comm), ofcclCommList[collId].comm->nRanks, ofcclCommList[collId].comm->connect);
-
-  ofcclCommListFront++;
-  if (ofcclCommListFront >= MAX_ASYNC_OPS) {
-    ofcclCommListFront = 0;
-    ofcclCommListPanel++;
-    if (ofcclCommListPanel >= MAX_ASYNC_PANELS) {
-      OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d",
-           MAX_ASYNC_PANELS * MAX_ASYNC_OPS);
-      ret = ncclInvalidUsage;
-      goto end;
-    }
-  }
 
   // ***** Ignore *****
   // NCCLCHECKGOTO(checkSetStream(info), ret, end);
@@ -723,7 +719,8 @@ void *startKernel(void *args) {
   sq = ((ThrdArgs *)args)->sq;
   cq = ((ThrdArgs *)args)->cq;
   cqes = ((ThrdArgs *)args)->cqes;
-  BlkCount4Coll = ((ThrdArgs *)args)->BlkCount4Coll;
+  blkCount4Coll = ((ThrdArgs *)args)->blkCount4Coll;
+  thrdCount4Coll = ((ThrdArgs *)args)->thrdCount4Coll;
   kernelStream = ((ThrdArgs *)args)->stream;
 
   // Setup thread_local variables using values from parent thread.
@@ -741,8 +738,9 @@ void *startKernel(void *args) {
   argsptrs[0] = &sq;
   argsptrs[1] = &cq;
   argsptrs[2] = &cqes;
-  argsptrs[3] = &BlkCount4Coll;
-  argsptrs[4] = &thrdCudaDev;
+  argsptrs[3] = &blkCount4Coll;
+  argsptrs[4] = &thrdCount4Coll;
+  argsptrs[5] = &thrdCudaDev;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -752,11 +750,11 @@ void *startKernel(void *args) {
   daemonKernelParam.stream = kernelStream;
   daemonKernelParam.args = argsptrs;
 
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, BlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, BlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, cqes @ %p, blkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, cqes, blkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
-  // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, BlkCount4Coll);
+  // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, cqes, blkCount4Coll);
   
   cudaStreamSynchronize(kernelStream);
 
@@ -782,7 +780,7 @@ void *startPoller(void *args) {
     } else {
       int collId = target.collId;
       // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
-      OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
+      // OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
       callbacks[collId](collId, callbackArgList[collId]);
     }
   }
@@ -846,8 +844,12 @@ ncclResult_t ofcclPrepareDone() {
   }
 
   // ***** check & 构建任务列表 *****
+  daemonKernelGridDim.x = 0;
+  daemonKernelBlockDim.x = 0;
+
   for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+    int collId = localCollIds[i];
+    ofcclCommArgs args = ofcclCommList[collId];
     ncclComm_t comm = args.comm;
     struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
     if (eqInfo->elemList->count() > 1) {
@@ -855,10 +857,18 @@ ncclResult_t ofcclPrepareDone() {
       OFCCL_LOG1(OFCCL_WARN, "eqInfo->elemList->count() shouldn't be larger than 1");
       goto end;
     }
+    
+    struct cudaLaunchParams *params = comm->myParams;
+    daemonKernelGridDim.x = std::max(daemonKernelGridDim.x, params->gridDim.x);
+    daemonKernelBlockDim.x = std::max(daemonKernelBlockDim.x, params->blockDim.x);
+    gridDim4Coll[collId] = params->gridDim;
+    blockDim4Coll[collId] = params->blockDim;
+    
+    // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), thrdCudaDev, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
+
     for (int k = 0; k < eqInfo->maxChannels; k++) {
       struct ncclChannel channel = comm->channels[k];
-      // %NCCL_MAX_OPS
-      // OFCCL_LOG(OFCCL, "pthread_id=%lu, %dth comm(comm->nChannels=%d), %dth channel, channel.workCount=%d, channel.workFifoTail=%lu, channel.index=%u", pthread_self(), j, comm->nChannels, k, channel.workCount, channel.workFifoTail, channel.index);
+    
       for (int l = 0; l < channel.workFifoTail; l++) {
         if (l > 1) {
           ret = ncclInvalidUsage;
@@ -874,7 +884,7 @@ ncclResult_t ofcclPrepareDone() {
             goto end;
           }
           // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
-          // TODO: 构建任务列表
+          
         }
       }
     }
@@ -883,7 +893,7 @@ ncclResult_t ofcclPrepareDone() {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls", pthread_self(), thrdCudaDev, collCount);
+  OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x);
   
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
@@ -895,27 +905,31 @@ ncclResult_t ofcclPrepareDone() {
     tempCqes[collId].collId = collId;
   }
   checkRuntime(cudaMemcpy(cqes, tempCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
-  
-  // TODO: 需要和实际的集合通信的解析结果联动
-  daemonKernelGridDim.x = 4;
-  daemonKernelBlockDim.x = 8;
 
-  checkRuntime(cudaMalloc(&BlkCount4Coll, MAX_LENGTH * sizeof(int)));
+  checkRuntime(cudaMalloc(&blkCount4Coll, MAX_LENGTH * sizeof(int)));
   tempBlkCount4Coll = (int *)malloc(MAX_LENGTH * sizeof(int));
   for (int i = 0; i < collCount; i++) {
     int collId = localCollIds[i];
-    // TODO: 需要和实际的集合通信的解析结果联动
-    tempBlkCount4Coll[collId] = testBlkCnt4Coll(collId);
+    tempBlkCount4Coll[collId] = gridDim4Coll[collId].x;
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d tempBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, tempBlkCount4Coll[collId]);
   }
-  checkRuntime(cudaMemcpy(BlkCount4Coll, tempBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMemcpy(blkCount4Coll, tempBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  // make sure Memcpy to BlkCount4Coll finish
+  checkRuntime(cudaMalloc(&thrdCount4Coll, MAX_LENGTH * sizeof(int)));
+  tempThrdCount4Coll = (int *)malloc(MAX_LENGTH * sizeof(int));
+  for (int i = 0; i < collCount; i++) {
+    int collId = localCollIds[i];
+    tempThrdCount4Coll[collId] = blockDim4Coll[collId].x;
+    // OFCCL_LOG(OFCCL, "<%lu> rank=%d tempBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, tempBlkCount4Coll[collId]);
+  }
+  checkRuntime(cudaMemcpy(thrdCount4Coll, tempThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+
+  // make sure Memcpy to blkCount4Coll finish
   checkRuntime(cudaStreamCreate(&kernelStream));
 
   checkRuntime(cudaDeviceSynchronize());
   
-  thrdArgs = { sq, cq, cqes, BlkCount4Coll, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim };
+  thrdArgs = { sq, cq, cqes, blkCount4Coll, thrdCount4Coll, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim };
   pthread_create(&kernelThrd, NULL, startKernel, &thrdArgs);
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, thrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, thrdArgs.cudaDev);
 
@@ -943,7 +957,7 @@ ncclResult_t ofcclDestroy() {
   pthread_join(kernelThrd, nullptr);
   checkRuntime(cudaFree(cqes));
   free(tempCqes);
-  checkRuntime(cudaFree(BlkCount4Coll));
+  checkRuntime(cudaFree(blkCount4Coll));
   free(tempBlkCount4Coll);
   sqDestroy(sq);
   cqDestroy(cq);
@@ -957,9 +971,7 @@ ncclResult_t ofcclDestroy() {
   free(callbackArgList);
 
   // ***** seems do not need to transverse ofcclCommList *****
-  
-  ofcclCommListPanel = 0;
-  ofcclCommListFront = 0;
+  collCount = 0;
   return ret;
 }
 
@@ -991,100 +1003,97 @@ ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
 }
 
 // 下边这部分主要是和单点的send、recv相关，所以目前没有支持。
-//   for (int i = 0; i <= ofcclCommListPanel; i++) {
-//     front_of_panel = i < ofcclCommListPanel ? MAX_ASYNC_PANELS : ofcclCommListFront;
-//     for (int j = 0; j < front_of_panel; j++) {
-//       ofcclCommArgs args = ofcclCommList[localCollIds[i]];
-//       ncclComm_t comm = args.comm;
-//       int node = comm->node;
-//       int nNodes = comm->nNodes;
-//       int localRank = comm->localRank;
+//   for (int i = 0; i < collCount; i++) {
+//     ofcclCommArgs args = ofcclCommList[localCollIds[i]];
+//     ncclComm_t comm = args.comm;
+//     int node = comm->node;
+//     int nNodes = comm->nNodes;
+//     int localRank = comm->localRank;
 
-//       // Compute how much to split operations
-//       // Natural step size matching buffer steps.
-//       ssize_t stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
-//       // Try to use all channels
-//       int nChannelsMax = comm->p2pnChannelsPerPeer;
-//       int nChannelsMin = nChannelsMax;
-//       // Try to use all channels, but one channel per operation.
-//       while (nChannelsMin*comm->nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
-//       // Avoid overloading channels with 8+ operations as we loose the sync warp, hence a bit of bandwidth.
-//       while (nChannelsMax*comm->nRanks > comm->p2pnChannels*4 && nChannelsMax > 1) nChannelsMax /= 2;
+//     // Compute how much to split operations
+//     // Natural step size matching buffer steps.
+//     ssize_t stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
+//     // Try to use all channels
+//     int nChannelsMax = comm->p2pnChannelsPerPeer;
+//     int nChannelsMin = nChannelsMax;
+//     // Try to use all channels, but one channel per operation.
+//     while (nChannelsMin*comm->nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
+//     // Avoid overloading channels with 8+ operations as we loose the sync warp, hence a bit of bandwidth.
+//     while (nChannelsMax*comm->nRanks > comm->p2pnChannels*4 && nChannelsMax > 1) nChannelsMax /= 2;
 
-//       while (comm->p2pSendCount > 0 || comm->p2pRecvCount > 0) {
-//         // schedule delta 0, +1, -1, +2, -2, ...
-//         // also make sure we don't do 0 twice, nor +n/2 and -n/2 if n is even.
-//         for (int d=0; d<=nNodes/4; d++) {
-//           int deltas[4] = { d, (nNodes-d)%nNodes, nNodes/2-d, (nNodes-(nNodes/2-d))%nNodes };
-//           int index = 0;
-//           int delta = deltas[index];
+//     while (comm->p2pSendCount > 0 || comm->p2pRecvCount > 0) {
+//       // schedule delta 0, +1, -1, +2, -2, ...
+//       // also make sure we don't do 0 twice, nor +n/2 and -n/2 if n is even.
+//       for (int d=0; d<=nNodes/4; d++) {
+//         int deltas[4] = { d, (nNodes-d)%nNodes, nNodes/2-d, (nNodes-(nNodes/2-d))%nNodes };
+//         int index = 0;
+//         int delta = deltas[index];
 // sched_delta:
-//           uint32_t recvNode = (node+nNodes-delta)%nNodes;
-//           uint32_t sendNode = (node+delta)%nNodes;
-//           int steps = comm->maxLocalRanks;
-//           for (int s=0; s<steps; s++) {
-//             int recvIndex = (localRank-s+steps)%steps;
-//             int recvPeer = recvIndex<comm->nodeRanks[recvNode].localRanks ? comm->nodeRanks[recvNode].localRankToRank[recvIndex] : -1;
-//             int sendIndex = (localRank+s)%steps;
-//             int sendPeer = sendIndex<comm->nodeRanks[sendNode].localRanks ? comm->nodeRanks[sendNode].localRankToRank[sendIndex] : -1;
-//             struct ncclP2Pinfo* recv = recvPeer != -1 && comm->p2pRecvs[recvPeer] ? comm->p2pRecvs[recvPeer]->getNext() : NULL;
-//             struct ncclP2Pinfo* send = sendPeer != -1 && comm->p2pSends[sendPeer] ? comm->p2pSends[sendPeer]->getNext() : NULL;
-//             if (recv != NULL || send != NULL) {
-//               ssize_t totRecvBytes = -1, totSendBytes = -1;
-//               if (recv != NULL) totRecvBytes = recv->nbytes;
-//               if (send != NULL) totSendBytes = send->nbytes;
-//               if (recv) comm->p2pRecvCount--;
-//               if (send) comm->p2pSendCount--;
-//               if (recvPeer == comm->rank) { // Check self send/recv
-//                 if (sendPeer != comm->rank) { OFCCL_LOG1(OFCCL_WARN, "Sendrecv schedule not aligned for self"); ret = ncclInternalError; goto group_cleanup; }
-//                 if (send && recv == NULL) { OFCCL_LOG1(OFCCL_WARN, "Trying to send to self without a matching recv"); ret = ncclInvalidUsage; goto group_cleanup; }
-//                 if (send == NULL && recv) { OFCCL_LOG1(OFCCL_WARN, "Trying to recv to self without a matching send"); ret = ncclInvalidUsage; goto group_cleanup; }
-//               }
-//               void* recvBuff = recv ? recv->buff : NULL;
-//               void* sendBuff = send ? send->buff : NULL;
-//               // After we recycle p2pSend/Recv, we're no longer allowed to dereference send or recv, only use them as boolean NULL/not NULL.
-//               if (recv && comm->p2pRecvs[recvPeer]->peakNext() == NULL) comm->p2pRecvs[recvPeer]->recycle();
-//               if (send && comm->p2pSends[sendPeer]->peakNext() == NULL) comm->p2pSends[sendPeer]->recycle();
-
-//               ssize_t recvChunkSize = getP2pChunkSize(totRecvBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
-//               ssize_t sendChunkSize = getP2pChunkSize(totSendBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
-
-//               ssize_t sendOffset = 0;
-//               ssize_t recvOffset = 0;
-//               int sendRemaining = 1, recvRemaining = 1;
-//               int chunk = 0;
-//               do {
-//                 // Shuffle channels with s intra-node, and delta inter-node. Inter-node, make sure
-//                 // to use multiple channels to guarantee progress on all ranks from the same node.
-//                 ssize_t recvbytes = totRecvBytes-recvOffset;
-//                 ssize_t sendbytes = totSendBytes-sendOffset;
-//                 if (recvbytes > recvChunkSize) { recvbytes = recvChunkSize; } else { recvRemaining = 0; }
-//                 if (sendbytes > sendChunkSize) { sendbytes = sendChunkSize; } else { sendRemaining = 0; }
-//                 // 0-bytes send/recv are considered as syncs. Make sure we only add syncs when requested
-//                 // (total size == 0), otherwise set size to -1.
-//                 if (sendbytes < 0 || (sendbytes == 0 && totSendBytes != 0)) send = NULL;
-//                 if (recvbytes < 0 || (recvbytes == 0 && totRecvBytes != 0)) recv = NULL;
-//                 if (recv) {
-//                   NCCLCHECKGOTO(scheduleRecv(comm, recvPeer, chunk, recvbytes, ((char*)recvBuff)+recvOffset), ret, group_cleanup);
-//                 }
-//                 if (send) {
-//                   NCCLCHECKGOTO(scheduleSend(comm, sendPeer, chunk, sendbytes, ((char*)sendBuff)+sendOffset), ret, group_cleanup);
-//                 }
-//                 recvOffset += recvChunkSize;
-//                 sendOffset += sendChunkSize;
-//                 chunk++;
-//               } while (sendRemaining || recvRemaining);
+//         uint32_t recvNode = (node+nNodes-delta)%nNodes;
+//         uint32_t sendNode = (node+delta)%nNodes;
+//         int steps = comm->maxLocalRanks;
+//         for (int s=0; s<steps; s++) {
+//           int recvIndex = (localRank-s+steps)%steps;
+//           int recvPeer = recvIndex<comm->nodeRanks[recvNode].localRanks ? comm->nodeRanks[recvNode].localRankToRank[recvIndex] : -1;
+//           int sendIndex = (localRank+s)%steps;
+//           int sendPeer = sendIndex<comm->nodeRanks[sendNode].localRanks ? comm->nodeRanks[sendNode].localRankToRank[sendIndex] : -1;
+//           struct ncclP2Pinfo* recv = recvPeer != -1 && comm->p2pRecvs[recvPeer] ? comm->p2pRecvs[recvPeer]->getNext() : NULL;
+//           struct ncclP2Pinfo* send = sendPeer != -1 && comm->p2pSends[sendPeer] ? comm->p2pSends[sendPeer]->getNext() : NULL;
+//           if (recv != NULL || send != NULL) {
+//             ssize_t totRecvBytes = -1, totSendBytes = -1;
+//             if (recv != NULL) totRecvBytes = recv->nbytes;
+//             if (send != NULL) totSendBytes = send->nbytes;
+//             if (recv) comm->p2pRecvCount--;
+//             if (send) comm->p2pSendCount--;
+//             if (recvPeer == comm->rank) { // Check self send/recv
+//               if (sendPeer != comm->rank) { OFCCL_LOG1(OFCCL_WARN, "Sendrecv schedule not aligned for self"); ret = ncclInternalError; goto group_cleanup; }
+//               if (send && recv == NULL) { OFCCL_LOG1(OFCCL_WARN, "Trying to send to self without a matching recv"); ret = ncclInvalidUsage; goto group_cleanup; }
+//               if (send == NULL && recv) { OFCCL_LOG1(OFCCL_WARN, "Trying to recv to self without a matching send"); ret = ncclInvalidUsage; goto group_cleanup; }
 //             }
+//             void* recvBuff = recv ? recv->buff : NULL;
+//             void* sendBuff = send ? send->buff : NULL;
+//             // After we recycle p2pSend/Recv, we're no longer allowed to dereference send or recv, only use them as boolean NULL/not NULL.
+//             if (recv && comm->p2pRecvs[recvPeer]->peakNext() == NULL) comm->p2pRecvs[recvPeer]->recycle();
+//             if (send && comm->p2pSends[sendPeer]->peakNext() == NULL) comm->p2pSends[sendPeer]->recycle();
+
+//             ssize_t recvChunkSize = getP2pChunkSize(totRecvBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
+//             ssize_t sendChunkSize = getP2pChunkSize(totSendBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
+
+//             ssize_t sendOffset = 0;
+//             ssize_t recvOffset = 0;
+//             int sendRemaining = 1, recvRemaining = 1;
+//             int chunk = 0;
+//             do {
+//               // Shuffle channels with s intra-node, and delta inter-node. Inter-node, make sure
+//               // to use multiple channels to guarantee progress on all ranks from the same node.
+//               ssize_t recvbytes = totRecvBytes-recvOffset;
+//               ssize_t sendbytes = totSendBytes-sendOffset;
+//               if (recvbytes > recvChunkSize) { recvbytes = recvChunkSize; } else { recvRemaining = 0; }
+//               if (sendbytes > sendChunkSize) { sendbytes = sendChunkSize; } else { sendRemaining = 0; }
+//               // 0-bytes send/recv are considered as syncs. Make sure we only add syncs when requested
+//               // (total size == 0), otherwise set size to -1.
+//               if (sendbytes < 0 || (sendbytes == 0 && totSendBytes != 0)) send = NULL;
+//               if (recvbytes < 0 || (recvbytes == 0 && totRecvBytes != 0)) recv = NULL;
+//               if (recv) {
+//                 NCCLCHECKGOTO(scheduleRecv(comm, recvPeer, chunk, recvbytes, ((char*)recvBuff)+recvOffset), ret, group_cleanup);
+//               }
+//               if (send) {
+//                 NCCLCHECKGOTO(scheduleSend(comm, sendPeer, chunk, sendbytes, ((char*)sendBuff)+sendOffset), ret, group_cleanup);
+//               }
+//               recvOffset += recvChunkSize;
+//               sendOffset += sendChunkSize;
+//               chunk++;
+//             } while (sendRemaining || recvRemaining);
 //           }
-//           index++;
-//           if (index == 1 && deltas[1] == deltas[0]) index++;
-//           if (index == 2 && deltas[2] == deltas[0]) index++;
-//           if (index == 3 && deltas[3] == deltas[2]) index++;
-//           if (index == 3 && deltas[3] == deltas[1]) index++;
-//           if (index < 4) {
-//             delta = deltas[index];
-//             goto sched_delta;
-//           }
+//         }
+//         index++;
+//         if (index == 1 && deltas[1] == deltas[0]) index++;
+//         if (index == 2 && deltas[2] == deltas[0]) index++;
+//         if (index == 3 && deltas[3] == deltas[2]) index++;
+//         if (index == 3 && deltas[3] == deltas[1]) index++;
+//         if (index < 4) {
+//           delta = deltas[index];
+//           goto sched_delta;
 //         }
 //       }
 //     }

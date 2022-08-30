@@ -2,12 +2,7 @@
 
 static __shared__ int quit;
 
-extern thread_local CQE *cqes;
-extern thread_local int *BlkCount4Coll;
-extern thread_local SQ *sq;
-extern thread_local CQ *cq;
-
-__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev) {
+__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *blkCount4Coll, int thrdCudaDev) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int sqeCollId;
@@ -18,14 +13,14 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
   *target = *RingBuffer_get(sq, sqReadFrontier);
   if (target->quit) {
-    OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, tid);
+    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, tid);
     return 0;
   }
 
   // 先判断一下相应的collId是不是该自己的bid处理，不该自己处理直接返回-1
   sqeCollId = target->collId;
-  // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> BlkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, BlkCount4Coll[sqeCollId]);
-  if (bid >= BlkCount4Coll[sqeCollId]) {
+  // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> blkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, blkCount4Coll[sqeCollId]);
+  if (bid >= blkCount4Coll[sqeCollId]) {
     return -1;
   } else {
     // 自己读到之后，更新相应的counter；至于读到的sqe对应的collId是不是该自己处理，是caller的事。
@@ -35,8 +30,8 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
     // RingBuffer_get(sq, sqReadFrontier)->counter += 1;
     __threadfence_system();
     // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
-    // if (RingBuffer_get(sq, sqReadFrontier)->counter == BlkCount4Coll[sqeCollId]) {
-    if (old_counter + 1 == BlkCount4Coll[sqeCollId]) {
+    // if (RingBuffer_get(sq, sqReadFrontier)->counter == blkCount4Coll[sqeCollId]) {
+    if (old_counter + 1 == blkCount4Coll[sqeCollId]) {
       // RingBuffer_commit_read(sq, 1);
       unsigned long long int old_head = atomicAdd(&sq->head, 1);
 
@@ -72,12 +67,15 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 
-__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *blkCount4Coll, int *thrdCount4Coll, int thrdCudaDev) {
   uint64_t round = 0;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   unsigned long long int sqReadFrontier = 0;
   // int tempRound = 0;
+
+  // TODO: 构建任务列表
+
   while (true) {
     if (tid == 0) {
       if (round++ == 0) {
@@ -94,14 +92,14 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
         // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
         sqReadFrontier = sq->head;
       }
-      if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, BlkCount4Coll, thrdCudaDev) == -1) {
+      if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, blkCount4Coll, thrdCudaDev) == -1) {
         goto thrd_common;
       } else {
         sqReadFrontier++;
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get collId %d, sqReadFrontier updates to %llu", thrdCudaDev, bid, tid, target.collId, GetLogicFrontier(sq, sqReadFrontier));
         if (target.quit) {
           quit = 1;
-          OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
+          // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
           goto thrd_common;
         }
 
@@ -123,7 +121,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
         int old_counter = atomicAdd(&(cqes[target.collId].counter), 1);
         __threadfence(); // cqes在global memory里边，全部thread关心。
 
-        if (old_counter + 1 == BlkCount4Coll[target.collId]) {
+        if (old_counter + 1 == blkCount4Coll[target.collId]) {
           atomicExch(&cqes[target.collId].counter, 0);
           while (cqWrite(cq, cqes + target.collId, thrdCudaDev) == -1) {
             // tempRound++;
@@ -131,7 +129,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
 
           }
           // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
-          OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
           __threadfence();
         }
       }
@@ -140,7 +138,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int 
 thrd_common:
     __syncthreads();
     if (quit == 1) {
-      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
+      // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
       return;
     }
   }

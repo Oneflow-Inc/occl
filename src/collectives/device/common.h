@@ -70,7 +70,7 @@ __device__ int copyToShmem(T *dst, T const *src, int turn=0) {
   n -= t;
   d += t;
   s += t;
-  #pragma unroll
+  #pragma unroll // 指示要循环展开。
   for (int i=0; i < divUp(sizeof(T), WARP_SIZE*sizeof(uint64_t)); i++) {
     if (n > 0) {
       *d = *s;

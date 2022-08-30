@@ -107,7 +107,8 @@ typedef struct {
   SQ *sq;
   CQ *cq;
   CQE *cqes;
-  int *BlkCount4Coll;
+  int *blkCount4Coll;
+  int *thrdCount4Coll;
   cudaStream_t stream;
   int cudaDev;
   dim3 gridDim;
@@ -129,7 +130,7 @@ typedef struct {
 //   int gotCqe;
 // } CallBackArgs;
 
-__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *BlkCount4Coll, int thrdCudaDev);
+__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *blkCount4Coll, int *thrdCount4Coll, int thrdCudaDev);
 
 
 
