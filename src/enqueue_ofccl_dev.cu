@@ -148,9 +148,9 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 
 // share mem用超了。
 static __shared__ ofcclShmemData ofcclShmem;
-// static __shared__ int sharedCollIds[MAX_LENGTH];
-// static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
-// static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
+static __shared__ int sharedCollIds[MAX_LENGTH];
+static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
+static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
 
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem) {
   uint64_t round = 0;
@@ -161,13 +161,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   // TODO: 构建任务列表
   for (int i = 0; i < collCount; i++) {
-    int collId = globalCollIds[i];
+    int collId = sharedCollIds[i] = globalCollIds[i];
     // 这两个变量会限制很多行为。
-    int blkLimit = globalBlkCount4Coll[collId];
-    int thrdLimit = globalThrdCount4Coll[collId];
-    // sharedCollIds[i] = 
-    // sharedBlkCount4Coll[collId] = 
-    // sharedThrdCount4Coll[collId] = 
+    int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
+    int thrdLimit = sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
     int nthreads = thrdLimit; // 需要按不同的集合通信分别指定。
     int turn;
 
@@ -177,6 +174,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (bid < blkLimit && tid < thrdLimit) {
       ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
       turn = copyToShmemLoop(&(globalShmem4Blk7Coll->comm), comm, tid, nthreads);
+      turn = copyToShmemLoop(&(ofcclShmem.comm), comm, tid, nthreads);
       // 不明白为啥能这样强转：get address of channel without incurring indirect load from ncclDevComm::channels
       // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
       ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
@@ -219,8 +217,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
         sqReadFrontier = sq->head;
       }
-      // if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, sharedBlkCount4Coll, thrdCudaDev) == -1) {
-        if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, globalBlkCount4Coll, thrdCudaDev) == -1) {
+      if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, sharedBlkCount4Coll, thrdCudaDev) == -1) {
         goto thrd_common;
       } else {
         sqReadFrontier++;
@@ -240,17 +237,12 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
 
 
-
-
-
-
         // 等待所有线程报告工作完成，0线程可以报告当前blk工作完成。
         // 然后协调所有blk，发现所有blk都完成，最后一个blk发送CQE
         int old_counter = atomicAdd(&(globalCqes[target.collId].counter), 1);
         __threadfence(); // cqes在global memory里边，全部thread关心。
 
-        // if (old_counter + 1 == sharedBlkCount4Coll[target.collId]) {
-        if (old_counter + 1 == globalBlkCount4Coll[target.collId]) {
+        if (old_counter + 1 == sharedBlkCount4Coll[target.collId]) {
           atomicExch(&globalCqes[target.collId].counter, 0);
           while (cqWrite(cq, globalCqes + target.collId, thrdCudaDev) == -1) {
             // tempRound++;
