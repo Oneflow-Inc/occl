@@ -3,17 +3,19 @@
 
 static __shared__ int quit;
 
+// TODO: nccl最新的代码里，这部分的设计和实现都变了。
 // Copy src to dst and fill extra size with zeroes
+// 这个是保证在一次调用复制完最多512B，并且以16B为单位。
+// 这个不要求src dst同一类型
 template<typename Tdst, typename Tsrc>
-__device__ void copyToShmem(Tdst *dst, Tsrc const *src) { // nccl的这个的函数签名里有个nthreads参数，但是并没有用，应该是为了和下边那个作区分，现在我们可以区分开了，反而带上nthreads是区分不开的。、
-  int tid = threadIdx.x;
+__device__ void copyToShmemOneShot(Tdst *dst, Tsrc const *src, int tid, int nthreads) { // nccl的这个的函数签名里有个nthreads参数，但是并没有用，应该是为了和下边那个作区分，现在我们可以区分开了，反而带上nthreads是区分不开的。
   static_assert(sizeof(Tdst)%(2*sizeof(uint64_t)) == 0 && sizeof(Tsrc)%(2*sizeof(uint64_t)) == 0,
-      "copyToShmem needs sizes which are multiple of 16B");
+      "copyToShmemOneShot needs sizes which are multiple of 16B");
   static_assert(sizeof(Tdst) >= sizeof(Tsrc), "Tdst size is too small");
-  static_assert(sizeof(Tdst) <= WARP_SIZE*2*sizeof(uint64_t), "copyToShmem limited to 512B to make sure it can always be done in one cycle");
+  static_assert(sizeof(Tdst) <= WARP_SIZE*2*sizeof(uint64_t), "copyToShmemOneShot limited to 512B to make sure it can always be done in one cycle");
   uint64_t *d = reinterpret_cast<uint64_t*>(dst);
   uint64_t const *s = reinterpret_cast<uint64_t const*>(src);
-  uint64_t *shmemPtr = shmemCvtPtr_ofccl(d);
+  uint64_t *shmemPtr = shmemCvtPtr_ofccl(d); // 由于这个地方，这个函数只能用于dst是shmem的情况了。
   int offset = 2*tid;
   uint64_t v0, v1;
   if (offset >= sizeof(Tsrc)/sizeof(uint64_t)) {
@@ -24,25 +26,32 @@ __device__ void copyToShmem(Tdst *dst, Tsrc const *src) { // nccl的这个的函
   if (offset < sizeof(Tdst)/sizeof(uint64_t)) storeShmem128_ofccl(shmemPtr+offset, v0, v1);
 }
 
+// 这个可以直接用到任意一轮搞不完的数据结构的复制吧。
+// 这个要求src dst同一类型。
+// turn的作用：   
 template<typename T>
-__device__ int copyToShmem(T *dst, T const *src, int tid, int nthreads, int turn=0) {
+__device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthreads, int turn=0) {
   static_assert(sizeof(uint64_t) <= alignof(T), "Uhoh");
   uint64_t *d = reinterpret_cast<uint64_t*>(dst);
   uint64_t const *s = reinterpret_cast<uint64_t const*>(src);
   int t = tid - turn;
   if (t < 0) t += nthreads;
-  int n = sizeof(T)/sizeof(uint64_t);
+  int n = sizeof(T)/sizeof(uint64_t); // n 代表要复制的数据结构包含了几个8Byte
 
-  int delta = (n + WARP_SIZE-1) & -WARP_SIZE; // round up to warp lane 0
-  if (delta < nthreads) {
+  int delta = (n + WARP_SIZE-1) & -WARP_SIZE; // round up to warp lane 0; 要把n和WARP_SIZE处理对齐了。
+  //  32 = 0000 0000 0010 0000
+  // -32 = 1111 1111 1110 0000，低位不变，高位都置1。大一的东西忘却了。。
+  // 所以delta相当于n相对于32的“向上取整”，即向上取到32的整数倍。
+
+  if (delta < nthreads) { // 总的要传的 8Byte 的个数小于blockDim.x（我们的case里是thrdLimit）
     turn += delta;
-    if (turn >= nthreads) turn -= nthreads;
+    if (turn >= nthreads) turn -= nthreads; // 在第一次调用里这个不会成立，应该是为了后续的调用使用
   }
   else
-    turn = 0;
+    turn = 0; // 如果总的要传的 8Byte 的个数超过了blockDim.x，那就不用管turn了。所以turn就是为了雨露均沾，让所有线程都干活
 
-  n -= t;
-  d += t;
+  n -= t; // 对每个线程来说，砍掉比tid小的几项，不用自己管。
+  d += t; // 对每个线程来说，自己从tid的偏移量开始管。
   s += t;
   #pragma unroll // 指示要循环展开。
   for (int i=0; i < divUp(sizeof(T), WARP_SIZE*sizeof(uint64_t)); i++) {
@@ -50,12 +59,13 @@ __device__ int copyToShmem(T *dst, T const *src, int tid, int nthreads, int turn
       *d = *s;
       d += nthreads;
       s += nthreads;
-      n -= nthreads;
+      n -= nthreads; // “一轮”完成 nthreads个8 Byte的复制。
     }
   }
   return turn;
 }
 
+// 这个的目的应该是在“切片并行复制”之后，恢复标量的语义
 static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
   if (we->header.type != ncclWorkTypeUnused && we->redOpArgIsPtr) {
     /* redOpArg is a pointer to the scalar value, so we'll dereference it
@@ -102,7 +112,6 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
     // 如果发现自己读完之后，所有block都读了，那么commit read
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> PREPARE to increase counter(curr=%d) for sqe of collId %d", thrdCudaDev, bid, tid, RingBuffer_get(sq, sqReadFrontier)->counter, sqeCollId);
     int old_counter = atomicAdd(&(RingBuffer_get(sq, sqReadFrontier)->counter), 1);
-    // RingBuffer_get(sq, sqReadFrontier)->counter += 1;
     __threadfence_system();
     // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
     
@@ -119,7 +128,6 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
 }
 
 __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
-  // the first thread of a block do this.
   // int bid = blockIdx.x;
   // int tid = threadIdx.x;
   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> enter cqRead, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
@@ -138,13 +146,13 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
   return 0;
 }
 
-// TODO: share mem用超了。
+// share mem用超了。
 static __shared__ ofcclShmemData ofcclShmem;
-static __shared__ int sharedCollIds[MAX_LENGTH];
-static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
-static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
+// static __shared__ int sharedCollIds[MAX_LENGTH];
+// static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
+// static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
 
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem) {
   uint64_t round = 0;
   int bid = blockIdx.x;
   int tid = threadIdx.x;
@@ -153,36 +161,45 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   // TODO: 构建任务列表
   for (int i = 0; i < collCount; i++) {
-    int collId = sharedCollIds[i] = globalCollIds[i];
+    int collId = globalCollIds[i];
     // 这两个变量会限制很多行为。
-    int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
-    int thrdLimit = sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
-
+    int blkLimit = globalBlkCount4Coll[collId];
+    int thrdLimit = globalThrdCount4Coll[collId];
+    // sharedCollIds[i] = 
+    // sharedBlkCount4Coll[collId] = 
+    // sharedThrdCount4Coll[collId] = 
     int nthreads = thrdLimit; // 需要按不同的集合通信分别指定。
+    int turn;
 
-  //   // ***** 移植ncclKernel的逻辑 *****
-  //   if (bid < blkLimit && tid < thrdLimit) {
-  //     ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
-  //     int turn = copyToShmem(&(ofcclShmem[collId].comm), comm, tid, nthreads);
-  //     // 不明白为啥能这样强转：get address of channel without incurring indirect load from ncclDevComm::channels
-  //     // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
-  //     ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-  //     turn = copyToShmem(&ofcclShmem[collId].channel, channel, tid, nthreads, turn);
-  //     // 按目前的理解，copyToShmem的行为应该是每个thread往shmem复制了一点。
-  //     __syncthreads();
+    ofcclShmemData *globalShmem4Blk7Coll = globalBlk2Coll2Shmem + bid * MAX_LENGTH + collId;
 
-  //     // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
-  //     copyToShmem(&(ofcclShmem[collId].work), &(globalDevComm7WorkElems[collId].first));
-  //     // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
-  //     __syncthreads();
+    // ***** 移植ncclKernel的逻辑 *****
+    if (bid < blkLimit && tid < thrdLimit) {
+      ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
+      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->comm), comm, tid, nthreads);
+      // 不明白为啥能这样强转：get address of channel without incurring indirect load from ncclDevComm::channels
+      // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
+      ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
+      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
+      __syncthreads();
 
-  //     if (ofcclShmem[collId].work.header.type == ncclWorkTypeColl) {
-  //       // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
-  //       // 原来这个写法，应该是想修改we->redOpArg，不过修改we->redOpArg一个线程就够了，所以让理论上最多的线程来工作，咱们保留就好。
-  //       if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&ofcclShmem[collId].work.elems[tid]);
-  //     } // 目前不用考虑其他type
-  //   }
-  //   __syncthreads();
+      // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
+      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用oneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
+      // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
+      __syncthreads();
+
+      if (globalShmem4Blk7Coll->work.header.type == ncclWorkTypeColl) {
+        // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
+        // 原来这个写法，应该是想修改we->redOpArg，不过修改we->redOpArg一个线程就够了，所以让理论上最多的线程来工作，咱们保留就好。
+        if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(globalShmem4Blk7Coll->work.elems[tid]));
+      } // 目前不用考虑其他ncclWorkType
+      __syncthreads();
+
+      if (tid == 0) {
+        globalShmem4Blk7Coll->executing = 0;
+      }
+      __syncthreads();
+    }
 
   }
 
@@ -202,7 +219,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
         sqReadFrontier = sq->head;
       }
-      if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, sharedBlkCount4Coll, thrdCudaDev) == -1) {
+      // if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, sharedBlkCount4Coll, thrdCudaDev) == -1) {
+        if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, globalBlkCount4Coll, thrdCudaDev) == -1) {
         goto thrd_common;
       } else {
         sqReadFrontier++;
@@ -231,7 +249,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         int old_counter = atomicAdd(&(globalCqes[target.collId].counter), 1);
         __threadfence(); // cqes在global memory里边，全部thread关心。
 
-        if (old_counter + 1 == sharedBlkCount4Coll[target.collId]) {
+        // if (old_counter + 1 == sharedBlkCount4Coll[target.collId]) {
+        if (old_counter + 1 == globalBlkCount4Coll[target.collId]) {
           atomicExch(&globalCqes[target.collId].counter, 0);
           while (cqWrite(cq, globalCqes + target.collId, thrdCudaDev) == -1) {
             // tempRound++;

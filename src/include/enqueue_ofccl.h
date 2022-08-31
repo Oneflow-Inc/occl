@@ -113,21 +113,6 @@ int cqRead(CQ *cq, CQE *target, int thrdCudaDev); // read 1 element each time
 __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev);
 
 typedef struct {
-  SQ *sq;
-  CQ *cq;
-  cudaStream_t stream;
-  int cudaDev;
-  dim3 gridDim;
-  dim3 blockDim;
-  int collCount;
-  CQE *globalCqes;
-  int *globalBlkCount4Coll;
-  int *globalThrdCount4Coll;
-  int *globalCollIds;
-  DevComm7WorkElem *globalDevComm7WorkElems;
-} KernelThrdArgs;
-
-typedef struct {
   int *poll_start;
   int *poll_stop;
   // std::unordered_map<int, CallbackFunc> *collId2callback;
@@ -141,8 +126,6 @@ typedef struct {
 //   int collId;
 //   int gotCqe;
 // } CallBackArgs;
-
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems);
 
 struct ofcclShmemGroup {
   ncclConnInfo *recvConns[NCCL_MAX_DIRECT_ARITY];
@@ -168,7 +151,23 @@ struct ofcclShmemData {
 };
 static_assert(offsetof(struct ofcclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
+typedef struct {
+  SQ *sq;
+  CQ *cq;
+  cudaStream_t stream;
+  int cudaDev;
+  dim3 gridDim;
+  dim3 blockDim;
+  int collCount;
+  CQE *globalCqes;
+  int *globalBlkCount4Coll;
+  int *globalThrdCount4Coll;
+  int *globalCollIds;
+  DevComm7WorkElem *globalDevComm7WorkElems;
+  ofcclShmemData *globalBlk2Coll2Shmem;
+} KernelThrdArgs;
 
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem);
 
 
 
