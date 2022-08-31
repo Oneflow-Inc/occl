@@ -196,6 +196,7 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
 
     __syncwarp();
     if (ncclShmem.work.header.type == ncclWorkTypeColl) {
+      // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64
       if (tid < NCCL_MAX_WORK_ELEMENTS) ncclRedopPtrDeref(&ncclShmem.work.elems[tid]);
     } else if (ncclShmem.work.header.type == ncclWorkTypeRegColl) {
       if (tid < NCCL_MAX_WORK_ELEMENTS_REG) ncclRedopPtrDeref(&ncclShmem.work.regElems[tid].elem);

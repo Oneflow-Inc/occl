@@ -62,7 +62,7 @@ endif
 ifneq ($(KEEP), 0)
 ENQ_NVCUFLAGS += -keep
 endif
-ENQ_NVCUFLAGS += -I. -I.. -Iinclude -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
+ENQ_NVCUFLAGS += -I. -I.. -Iinclude -Icollectives_ofccl/device -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
 ##### rules
 build : lib staticlib
 

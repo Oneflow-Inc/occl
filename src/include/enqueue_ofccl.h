@@ -10,21 +10,30 @@
 #include "comm.h"
 #include "nccl.h"
 #include "group.h"
+#include "devcomm.h"
+#include "debug.h"
 #include "collectives_ofccl.h"
+
 #include <cuda_runtime.h>
 #include <unordered_map>
 
 #define MAX_ASYNC_PANELS 32
 #define MAX_ASYNC_OPS 128
 // 10000应该是大于大多数任务中会使用的集合通信的数目了。
+// 单个block的__shared__ ofcclShmemData[] 占用42K * MAX_LENGTH = 420M这么多显存
 #define MAX_LENGTH 10000
-// 队列长度搞大些，反正目前也不缺这点显存。
-#define QLen 10000
+// 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
+#define QLen MAX_LENGTH
 #define tempPrintRound 100000
 
 struct ofcclCommArgs {
   ncclResult_t ret;
   ncclComm_t comm;
+};
+
+struct DevComm7WorkElem {
+  struct ncclDevComm* comm;
+  ncclWorkElem first;
 };
 
 ncclResult_t ofcclEnqueueCheck(struct ncclInfo* info);
@@ -81,7 +90,7 @@ typedef struct {
 SQ *sqCreate(int length);
 void sqDestroy(SQ *sq);
 // SQ read by device, written by host;
-__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *BlkCount4Coll, int thrdCudaDev); // read 1 element each time
+__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *globalBlkCount4Coll, int thrdCudaDev); // read 1 element each time
 int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs);
 
 typedef struct {
@@ -106,14 +115,17 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev);
 typedef struct {
   SQ *sq;
   CQ *cq;
-  CQE *cqes;
-  int *blkCount4Coll;
-  int *thrdCount4Coll;
   cudaStream_t stream;
   int cudaDev;
   dim3 gridDim;
   dim3 blockDim;
-} ThrdArgs;
+  int collCount;
+  CQE *globalCqes;
+  int *globalBlkCount4Coll;
+  int *globalThrdCount4Coll;
+  int *globalCollIds;
+  DevComm7WorkElem *globalDevComm7WorkElems;
+} KernelThrdArgs;
 
 typedef struct {
   int *poll_start;
@@ -130,9 +142,31 @@ typedef struct {
 //   int gotCqe;
 // } CallBackArgs;
 
-__global__ void daemonKernel(SQ *sq, CQ *cq, CQE *cqes, int *blkCount4Coll, int *thrdCount4Coll, int thrdCudaDev);
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems);
 
+struct ofcclShmemGroup {
+  ncclConnInfo *recvConns[NCCL_MAX_DIRECT_ARITY];
+  ncclConnInfo *sendConns[NCCL_MAX_DIRECT_ARITY];
+  void* srcs[NCCL_MAX_DIRECT_ARITY+1];
+  void* dsts[NCCL_MAX_DIRECT_ARITY+1];
+  int totalSendSize[NCCL_MAX_SLICE_PER_CHUNK];
+};
 
+// sizeof(ofcclShmemData)=42104, sizeof(ofcclShmemGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
+struct ofcclShmemData {
+  union {
+    uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
+    struct ofcclShmemGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
+  };
+  uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+  struct ncclDevComm comm;
+  struct ncclChannel channel;
+  uint64_t pad;
+  struct ncclWork work;
+  // 代表当前的表项对应的集合通信被调用，还没有执行完成。初始化置0；发现了相应的sqe之后置1；执行完成后置0。
+  int executing;
+};
+static_assert(offsetof(struct ofcclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
 
 

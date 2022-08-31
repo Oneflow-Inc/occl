@@ -172,7 +172,7 @@ static ncclResult_t getNextOp(struct ncclChannel* channel, struct ncclWork** wor
   // OFCCL_LOG(NCCL, "parameter ncclWork** work=%p, ncclWorkElem* base=%p", work, base);
   int opIndex = channel->workFifoTail%NCCL_MAX_OPS;
   struct ncclWork* w = channel->workFifo+opIndex;
-  volatile uint8_t* typePtr = (volatile uint8_t*)&w->header.type;
+  volatile uint8_t* typePtr = (volatile uint8_t*)&w->header.type; // 这里这个volatile确实挺精髓的，起到了注释的作用。
   // OFCCL_LOG(NCCL, "typePtr[0]=%d, channel->opIndex=%d, channel->workCount=%d", typePtr[0],  opIndex, channel->workCount);
   while (typePtr[0] != ncclWorkTypeUnused) sched_yield();
   memset(w, 0, sizeof(struct ncclWork));
