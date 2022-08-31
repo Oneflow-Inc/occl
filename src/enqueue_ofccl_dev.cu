@@ -105,17 +105,14 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
     // RingBuffer_get(sq, sqReadFrontier)->counter += 1;
     __threadfence_system();
     // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
-    // if (RingBuffer_get(sq, sqReadFrontier)->counter == globalBlkCount4Coll[sqeCollId]) {
+    
     if (old_counter + 1 == globalBlkCount4Coll[sqeCollId]) {
-      // RingBuffer_commit_read(sq, 1);
+      
       unsigned long long int old_head = atomicAdd(&sq->head, 1);
 
       __threadfence_system();
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sqe of collId %d commit read, new sqHead is %llu", thrdCudaDev, bid, tid, sqeCollId, old_head + 1);
     }
-    
-    // 修改了GPU和CPU都关心的sq.counter
-    __threadfence_system();
   }
   
   return 0;
@@ -155,13 +152,13 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // int tempRound = 0;
 
   // TODO: 构建任务列表
-  // for (int i = 0; i < collCount; i++) {
-  //   int collId = sharedCollIds[i] = globalCollIds[i];
-  //   // 这两个变量会限制很多行为。
-  //   int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
-  //   int thrdLimit = sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
+  for (int i = 0; i < collCount; i++) {
+    int collId = sharedCollIds[i] = globalCollIds[i];
+    // 这两个变量会限制很多行为。
+    int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
+    int thrdLimit = sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
 
-  //   int nthreads = thrdLimit; // 需要按不同的集合通信分别指定。
+    int nthreads = thrdLimit; // 需要按不同的集合通信分别指定。
 
   //   // ***** 移植ncclKernel的逻辑 *****
   //   if (bid < blkLimit && tid < thrdLimit) {
@@ -187,8 +184,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   //   }
   //   __syncthreads();
 
-
-  // }
+  }
 
   while (true) {
     if (tid == 0) {

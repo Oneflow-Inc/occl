@@ -21,7 +21,7 @@
 #define MAX_ASYNC_OPS 128
 // 10000应该是大于大多数任务中会使用的集合通信的数目了。
 // 单个block的__shared__ ofcclShmemData[] 占用42K * MAX_LENGTH = 420M这么多显存
-#define MAX_LENGTH 10000
+#define MAX_LENGTH 3000
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000

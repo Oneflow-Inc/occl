@@ -744,15 +744,15 @@ void *startKernel(void *args) {
 
   // TODO: 之后考虑按需启停kernel
   
-  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
 
   argsptrs[0] = &sq;
   argsptrs[1] = &cq;
-  argsptrs[5] = &thrdCudaDev;
-  argsptrs[6] = &collCount;
-  argsptrs[2] = &globalCqes;
-  argsptrs[3] = &globalBlkCount4Coll;
-  argsptrs[4] = &globalThrdCount4Coll;
+  argsptrs[2] = &thrdCudaDev;
+  argsptrs[3] = &collCount;
+  argsptrs[4] = &globalCqes;
+  argsptrs[5] = &globalBlkCount4Coll;
+  argsptrs[6] = &globalThrdCount4Coll;
   argsptrs[7] = &globalCollIds;
   argsptrs[8] = &globalDevComm7WorkElems;
 
@@ -760,12 +760,12 @@ void *startKernel(void *args) {
   daemonKernelParam.func = (void *)daemonKernel;
   daemonKernelParam.gridDim = daemonKernelGridDim;
   daemonKernelParam.blockDim = daemonKernelBlockDim;
-  // daemonKernelParam.sharedMem = 0;
-  daemonKernelParam.sharedMem = 60 * 1024 * MAX_LENGTH;
+  daemonKernelParam.sharedMem = 0;
+  // daemonKernelParam.sharedMem = 60 * 1024 * MAX_LENGTH;
   daemonKernelParam.stream = kernelStream;
   daemonKernelParam.args = argsptrs;
 
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p", pthread_self(), thrdCudaDev, sq, cq, globalCqes, globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), thrdCudaDev, sq, cq, globalCqes, globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, collCount);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
