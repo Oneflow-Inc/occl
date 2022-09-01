@@ -7,22 +7,17 @@
 
 dir=$1
 
-# datatypes="i8 u8 i32 u32 i64 u64 f16 f32 f64"
-datatypes="f32"
-# ↑ 开发阶段，先只用一个float(32bit, 4byte)，加速编译。
-# if [ "$CUDA_MAJOR" -ge 11 ]
-# then
-#     datatypes+=" bf16"
-# fi
+datatypes="i8 u8 i32 u32 i64 u64 f16 f32 f64"
+if [ "$CUDA_MAJOR" -ge 11 ]
+then
+    datatypes+=" bf16"
+fi
 
 targets="GENOBJS := \\\\\n"
 
-for base in ofccl_all_reduce; do
-# ↑ 开发阶段，目前只实现了all_reduce，加速编译。
+for base in ofccl_sendrecv ofccl_all_reduce ofccl_all_gather ofccl_broadcast ofccl_reduce ofccl_reduce_scatter; do
   opn=0
-  # for op in sum prod min max premulsum sumpostdiv; do
-  for op in sum; do
-  # ↑ 开发阶段，先只用一个sum redOp，加速编译。
+  for op in sum prod min max premulsum sumpostdiv; do
     dtn=0
     # Order must match that of the ncclDataType_t enum
     for dt in ${datatypes}; do

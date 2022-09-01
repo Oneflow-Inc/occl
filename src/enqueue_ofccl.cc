@@ -25,19 +25,7 @@
 #include <algorithm> // max
 #include <unordered_set>
 
-static void *const ofcclKerns[1] = {
-    (void *)try_make_kern,
-};
-
 namespace {
-void try_make() {
-  dim3 gridDim, blockDim;
-  gridDim.x = 8;
-  blockDim.x = 4;
-  int a = 1;
-  int *b = &a;
-  cudaLaunchKernel(ofcclKerns[0], gridDim, blockDim, (void **)&b, 0, NULL);
-}
 
 static inline ncclResult_t ofcclGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
   if (info->comm->collNetSupport > 0) {
@@ -1025,11 +1013,6 @@ ncclResult_t ofcclDestroy() {
 
 
 
-
-ncclResult_t ofcclEnqueueCheck(struct ncclInfo *info) {
-  try_make();
-  return ncclSuccess;
-}
 
 // 下边这部分主要是和单点的send、recv相关，所以目前没有支持。
 //   for (int i = 0; i < collCount; i++) {

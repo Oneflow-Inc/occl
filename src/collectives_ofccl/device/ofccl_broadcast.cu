@@ -1,5 +1,5 @@
-#include "ofccl_all_reduce.h"
+#include "ofccl_broadcast.h"
 #include "common_ofccl.h"
 #include "collectives_ofccl.h"
 
-IMPL_COLL_R(AllReduce);
+IMPL_COLL_C(Broadcast);

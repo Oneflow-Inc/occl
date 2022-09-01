@@ -6,11 +6,9 @@ BUILDDIR ?= $(abspath ../../../build)
 OBJDIR := $(BUILDDIR)/obj/collectives_ofccl/device
 # ↑ 改了名字
 
-LIBSRCFILES := ofccl_all_reduce.cu
-# ↑ 原来的版本：
-# LIBSRCFILES := all_reduce.cu broadcast.cu reduce.cu all_gather.cu reduce_scatter.cu sendrecv.cu onerank_reduce.cu
+LIBSRCFILES := ofccl_all_reduce.cu ofccl_broadcast.cu ofccl_reduce.cu ofccl_all_gather.cu ofccl_reduce_scatter.cu ofccl_sendrecv.cu ofccl_onerank_reduce.cu
 
-# LIBSRCFILES += functions.cu
+LIBSRCFILES += functions_ofccl.cu
 
 DEPFILES   := $(patsubst %.cu, $(OBJDIR)/%.d, $(LIBSRCFILES))
 DEPENDFILES:= $(DEPFILES:%.d=%.dep)
@@ -37,9 +35,7 @@ $(RULESFILE) :
 
 -include $(RULESFILE)
 
-LIBOBJ     := $(GENOBJS)
-# ↑ 原来的版本：
-# LIBOBJ     := $(GENOBJS) $(OBJDIR)/functions.o $(OBJDIR)/onerank_reduce.o
+LIBOBJ     := $(GENOBJS) $(OBJDIR)/functions_ofccl.o $(OBJDIR)/onerank_reduce.o
 
 -include $(DEPFILES)
 
@@ -60,16 +56,16 @@ $(OBJDIR)/%.dep : %.cu
 	@rm -f $@.tmp
 	@cp $@ $(@:.dep=.d)
 
-# Compiled kernels and collectives with relocatable device code ... 目前下边这俩都没有
-# $(OBJDIR)/functions.o : functions.cu $(OBJDIR)/functions.dep
-# 	@printf "Compiling  %-35s > %s\n" $< $@
-# 	mkdir -p `dirname $@`
-# 	$(NVCC) $(NVCUFLAGS) -dc $< -o $@
+# Compiled kernels and collectives with relocatable device code ... 
+$(OBJDIR)/functions_ofccl.o : functions_ofccl.cu $(OBJDIR)/functions_ofccl.dep
+	@printf "Compiling  %-35s > %s\n" $< $@
+	mkdir -p `dirname $@`
+	$(NVCC) $(NVCUFLAGS) -dc $< -o $@
 
-# $(OBJDIR)/onerank_reduce.o : onerank_reduce.cu $(OBJDIR)/onerank_reduce.dep
-# 	@printf "Compiling  %-35s > %s\n" $< $@
-# 	mkdir -p `dirname $@`
-# 	$(NVCC) $(NVCUFLAGS) -dc $< -o $@
+$(OBJDIR)/onerank_reduce.o : onerank_reduce.cu $(OBJDIR)/onerank_reduce.dep
+	@printf "Compiling  %-35s > %s\n" $< $@
+	mkdir -p `dirname $@`
+	$(NVCC) $(NVCUFLAGS) -dc $< -o $@
 
 # ... and create the device-side linked object with all those.
 $(DEVOBJ) : $(LIBOBJ)

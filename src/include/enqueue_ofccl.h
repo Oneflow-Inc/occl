@@ -34,7 +34,6 @@ struct DevComm7WorkElem {
   ncclWorkElem first;
 };
 
-ncclResult_t ofcclEnqueueCheck(struct ncclInfo* info);
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
 
 #define RingBuffer_full(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
