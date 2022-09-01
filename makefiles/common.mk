@@ -49,8 +49,8 @@ CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 
 # ref https://en.wikipedia.org/wiki/CUDA#Version_features_and_specifications
 # we use GeForce 2080Ti(7.5) and 3080Ti(8.6, also for A40, A16, A10, A2), may use V100(7.0) and A100(8.0)
-CUDA_GENCODE_INUSE  = -gencode=arch=compute_75,code=sm_75 \
-                      -gencode=arch=compute_86,code=sm_86
+CUDA_GENCODE_3080   = -gencode=arch=compute_86,code=sm_86
+CUDA_GENCODE_2080   = -gencode=arch=compute_75,code=sm_75
 # CUDA_GENCODE_MAYUSE = -gencode=arch=compute_70,code=sm_70 \
 #                       -gencode=arch=compute_80,code=sm_80                 
 
@@ -61,7 +61,14 @@ CUDA_GENCODE_INUSE  = -gencode=arch=compute_75,code=sm_75 \
 # CUDA_PTX_MAYUSE     = -gencode=arch=compute_70,code=compute_70 \
 #                       -gencode=arch=compute_80,code=compute_80
 
-NVCC_GENCODE ?= $(CUDA_GENCODE_INUSE) $(CUDA_PTX_INUSE)
+CARDNAME ?= 3080
+ifeq ($(CARDNAME), 3080)
+NVCC_GENCODE ?= $(CUDA_GENCODE_3080) $(CUDA_PTX_INUSE)
+else
+NVCC_GENCODE ?= $(CUDA_GENCODE_2080) $(CUDA_PTX_INUSE)
+endif
+$(info CARDNAME $(CARDNAME))
+$(info NVCC_GENCODE $(NVCC_GENCODE))
 
 CXXFLAGS   := -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR) -fPIC -fvisibility=hidden \
               -Wall -Wno-unused-function -Wno-sign-compare -std=c++11 -Wvla \
