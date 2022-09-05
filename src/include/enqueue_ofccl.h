@@ -14,12 +14,14 @@
 #include "debug.h"
 #include "collectives_ofccl.h"
 
+#include <cstddef>
 #include <cuda_runtime.h>
 #include <unordered_map>
 
 #define MAX_ASYNC_PANELS 32
 #define MAX_ASYNC_OPS 128
-#define MAX_LENGTH 587 // 587不超0xc000 shmem的限制，588就超了(0xc00c)，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如587不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。
+// #define MAX_LENGTH 587 // 587不超0xc000 shmem的限制，588就超了(0xc00c)，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如587不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。
+#define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000
@@ -133,7 +135,7 @@ struct ofcclShmemGroup {
 };
 
 // sizeof(ofcclShmemData)=42104, sizeof(ofcclShmemGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
-struct ofcclShmemData {
+typedef struct {
   union {
     uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
     struct ofcclShmemGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
@@ -145,8 +147,14 @@ struct ofcclShmemData {
   struct ncclWork work;
   // 代表当前的表项对应的集合通信被调用，还没有执行完成。初始化置0；发现了相应的sqe之后置1；执行完成后置0。
   int executing;
-};
-static_assert(offsetof(struct ofcclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
+} ofcclShmemData;
+static_assert(offsetof(ofcclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
+
+// 初步设计是一个线程一个这个结构
+typedef struct {
+  int contextCount;
+  int *contexts;
+} CollExecContext;
 
 typedef struct {
   SQ *sq;
@@ -162,11 +170,10 @@ typedef struct {
   int *globalCollIds;
   DevComm7WorkElem *globalDevComm7WorkElems;
   ofcclShmemData *globalBlk2Coll2Shmem;
+  CollExecContext *globalCollExecContext;
 } KernelThrdArgs;
 
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem);
-
-
 
 
 

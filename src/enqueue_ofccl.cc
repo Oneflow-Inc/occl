@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "enqueue_ofccl.h"
+#include "collectives.h"
 #include "debug.h"
 #include "enqueue.h" // struct ncclQueueInfo
 #include "argcheck.h"
@@ -508,6 +509,82 @@ cb_end:
 
 } // namespace
 
+// 5 * 3 * 3
+// TODO: algo = tree的时候，根据cuda版本不同可能有差别。allreduce里会根据cuda版本调用treeUpDown或者treeSplit
+static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {
+  {
+    {
+      0, //Broadcast, Tree, LL
+      0, //Broadcast, Tree, LL128
+      0  //Broadcast, Tree, Simple
+    }, {
+      0, //Broadcast, Ring, LL
+      0, //Broadcast, Ring, LL128
+      0  //Broadcast, Ring, Simple
+    }, {
+      0, //Broadcast, CollNet, LL
+      0, //Broadcast, CollNet, LL128
+      0  //Broadcast, CollNet, Simple
+    }
+  }, {
+    {
+      0, //Reduce, Tree, LL
+      0, //Reduce, Tree, LL128
+      0  //Reduce, Tree, Simple
+    }, {
+      0, //Reduce, Ring, LL
+      0, //Reduce, Ring, LL128
+      0  //Reduce, Ring, Simple
+    }, {
+      0, //Reduce, CollNet, LL
+      0, //Reduce, CollNet, LL128
+      0  //Reduce, CollNet, Simple
+    }
+  }, {
+    {
+      0, //AllGather, Tree, LL
+      0, //AllGather, Tree, LL128
+      0  //AllGather, Tree, Simple
+    }, {
+      0, //AllGather, Ring, LL
+      0, //AllGather, Ring, LL128
+      0  //AllGather, Ring, Simple
+    }, {
+      0, //AllGather, CollNet, LL
+      0, //AllGather, CollNet, LL128
+      0  //AllGather, CollNet, Simple
+    }
+  }, {
+    {
+      0, //ReduceScatter, Tree, LL
+      0, //ReduceScatter, Tree, LL128
+      0  //ReduceScatter, Tree, Simple
+    }, {
+      0, //ReduceScatter, Ring, LL
+      0, //ReduceScatter, Ring, LL128
+      0  //ReduceScatter, Ring, Simple
+    }, {
+      0, //ReduceScatter, CollNet, LL
+      0, //ReduceScatter, CollNet, LL128
+      0  //ReduceScatter, CollNet, Simple
+    }
+  }, {
+    {
+      0, //AllReduce, Tree, LL
+      0, //AllReduce, Tree, LL128
+      0  //AllReduce, Tree, Simple
+    }, {
+      0, //AllReduce, Ring, LL
+      0, //AllReduce, Ring, LL128
+      4  //AllReduce, Ring, Simple
+    }, {
+      0, //AllReduce, CollNet, LL
+      0, //AllReduce, CollNet, LL128
+      0  //AllReduce, CollNet, Simple
+    }
+  }
+};
+
 // TODO: 之后考虑搞一个Context整理起来。
 static thread_local ofcclCommArgs ofcclCommList[MAX_LENGTH];
 static thread_local pthread_t ofcclPrepareThreads[MAX_LENGTH];
@@ -540,6 +617,8 @@ static thread_local ofcclShmemData *globalBlk2Coll2Shmem;
 
 thread_local SQ *sq;
 thread_local CQ *cq;
+static thread_local CollExecContext *hostCollExecContext[MAX_LENGTH];
+thread_local CollExecContext *globalCollExecContext; // extern
 
 // for poller thread
 static thread_local pthread_t poller;
@@ -729,6 +808,7 @@ void *startKernel(void *args) {
   globalCollIds = ((KernelThrdArgs *)args)->globalCollIds;
   globalDevComm7WorkElems = ((KernelThrdArgs *)args)->globalDevComm7WorkElems;
   globalBlk2Coll2Shmem = ((KernelThrdArgs *)args)->globalBlk2Coll2Shmem;
+  globalCollExecContext = ((KernelThrdArgs *)args)->globalCollExecContext;
   
   checkRuntime(cudaSetDevice(thrdCudaDev));
 
@@ -806,22 +886,22 @@ ncclResult_t ofcclPrepareDone() {
 
   // ***** ncclAsyncThreadPreconnect threads *****
   for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs args = ofcclCommList[hostCollIds[i]];
+    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
     // ***** 目前应该是不会执行 *****
-    if (args.comm->connect) {
+    if (args->comm->connect) {
       pthread_create(&ofcclPrepareThreads[hostCollIds[i]], NULL, ofcclAsyncThreadPreconnect, &args);
     }
   }
   for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs args = ofcclCommList[hostCollIds[i]];
-    if (args.comm->connect) {
+    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+    if (args->comm->connect) {
       int err = pthread_join(ofcclPrepareThreads[hostCollIds[i]], NULL);
       if (err != 0) {
         OFCCL_LOG(OFCCL_WARN, "Error waiting for pthread_join : %s", strerror(errno));
         return ncclSystemError;
       }
-      NCCLCHECKGOTO(args.ret, ret, end);
-      args.comm->connect = 0;
+      NCCLCHECKGOTO(args->ret, ret, end);
+      args->comm->connect = 0;
     }
   }
 
@@ -830,15 +910,16 @@ ncclResult_t ofcclPrepareDone() {
 
   // ***** first for loop *****
   for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs args = ofcclCommList[hostCollIds[i]];
-    ncclComm_t comm = args.comm;
+    int collId = hostCollIds[i];
+    ofcclCommArgs *args = ofcclCommList + collId;
+    ncclComm_t comm = args->comm;
     NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
   }
   
   // ***** second for loop *****
   for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs args = ofcclCommList[hostCollIds[i]];
-    ncclComm_t comm = args.comm;
+    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+    ncclComm_t comm = args->comm;
 
     // ***** omit cudaSetDevice related to stream *****
     // ***** omit ncclCudaGraphHostSetup *****
@@ -849,14 +930,13 @@ ncclResult_t ofcclPrepareDone() {
     // ***** omit ncclLaunchBarrier *****
   }
 
-  // ***** check *****
   daemonKernelGridDim.x = 0;
   daemonKernelBlockDim.x = 0;
 
   for (int i = 0; i < collCount; i++) {
     int collId = hostCollIds[i];
-    ofcclCommArgs args = ofcclCommList[collId];
-    ncclComm_t comm = args.comm;
+    ofcclCommArgs *args = ofcclCommList + collId;
+    ncclComm_t comm = args->comm;
     struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
     if (eqInfo->elemList->count() > 1) {
       ret = ncclInvalidUsage;
@@ -864,6 +944,7 @@ ncclResult_t ofcclPrepareDone() {
       goto end;
     }
 
+    // TODO: 如果要支持其他work，这里要调整。
     if (comm->args.header.type == ncclWorkTypeUnused) {
       ret = ncclInvalidUsage;
       OFCCL_LOG1(OFCCL_WARN, "comm->args.header.type should be ncclWorkTypeColl(1)");
@@ -880,6 +961,26 @@ ncclResult_t ofcclPrepareDone() {
     
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), thrdCudaDev, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
 
+    hostCqes[collId].collId = collId;
+    int blkCount = hostBlkCount4Coll[collId] = gridDim4Coll[collId].x;
+    int thrdCount = hostThrdCount4Coll[collId] = blockDim4Coll[collId].x;
+
+    // 分析并记录每个coll的执行上下文
+    // ncclInfo *info = comm->asyncOps;
+    // ncclFunc_t collFn = info->coll;
+    // int algorithm = info->algorithm;
+    // int protocol = info->protocol;
+    // int contextCount = collExecContextCount[collFn][algorithm][protocol];
+    // hostCollExecContext[collId] = (CollExecContext *)calloc(blkCount * thrdCount, sizeof(CollExecContext));
+    // for (int j = 0; j < blkCount; j++) {
+    //   for (int k = 0; k < thrdCount; k++) {
+    //     (hostCollExecContext[collId] + j * thrdCount + k)->contextCount = contextCount;
+    //     (hostCollExecContext[collId] + j * thrdCount + k)->contexts = (int *)calloc(contextCount, sizeof(int));
+    //     // TODO: 填充contexts
+    //   }
+    // }
+
+    // check 确实一个comm对应了一个coll
     for (int k = 0; k < eqInfo->maxChannels; k++) {
       struct ncclChannel channel = comm->channels[k];
     
@@ -898,7 +999,6 @@ ncclResult_t ofcclPrepareDone() {
             goto end;
           }
           // OFCCL_LOG(OFCCL, "elem.count=%lu, elem.nChannels=%d, elem.header.nWarps=%u, elem.header.funcIndex=%u, elem.lastChunkSize=%lu, elem.direct=%u", work->elems[e].count, work->elems[e].nChannels, work->elems[e].header.nWarps, work->elems[e].header.funcIndex, work->elems[e].lastChunkSize, work->elems[e].direct);
-          
         }
       }
     }
@@ -907,32 +1007,18 @@ ncclResult_t ofcclPrepareDone() {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d, sizeof(ofcclShmemData)=%lu, sizeof(ofcclShmemGroup)=%lu, offsetof(struct ofcclShmemData, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct ofcclShmemData, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(ofcclShmemData)=%lu", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x, sizeof(ofcclShmemData), sizeof(ofcclShmemGroup), offsetof(struct ofcclShmemData, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(struct ofcclShmemData, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(ofcclShmemData));
+  OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d, sizeof(ofcclShmemData)=%lu, sizeof(ofcclShmemGroup)=%lu, offsetof(struct ofcclShmemData, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct ofcclShmemData, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(ofcclShmemData)=%lu", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x, sizeof(ofcclShmemData), sizeof(ofcclShmemGroup), offsetof(ofcclShmemData, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(ofcclShmemData, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(ofcclShmemData));
   
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
 
   checkRuntime(cudaMalloc(&globalCqes, MAX_LENGTH * sizeof(CQE)));
-  for (int i = 0; i < collCount; i++) {
-    int collId = hostCollIds[i];
-    hostCqes[collId].collId = collId;
-  }
   checkRuntime(cudaMemcpy(globalCqes, hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&globalBlkCount4Coll, MAX_LENGTH * sizeof(int)));
-  for (int i = 0; i < collCount; i++) {
-    int collId = hostCollIds[i];
-    hostBlkCount4Coll[collId] = gridDim4Coll[collId].x;
-    // OFCCL_LOG(OFCCL, "<%lu> rank=%d hostBlkCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, hostBlkCount4Coll[collId]);
-  }
   checkRuntime(cudaMemcpy(globalBlkCount4Coll, hostBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
-  for (int i = 0; i < collCount; i++) {
-    int collId = hostCollIds[i];
-    hostThrdCount4Coll[collId] = blockDim4Coll[collId].x;
-    // OFCCL_LOG(OFCCL, "<%lu> rank=%d hostThrdCount4Coll[%d] = %d", pthread_self(), thrdCudaDev, collId, hostThrdCount4Coll[collId]);
-  }
   checkRuntime(cudaMemcpy(globalThrdCount4Coll, hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&globalCollIds, MAX_LENGTH * sizeof(int)));
@@ -945,10 +1031,12 @@ ncclResult_t ofcclPrepareDone() {
 
   checkRuntime(cudaMalloc(&globalBlk2Coll2Shmem, daemonKernelGridDim.x * MAX_LENGTH * sizeof(ofcclShmemData)));
 
+
+
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
   
-  kernelThrdArgs = { sq, cq, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim, collCount, globalCqes, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2Coll2Shmem };
+  kernelThrdArgs = { sq, cq, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim, collCount, globalCqes, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2Coll2Shmem, globalCollExecContext };
   pthread_create(&kernelThrd, NULL, startKernel, &kernelThrdArgs);
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, kernelThrdArgs.cudaDev);
 
@@ -1016,8 +1104,8 @@ ncclResult_t ofcclDestroy() {
 
 // 下边这部分主要是和单点的send、recv相关，所以目前没有支持。
 //   for (int i = 0; i < collCount; i++) {
-//     ofcclCommArgs args = ofcclCommList[hostCollIds[i]];
-//     ncclComm_t comm = args.comm;
+//     ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+//     ncclComm_t comm = args->comm;
 //     int node = comm->node;
 //     int nNodes = comm->nNodes;
 //     int localRank = comm->localRank;

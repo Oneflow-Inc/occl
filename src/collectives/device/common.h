@@ -82,31 +82,6 @@ __device__ int copyToShmem(T *dst, T const *src, int turn=0) {
   return turn;
 }
 
-template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
-struct RunWorkElement {
-  __device__ void run(ncclWorkElem*) {
-    // Put NOT IMPLEMENTED behavior here.
-  }
-};
-
-template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
-struct RunWork {
-  // This __forceinline__ is necessary. The compiler was inserting a function call
-  // here from the LL ncclKernel.
-  __device__ __forceinline__ void run(ncclWork *w) {
-    int wid = threadIdx.x / WARP_SIZE;
-    int inc = w->header.type == ncclWorkTypeRegColl ? sizeof(ncclWorkElemReg) / sizeof(ncclWorkElem) : 1;
-    #pragma unroll 1
-    for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && w->elems[e].header.type != ncclWorkTypeUnused; e += inc) {
-      if (wid < w->header.nWarps)
-        RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[e]);
-        // if (threadIdx.x == 0) {
-        //   OFCCL_LOG(NCCL, "bid(%d), blockDim.x(%d), ncclWorkElem(%d)(with %d channels, %lu bytes each, lastChunkSize=%lu) done", blockIdx.x, blockDim.x, e, w->elems[e].nChannels, w->elems[e].count, w->elems[e].lastChunkSize);
-        // }
-    }
-  }
-};
-
 typedef void(*ncclKern_t)();
 extern __device__ ncclKern_t ncclFuncs[];
 
@@ -153,6 +128,79 @@ static __device__ void ncclRedopPtrDeref(struct ncclWorkElem* we) {
 }
 
 extern __shared__ ncclShmemData ncclShmem;
+
+template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
+struct RunWorkElement {
+  __device__ void run(ncclWorkElem*) {
+    // Put NOT IMPLEMENTED behavior here.
+  }
+};
+
+template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
+struct RunWork {
+  // This __forceinline__ is necessary. The compiler was inserting a function call
+  // here from the LL ncclKernel.
+  __device__ __forceinline__ void run(ncclWork *w) {
+    int wid = threadIdx.x / WARP_SIZE;
+    int inc = w->header.type == ncclWorkTypeRegColl ? sizeof(ncclWorkElemReg) / sizeof(ncclWorkElem) : 1;
+    #pragma unroll 1
+    for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && w->elems[e].header.type != ncclWorkTypeUnused; e += inc) {
+      if (wid < w->header.nWarps)
+        // OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, invoke RunWorkElement, e=%d", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, e);
+        RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[e]);
+        // if (threadIdx.x == 0) {
+        //   OFCCL_LOG(NCCL, "bid(%d), blockDim.x(%d), ncclWorkElem(%d)(with %d channels, %lu bytes each, lastChunkSize=%lu) done", blockIdx.x, blockDim.x, e, w->elems[e].nChannels, w->elems[e].count, w->elems[e].lastChunkSize);
+        // }
+    }
+  }
+};
+
+// typedef void(*ncclKern_t)();
+// extern __device__ ncclKern_t ncclFuncs[];
+
+// struct ncclShmemGroup {
+//   ncclConnInfo *recvConns[NCCL_MAX_DIRECT_ARITY];
+//   ncclConnInfo *sendConns[NCCL_MAX_DIRECT_ARITY];
+//   void* srcs[NCCL_MAX_DIRECT_ARITY+1];
+//   void* dsts[NCCL_MAX_DIRECT_ARITY+1];
+//   int totalSendSize[NCCL_MAX_SLICE_PER_CHUNK];
+// };
+
+// struct ncclShmemData {
+//   union {
+//     uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE];
+//     struct ncclShmemGroup groups[NCCL_MAX_GROUPS];
+//   };
+//   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+//   struct ncclDevComm comm;
+//   struct ncclChannel channel;
+//   uint64_t pad;
+//   struct ncclWork work;
+// };
+// static_assert(offsetof(struct ncclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
+
+// static __device__ void ncclRedopPtrDeref(struct ncclWorkElem* we) {
+//   if (we->header.type != ncclWorkTypeUnused && we->redOpArgIsPtr) {
+//     /* redOpArg is a pointer to the scalar value, so we'll dereference it
+//      * here so that redOpArg holds the bits of the scalar going forward.
+//      * The tricky thing is we don't know its type T since that's encoded in
+//      * the funcIndex. Because it would be difficult to get sizeof(T) from
+//      * funcIndex, we'll cheat and just dereference the largest possible size
+//      * given the alignment of the pointer. We might be reading in more bytes
+//      * than we need but that's harmless.
+//      */
+//     if (we->redOpArg%2 != 0)
+//       we->redOpArg = *reinterpret_cast<uint8_t*>(we->redOpArg);
+//     else if (we->redOpArg%4 != 0)
+//       we->redOpArg = *reinterpret_cast<uint16_t*>(we->redOpArg);
+//     else if (we->redOpArg%8 != 0)
+//       we->redOpArg = *reinterpret_cast<uint32_t*>(we->redOpArg);
+//     else
+//       we->redOpArg = *reinterpret_cast<uint64_t*>(we->redOpArg);
+//   }
+// }
+
+// extern __shared__ ncclShmemData ncclShmem;
 
 template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto, int FnIndex>
 __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {

@@ -13,7 +13,7 @@ LIBSRCFILES := init.cc channel.cc bootstrap.cc transport.cc enqueue.cc enqueue_o
 		misc/nvmlwrap.cc misc/ibvwrap.cc misc/gdrwrap.cc misc/utils.cc misc/argcheck.cc misc/socket.cc misc/shmutils.cc misc/profiler.cc misc/param.cc \
 		transport/p2p.cc transport/shm.cc transport/net.cc transport/net_socket.cc transport/net_ib.cc transport/coll_net.cc \
                 collectives/sendrecv.cc collectives/all_reduce.cc collectives/all_gather.cc collectives/broadcast.cc collectives/reduce.cc collectives/reduce_scatter.cc \
-								collectives_ofccl/ofccl_all_reduce.cc \
+								collectives_ofccl/ofccl_sendrecv.cc collectives_ofccl/ofccl_all_reduce.cc collectives_ofccl/ofccl_all_gather.cc collectives_ofccl/ofccl_broadcast.cc collectives_ofccl/ofccl_reduce.cc collectives_ofccl/ofccl_reduce_scatter.cc \
                 graph/topo.cc graph/paths.cc graph/search.cc graph/connect.cc graph/rings.cc graph/trees.cc graph/tuning.cc graph/xml.cc
 
 ENQ_DEVSRC 	:= enqueue_ofccl_dev.cu

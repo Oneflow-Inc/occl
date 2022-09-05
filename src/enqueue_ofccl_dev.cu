@@ -195,6 +195,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
       if (tid == 0) {
         globalShmem4Blk7Coll->executing = 0;
+        // OFCCL_LOG(OFCCL, "nthreads: globalShmem4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalShmem4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
       }
       __syncthreads();
     }

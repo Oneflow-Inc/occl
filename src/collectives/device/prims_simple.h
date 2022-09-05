@@ -4,6 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+//                                       NCCL_STEPS(8)/2=4     NCCL_STEPS/4=2         2
+// ringAllreduce里边，Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>;
+// 对应                       ProtoSimple<          SlicePerChunk,                    StepPerSlice, Unroll>
+//                                                SlicePerChunk=2                     StepPerSlice=2
+// Unroll 在primitives.h 里有默认值 COLL_UNROLL=4
+// P2p=0
+#include "debug.h"
 template<typename T, typename RedOp, typename Fan, int Direct,
          int SlicePerChunk, int StepPerSlice, int Unroll, int P2p>
 class Primitives<
@@ -33,11 +40,11 @@ class Primitives<
   int group;
   uint64_t step;
   int *connOffsFifoPtr;   // (flags & OffsFifoEnabled)
-  union {
+  union { // 每个线程各自设置，这一组是选本地buff，还是conn里buff
     T *userBuff;            // (flags & (RoleInput|RoleOutput))
     T *connEltsFifo;        // !(flags & (RoleInput|RoleOutput))
   };
-  union {
+  union { // 每个线程各自设置，这一组是选proxy（conn相关），还是direct buff
     int volatile *connSizesFifoPtr; //  (flags & SizesFifoEnabled)
     T *directBuff;                  // !(flags & SizesFifoEnabled)
   };
@@ -68,28 +75,29 @@ class Primitives<
     return flags & Aborted;
   }
 
+  // 所有模板参数都和genericOp相同
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t dstIx, intptr_t remoteIx, int offset, int nelts) {
     const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
-    const bool noRecvWait = DirectRecv && Src && (flags & DirectRead);        // no wait when directly reading from remote input
-    const bool noSendWait = DirectSend && (flags & (DirectRead|DirectWrite)); // no wait in empty send (e.g. directScatter) or direct remote write
-    if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) ||
-        ((flags & (Send*RoleWaitSend)) && !noSendWait)) {
+    const bool noRecvWait = DirectRecv && Src && (flags & DirectRead); // 目前应该一直是false       // no wait when directly reading from remote input
+    const bool noSendWait = DirectSend && (flags & (DirectRead|DirectWrite)); // 目前应该一直是false // no wait in empty send (e.g. directScatter) or direct remote write
+    if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
+        ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8 
       int spins = 0;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         connStepCache = *connStepPtr;
-        if (checkAbort(spins)) break;
+        if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
       }
     }
 
-    if (flags & (Recv*RoleWaitRecv | Send*RoleWaitSend)) {
-      if (isSendNotRecv && (flags & SizesFifoEnabled))
+    if (flags & (Recv*RoleWaitRecv | Send*RoleWaitSend)) { // 这里还是只有特殊线程在做
+      if (isSendNotRecv && (flags & SizesFifoEnabled)) // proxy 相关，不用考虑
         connSizesFifoPtr[step%NCCL_STEPS] = nelts*sizeof(T);
 
       void **ptrs = isSendNotRecv ? (ncclShmem.groups[group].dsts + Dst)
                                   : (ncclShmem.groups[group].srcs + Src);
-      if (flags & OffsFifoEnabled)
+      if (flags & OffsFifoEnabled) // proxy 相关，不用考虑
         ptrs[index] = connEltsFifo + loadInt(connOffsFifoPtr + (step%NCCL_STEPS))/sizeof(T);
       else if (isSendNotRecv && DirectSend) {
         if (flags & DirectWrite) {
@@ -99,7 +107,7 @@ class Primitives<
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*stepSize;
         }
-      } else if (!isSendNotRecv && DirectRecv) {
+      } else if (!isSendNotRecv && DirectRecv) { 
         if (flags & DirectRead) {
           ptrs[index] = directBuff + remoteIx + offset;
         } else if (flags & DirectWrite) {
@@ -123,16 +131,21 @@ class Primitives<
     }
   }
 
+  // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
   template <int DirectRecv1, int DirectSend1, int Recv, int Send, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void genericOp(
       intptr_t srcIx, intptr_t dstIx, intptr_t remoteIx, int nelem, bool postOp
     ) {
+    // 下边这两个由模板参数决定
     constexpr int DirectRecv = 1 && Direct && DirectRecv1;
     constexpr int DirectSend = 1 && Direct && DirectSend1;
+    // 只要传了那个静态变量，不是-1，下边的值就是true
     constexpr int Src = SrcBuf != -1;
     constexpr int Dst = DstBuf != -1;
 
     nelem = nelem < 0 ? 0 : nelem;
+    // stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T))
+    // SlicePerChunk = 2, StepPerSlice = 2
     int sliceSize = stepSize*StepPerSlice;
     sliceSize = max(divUp(nelem, 16*SlicePerChunk)*16, sliceSize/32);
     int slice = 0;
@@ -171,7 +184,7 @@ class Primitives<
       do {
         sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
         if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)))
-          ncclShmem.groups[group].srcs[0] = userBuff + srcIx + offset;
+          ncclShmem.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
           ncclShmem.groups[group].dsts[0] = userBuff + dstIx + offset;
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
@@ -303,22 +316,26 @@ class Primitives<
     }
   }
 
+  // connIndex = group >> 16 = 0, e = nullptr，通过打log确认了，打log也确认了，经过loadRecvConn和loadSendConn，flags都没变。
+  // 所以这两个函数的效果，就是设置了step，设置了connStepPtr，设置了connStepCache，设置了connEltsFifo，设置了ncclShmem里的peer的conn
+  // SlicePerChunk=2, StepPerSlice=2
   __device__ __forceinline__ void loadRecvConn(ncclPeer *peer, int connIndex, struct ncclWorkElem* e) {
     if (flags & (RoleWaitRecv|RolePostRecv)) {
       auto *conn = &peer->recv[connIndex].conn;
-      step = conn->step;
-      step = roundUp(step, SlicePerChunk*StepPerSlice);
-      if (flags & RolePostRecv) {
-        connStepPtr = conn->head;
+      step = conn->step; // uint64_t step;      // Keep where we are // 设置好就不会变了；每个线程有自己的值
+      step = roundUp(step, SlicePerChunk*StepPerSlice); // return (x+y-1) - (x+y-1)%y;，就是向上取到y的倍数
+      if (flags & RolePostRecv) { // (ng - 2) * 8 + 0 号线程是 RolePostRecv
+        connStepPtr = conn->head; // uint64_t *head;     // Local for send, remote for recv
         *connStepPtr = step; // Return credits in case we rounded up.
       }
-      if (flags & RoleWaitRecv) {
+      if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
         ncclShmem.groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
-        connStepPtr = conn->tail;
-        connStepCache = *connStepPtr;
-        flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0;
-        if (Direct) {
+        connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
+        connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据
+        flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0; // 这个和proxy相关，先不关注。int *offsFifo;      // Buffer fifo from proxy to GPU，所以对GPU是recv
+        if (Direct) { // 模板参数 Direct 是 1，下边会区分两种direct的方式
           // User buffers have been registered
+          // 现在log打印出来 conn->direct=0
           if ((conn->direct & (NCCL_IPC_READ|NCCL_IPC_WRITE)) && e != nullptr && e->regUsed) {
             if (connIndex == 1 && P2p == 0) {
               flags |= DirectRead;  // scatter-reduce use direct pull
@@ -339,7 +356,11 @@ class Primitives<
         if (flags & OffsFifoEnabled)
           connOffsFifoPtr = conn->offsFifo;
         connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
+        // OFCCL_LOG(OFCCL, "recv Rank<%d>, Blk<%d>, Thrd<%d>, flags=0x%X, conn->direct=%d, step=%llu, connStepCache=%llu", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, flags, conn->direct, step, connStepCache);
       }
+      // int g = tid / 8; // 当前线程属于哪个 “g”
+      // int ng = nthreads / 8; // 一共有几个 “g”
+      // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d>, ng=%d, g=%d, connIndex=%d, e @ %p, flags=0x%X", blockIdx.x, threadIdx.x, ng, g, connIndex, e, flags);
     }
   }
 
@@ -360,10 +381,10 @@ class Primitives<
           connOffsFifoPtr = conn->offsFifo;
         connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
 
-        if (conn->sizesFifo != nullptr) {
+        if (conn->sizesFifo != nullptr) { // int *sizesFifo;     // Sizes fifo from GPU to proxy，从GPU发到网络，是send，先不关注。
           flags |= SizesFifoEnabled;
           connSizesFifoPtr = conn->sizesFifo;
-        } else if (Direct) {
+        } else if (Direct) { // 模板参数 Direct 是 1，下边会区分两种direct的方式
           // User buffers have been registered
           if ((conn->direct & (NCCL_IPC_READ|NCCL_IPC_WRITE)) && e != nullptr && e->regUsed) {
             if (connIndex == 1 && P2p == 0) {
@@ -382,11 +403,16 @@ class Primitives<
             }
           }
         }
+        // OFCCL_LOG(OFCCL, "send Rank<%d>, Blk<%d>, Thrd<%d>, flags=0x%X, step=%llu, connStepCache=%llu", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, flags, step, connStepCache);
       }
+      // int g = tid / 8; // 当前线程属于哪个 “g”
+      // int ng = nthreads / 8; // 一共有几个 “g”
+      // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d>, ng=%d, g=%d, connIndex=%d, e @ %p, flags=0x%X", blockIdx.x, threadIdx.x, ng, g, connIndex, e, flags);
     }
   }
 
  public:
+  // 模板参数：Ring AllReduce里边，MaxSend和MaxRecv都是 1，Direct = 1
   __device__ Primitives(
       int tid, int nthreads, int const *recvPeers, int const *sendPeers,
       void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint32_t group=0, struct ncclWorkElem* e = nullptr
@@ -396,42 +422,50 @@ class Primitives<
 
     // For send operations, we need an extra warp to overlap the threadfence and the copy
     this->nthreads = nthreads;
-    this->nworkers = nthreads - (MaxSend > 0 && nthreads-WARP_SIZE >= 64 ? WARP_SIZE : 0);
-    this->group = group & (uint16_t)0xFFFF;
-    int connIndex = group >> 16;
+    this->nworkers = nthreads - (MaxSend > 0 && nthreads-WARP_SIZE >= 64 ? WARP_SIZE : 0); // 这一行的意思是，nthreads足够大的话，就可以剔除出一个warp了，剩下的是worker。
+    this->group = group & (uint16_t)0xFFFF; // 还是 0. ring的情况下，group一直是0。
+    int connIndex = group >> 16; // 还是 0.
 
-    int nrecv=0, nsend=0;
+    int nrecv=0, nsend=0; // 后边两行代码之后，变成nrecv=1, nsend=1
     while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
     while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
-    this->fan = Fan(nrecv, nsend);
+    this->fan = Fan(nrecv, nsend); // 相当于调用 __device__ FanSymmetric<1>(1, 1)
 
     constexpr int ThreadPerSync = 8;
     static_assert(MaxSend < ThreadPerSync && MaxRecv < ThreadPerSync, "Not enough threads to cover all peers");
 
-    int g = tid / ThreadPerSync;
-    int ng = nthreads / ThreadPerSync;
-    index = tid % ThreadPerSync;
+    int g = tid / ThreadPerSync; // 当前线程属于哪个 “g”
+    int ng = nthreads / ThreadPerSync; // 一共有几个 “g”
+    index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
     flags = 0;
     if (g == 0) {
-      if (index < nrecv) flags |= RoleWaitRecv;
-      if (index == nrecv) flags |= RoleInput;
+      if (index < nrecv) flags |= RoleWaitRecv; // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
+      if (index == nrecv) flags |= RoleInput; // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
     } else if (g == 1) {
-      if (index < nsend) flags |= RoleWaitSend;
-      if (index == nsend) flags |= RoleOutput;
-    } else if (g == ng - 2) {
-      if (index < nrecv) flags |= RolePostRecv;
+      if (index < nsend) flags |= RoleWaitSend; // 1 * 8 + 0 号线程是 RoleWaitSend 8 
+      if (index == nsend) flags |= RoleOutput; // 1 * 8 + 1 号线程是 RoleOutput 9
+    } else if (g == ng - 2) { // 从 ng - 3 到 ng 都是属于最后一个warp的。
+      if (index < nrecv) flags |= RolePostRecv; // (ng - 2) * 8 + 0 号线程是 RolePostRecv(0x20) 272
     } else if (g == ng - 1) {
-      if (index < nsend) flags |= RolePostSend;
+      if (index < nsend) flags |= RolePostSend; // (ng - 1) * 8 + 0 号线程是 RolePostSend(0x10) 280
     }
+    // 所以总的来看，有flag的线程不多，事实上只有6个。
+    // 没有任何线程被 **单独** 设置了flag DirectWrite 和 DirectRead
 
     int peer = 0;
-    if (flags & (RoleWaitRecv|RolePostRecv)) peer = recvPeers[index];
-    if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index];
+    if (flags & (RoleWaitRecv|RolePostRecv)) peer = recvPeers[index]; // 有RoleWaitRecv或RolePostRecv标记的线程，设置其peer。虽然我们给线程分配了0-7的index，但是只给index=0的线程分配了recv相关的flag。这个函数同时也会根据conn.direct，为flags追加DirectRead、DirectWrite
+    if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index]; // 同上
+    
+    // if (flags & RoleWaitRecv) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, flags=0x%X, invoke loadRecvConn", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, flags);
+    // }
+    loadRecvConn(&ncclShmem.channel.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
+    loadSendConn(&ncclShmem.channel.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
 
-    loadRecvConn(&ncclShmem.channel.devPeers[peer], connIndex, e);
-    loadSendConn(&ncclShmem.channel.devPeers[peer], connIndex, e);
+    // inputBuf = sendbuff, outputBuf = recvbuff
+    setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e); // 事实上也是需要被指定了flag的线程才会进行相应的工作
 
-    setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e);
+    // 初步观察了下，genericOp里边所有thrd都有活干——上边的load、set函数都是在操作shmem，单个thrd操作，然后真正执行的时候，大家都利用shmem里的信息工作
   }
 
   __device__ ~Primitives() {
@@ -448,18 +482,25 @@ class Primitives<
     barrier();
   }
 
+  // inputBuf = sendbuff, outputBuf = recvbuff
   __device__ void setDataPtrs(void const *inputBuf, void *outputBuf, uint64_t redOpArg, struct ncclWorkElemReg* e) {
-    if (flags & RoleInput) {
+    if (flags & RoleInput) { // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
       userBuff = (T*)inputBuf;
       ncclShmem.redOpArgs[0] = redOpArg;  // scaler for local input
     }
-    if (flags & RoleOutput) userBuff = (T*)outputBuf;
+    if (flags & RoleOutput) userBuff = (T*)outputBuf; // 1 * 8 + 1 号线程是 RoleOutput 9
     bool recvProvider = flags == (flags|RoleWaitRecv|DirectWrite);
     bool sendAcceptor = flags == (flags|RoleWaitSend|DirectWrite);
     bool sendProvider = flags == (flags|RoleWaitSend|DirectRead); // sender provides direct buffer (to be fetched)
     bool recvAcceptor = flags == (flags|RoleWaitRecv|DirectRead); // receiver accepts direct buffer
     int regUsed = e != nullptr ? e->elem.regUsed : 0;
+    // 打log 显示上边5个变量全是0
 
+    // if (!(recvProvider == 0 && sendAcceptor == 0 && sendProvider == 0 && recvAcceptor == 0 && regUsed == 0)) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, recvProvider=%d, sendAcceptor=%d, sendProvider=%d, recvAcceptor=%d, regUsed=%d", ncclShmem.comm.rank, blockIdx.x, threadIdx.x, recvProvider, sendAcceptor, sendProvider, recvAcceptor, regUsed);
+    // }
+
+    // 模板参数 Direct 是 1
     if (Direct && recvProvider) {
       int spins = 0;
       void *volatile *slot = ncclShmem.groups[group].recvConns[index]->ptrExchange;
@@ -533,6 +574,7 @@ class Primitives<
       userBuff += delta;
   }
 
+  // static constexpr int Input=0, Output=1;
   __device__ __forceinline__ void send(intptr_t inpIx, int eltN) {
     genericOp<0, 0, 0, 1, Input, -1>(inpIx, -1, -1, eltN, false);
   }
@@ -586,6 +628,7 @@ class Primitives<
   }
   __device__ __forceinline__ void directRecvReduceCopySend(intptr_t inpIx, intptr_t outIx, intptr_t remoteOutIx, int eltN, bool postOp=false) {
     // Direct is only for the send part
+    // 看起来契合了俊丞写的 directRecv是被动操作。
     genericOp<0, 1, 1, 1, Input, Output>(inpIx, outIx, remoteOutIx, eltN, postOp);
   }
 

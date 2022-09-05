@@ -8,6 +8,7 @@
 #define NCCL_PRIMITIVES_H_
 
 #include <type_traits>
+#include <stdlib.h>
 #include "reduce_kernel.h" // for reduction funcs
 #include "common.h"
 
