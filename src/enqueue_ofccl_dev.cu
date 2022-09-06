@@ -1,6 +1,8 @@
 #include "enqueue_ofccl.h"
 #include "collectives_ofccl/device/op128_ofccl.h"
 
+// extern __shared__ ofcclShmemData ofcclShmem;
+
 static __shared__ int quit;
 
 // TODO: nccl最新的代码里，这部分的设计和实现都变了。
@@ -147,7 +149,7 @@ __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 // share mem用超了。
-static __shared__ ofcclShmemData ofcclShmem;
+// __shared__ ofcclShmemData ofcclShmem; // 不应该static
 static __shared__ int sharedCollIds[MAX_LENGTH];
 static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
 static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
@@ -232,6 +234,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         // real work
         // TODO: 在真正的ofccl代码里，需要在这里通过shmem把sendbuf，recvbuf分享出去，然后这个blk的全部线程开始执行
         // 分配的时候注意限制tid，以及等待相应的tid报告完成
+        // 这里已经是每个线程各自工作了
+        
 
 
 

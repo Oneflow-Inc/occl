@@ -628,7 +628,7 @@ class Primitives<
   }
   __device__ __forceinline__ void directRecvReduceCopySend(intptr_t inpIx, intptr_t outIx, intptr_t remoteOutIx, int eltN, bool postOp=false) {
     // Direct is only for the send part
-    // 看起来契合了俊丞写的 directRecv是被动操作。
+    // 在这个操作中契合了俊丞写的 directRecv是被动操作。
     genericOp<0, 1, 1, 1, Input, Output>(inpIx, outIx, remoteOutIx, eltN, postOp);
   }
 

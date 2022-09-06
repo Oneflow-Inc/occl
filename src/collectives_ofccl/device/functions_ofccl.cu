@@ -2,6 +2,8 @@
 #include "collectives_ofccl.h"
 #include "common_ofccl.h"
 
+__shared__ ofcclShmemData ofcclShmem;
+
 #define OFCCL_FUNC5(func, algo, devredop, type, nullify) \
   MACRO_IF(nullify, nullptr, OFCCL_FUNC_NAME(func, algo, LL,     devredop, type)), \
   MACRO_IF(nullify, nullptr, OFCCL_FUNC_NAME(func, algo, LL128,  devredop, type)), \

@@ -5,7 +5,9 @@
 #include "debug.h"
 #include "devcomm.h"
 #include "op128_ofccl.h"
-#include "enqueue_ofccl.h"
+#include "ofccl_contexts.h"
+
+extern __shared__ ofcclShmemData ofcclShmem;
 
 // ***** 这些文件夹内部用的宏，而且本身不带NCCL关键字的，可以不改名 *****
 #if __CUDA_ARCH__ >= 800
@@ -20,8 +22,6 @@
 typedef void(*ncclKern_t)();
 extern __device__ ncclKern_t ncclFuncs[];
 
-// TODO: 这里需要改造一下，切分成初始化和真正执行两部分。
-extern __shared__ ofcclShmemData ofcclShmem;
 template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWorkElement {
   __device__ void run(ncclWorkElem*) {
