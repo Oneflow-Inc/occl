@@ -1,5 +1,6 @@
-#include "enqueue_ofccl.h"
-#include "collectives_ofccl/device/op128_ofccl.h"
+#include "collectives_ofccl.h"
+#include "op128_ofccl.h"
+#include "common_ofccl.h" // for ofcclShmemData
 
 // extern __shared__ ofcclShmemData ofcclShmem;
 
@@ -10,7 +11,7 @@ static __shared__ int quit;
 // 这个是保证在一次调用复制完最多512B，并且以16B为单位。
 // 这个不要求src dst同一类型
 template<typename Tdst, typename Tsrc>
-__device__ void copyToShmemOneShot(Tdst *dst, Tsrc const *src, int tid, int nthreads) { // nccl的这个的函数签名里有个nthreads参数，但是并没有用，应该是为了和下边那个作区分，现在我们可以区分开了，反而带上nthreads是区分不开的。
+static __device__ void copyToShmemOneShot(Tdst *dst, Tsrc const *src, int tid, int nthreads) { // nccl的这个的函数签名里有个nthreads参数，但是并没有用，应该是为了和下边那个作区分，现在我们可以区分开了，反而带上nthreads是区分不开的。
   static_assert(sizeof(Tdst)%(2*sizeof(uint64_t)) == 0 && sizeof(Tsrc)%(2*sizeof(uint64_t)) == 0,
       "copyToShmemOneShot needs sizes which are multiple of 16B");
   static_assert(sizeof(Tdst) >= sizeof(Tsrc), "Tdst size is too small");
@@ -32,7 +33,7 @@ __device__ void copyToShmemOneShot(Tdst *dst, Tsrc const *src, int tid, int nthr
 // 这个要求src dst同一类型。
 // turn的作用：   
 template<typename T>
-__device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthreads, int turn=0) {
+static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthreads, int turn=0) {
   static_assert(sizeof(uint64_t) <= alignof(T), "Uhoh");
   uint64_t *d = reinterpret_cast<uint64_t*>(dst);
   uint64_t const *s = reinterpret_cast<uint64_t const*>(src);
@@ -89,7 +90,7 @@ static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
   }
 }
 
-__device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *globalBlkCount4Coll, int thrdCudaDev) {
+static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *globalBlkCount4Coll, int thrdCudaDev) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int sqeCollId;
@@ -129,7 +130,7 @@ __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target
   return 0;
 }
 
-__device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
+static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
   // int bid = blockIdx.x;
   // int tid = threadIdx.x;
   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> enter cqRead, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));

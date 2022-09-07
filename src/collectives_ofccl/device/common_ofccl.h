@@ -5,7 +5,6 @@
 #include "debug.h"
 #include "devcomm.h"
 #include "op128_ofccl.h"
-#include "ofccl_contexts.h"
 
 extern __shared__ ofcclShmemData ofcclShmem;
 

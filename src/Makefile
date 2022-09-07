@@ -16,7 +16,6 @@ LIBSRCFILES := init.cc channel.cc bootstrap.cc transport.cc enqueue.cc enqueue_o
 								collectives_ofccl/ofccl_sendrecv.cc collectives_ofccl/ofccl_all_reduce.cc collectives_ofccl/ofccl_all_gather.cc collectives_ofccl/ofccl_broadcast.cc collectives_ofccl/ofccl_reduce.cc collectives_ofccl/ofccl_reduce_scatter.cc \
                 graph/topo.cc graph/paths.cc graph/search.cc graph/connect.cc graph/rings.cc graph/trees.cc graph/tuning.cc graph/xml.cc
 
-ENQ_DEVSRC 	:= enqueue_ofccl_dev.cu
 ##### lib files
 LIBNAME     := libnccl.so
 STATICLIBNAME := libnccl_static.a
@@ -39,30 +38,8 @@ LIBOBJ     := $(LIBSRCFILES:%.cc=$(OBJDIR)/%.o) # 替换出来libobj的target，
 DEPFILES   := $(LIBOBJ:%.o=%.d) # 为了解决include依赖，对所有.o文件生成.d文件来记录相应的依赖
 LDFLAGS    += -L${CUDA_LIB} -l$(CUDARTLIB) -lpthread -lrt -ldl
 
-DEVICELIB  := $(BUILDDIR)/obj/collectives/device/colldevice.a $(BUILDDIR)/obj/collectives_ofccl/device/colldevice_ofccl.a # device的相关函数，做一个静态库就够了。
+DEVICELIB  := $(BUILDDIR)/obj/collectives/device/colldevice.a $(BUILDDIR)/obj/collectives_ofccl/device/colldevice_ofccl.a # device目录下的编译结果，打包进一个.a文件
 
-ENQ_DEVOBJ 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.o)
-ENQ_DEVDEP 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
-ENQ_DEV_LINKOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%_link.o)
-ENQ_DEVSTATIC			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.a)
-
-DEBUG_ENQ ?= 1
-ENQ_NVCUFLAGS := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11 --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
-ENQ_NVCUFLAGS += ${GCOV_FLAGS:%=-Xcompiler %}
-ifeq ($(DEBUG_ENQ), 0)
-ENQ_NVCUFLAGS += -O3
-else
-ENQ_NVCUFLAGS += -O0 -G -g
-endif
-ifneq ($(VERBOSE), 0)
-ENQ_NVCUFLAGS += -Xptxas -v -Xcompiler -Wall,-Wextra,-Wno-unused-parameter
-else
-.SILENT:
-endif
-ifneq ($(KEEP), 0)
-ENQ_NVCUFLAGS += -keep
-endif
-ENQ_NVCUFLAGS += -I. -I.. -Iinclude -Icollectives_ofccl/device -I$(BUILDDIR)/include --compiler-options "-fPIC -fvisibility=hidden"
 ##### rules
 build : lib staticlib
 
@@ -92,10 +69,10 @@ $(INCDIR)/nccl.h : nccl.h.in
 	    -e "s/\$${nccl:Version}/$(NCCL_VERSION)/g" \
 	    $< > $@
 
-$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC)
+$(LIBDIR)/$(LIBTARGET): $(LIBOBJ) $(DEVICELIB)
 	@printf "Linking    %-35s > %s\n" $(LIBTARGET) $@
 	mkdir -p $(LIBDIR)
-	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC) $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -shared -Wl,--no-as-needed -Wl,-soname,$(LIBSONAME) -o $@ $(LIBOBJ) $(DEVICELIB) $(LDFLAGS)
 # ln [OPTION]... [-T] TARGET LINK_NAME, 下边这两行不用动。
 	ln -sf $(LIBSONAME) $(LIBDIR)/$(LIBNAME)
 	ln -sf $(LIBTARGET) $(LIBDIR)/$(LIBSONAME)
@@ -105,36 +82,14 @@ null :=
 space := $(null) #
 comma := ,
 
-$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB) $(ENQ_DEVSTATIC)
+$(LIBDIR)/$(STATICLIBTARGET): $(LIBOBJ) $(DEVICELIB)
 	@printf "HELLO Archiving  %-35s > %s\n" $(STATICLIBTARGET) $@
 	mkdir -p $(LIBDIR)
 # printf "create $@\naddlib $(DEVICELIB)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
-	printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddlib $(ENQ_DEVSTATIC)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
+# printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddlib $(ENQ_DEVSTATIC)\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
+	printf "create $@\naddlib $(OBJDIR)/collectives/device/colldevice.a\naddlib $(OBJDIR)/collectives_ofccl/device/colldevice_ofccl.a\naddmod $(subst $(space),$(comma),$(strip $(LIBOBJ)))\nsave\nend" | ar -M
 
-$(ENQ_DEVDEP) : $(ENQ_DEVSRC)
-	mkdir -p $(OBJDIR)
-	@$(NVCC) $(ENQ_NVCUFLAGS) -M $< -o $@.tmp
-	@sed "0,/^.*:/s//$(subst /,\/,$@):/" $@.tmp > $@
-	@sed -e 's/.*://' -e 's/\\$$//' < $@.tmp | fmt -1 | \
-                sed -e 's/^ *//' -e 's/$$/:/' >> $@
-	@rm -f $@.tmp
-	@cp $@ $(@:.dep=.d)
 
--include $(ENQ_DEVDEP)
-$(ENQ_DEVOBJ) : $(ENQ_DEVSRC) $(ENQ_DEVDEP)
-	@printf "ENQUEUE DEV Compiling  %-35s > %s\\n" $< $@
-	@printf "DEBUG_ENQ is %s\\n" $(DEBUG_ENQ)
-	@printf "ENQ_NVCUFLAGS is %s\\n" $(ENQ_NVCUFLAGS)
-	mkdir -p $(OBJDIR)
-	${NVCC} ${ENQ_NVCUFLAGS} -dc $< -o $@
-
-# 经过尝试，发现不能把-dc -dlink放在一起，只做一个.o
-$(ENQ_DEV_LINKOBJ) : $(ENQ_DEVOBJ)
-	$(NVCC) $(NVCUFLAGS) -dlink $^ -o $@
-
-$(ENQ_DEVSTATIC) : $(ENQ_DEVOBJ) $(ENQ_DEV_LINKOBJ)
-	@printf "Archiving  %-35s > %s\n" enqueue_dev_objects $@
-	ar cr $@ $^
 
 $(PKGDIR)/nccl.pc : nccl.pc.in
 	mkdir -p $(PKGDIR)

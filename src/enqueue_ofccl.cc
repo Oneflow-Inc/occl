@@ -5,7 +5,7 @@
  ************************************************************************/
 
 #include "enqueue_ofccl.h"
-#include "collectives.h"
+#include "collectives_ofccl.h"
 #include "debug.h"
 #include "enqueue.h" // struct ncclQueueInfo
 #include "argcheck.h"
@@ -14,7 +14,7 @@
 #include "coll_net.h"
 #include "gdrwrap.h"
 #include "group.h"
-#include "nccl.h"
+// #include "nccl.h"
 #include "transport.h"
 
 #include <cstddef>
@@ -633,7 +633,7 @@ thread_local CallbackFunc *callbacks;
 
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
-SQ *sqCreate(int length) {
+static SQ *sqCreate(int length) {
   SQ *sq = nullptr;
   checkRuntime(cudaMallocHost((void **)&sq, sizeof(SQ)));
   sq->length = length + 1;
@@ -645,7 +645,7 @@ SQ *sqCreate(int length) {
   return sq;
 }
 
-void sqDestroy(SQ *sq) {
+static void sqDestroy(SQ *sq) {
   if (sq) {
     checkRuntime(cudaFreeHost(sq->buffer));
     checkRuntime(cudaFreeHost(sq));
@@ -684,7 +684,7 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *call
   return 0;
 }
 
-CQ *cqCreate(int length) {
+static CQ *cqCreate(int length) {
   CQ *cq = nullptr;
   checkRuntime(cudaMallocHost((void **)&cq, sizeof(CQ)));
   cq->length = length + 1;
@@ -696,14 +696,14 @@ CQ *cqCreate(int length) {
   return cq;
 }
 
-void cqDestroy(CQ *cq) {
+static void cqDestroy(CQ *cq) {
   if (cq) {
     checkRuntime(cudaFreeHost(cq->buffer));
     checkRuntime(cudaFreeHost(cq));
   }
 }
 // thread_local static int tempRound = 0;
-int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
+static int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
   pthread_mutex_lock(&cq->mutex);
   // tempRound++;
   // if(tempRound % tempPrintRound == 0) OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), thrdCudaDev, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
