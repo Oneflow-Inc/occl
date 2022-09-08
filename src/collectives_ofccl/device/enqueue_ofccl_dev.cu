@@ -284,14 +284,15 @@ static __device__ int execColl(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll,
 
 }
 
-static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn) {
+static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn, int activeCount) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = sharedThrdCount4Coll[collId];
 
   turn = copyToShmemLoop(&sharedCollCtx.comm, &(globalCollCtx4Blk7Coll->comm), tid, nthreads, turn);
   turn = copyToShmemLoop(&sharedCollCtx.channel, &(globalCollCtx4Blk7Coll->channel), tid, nthreads, turn);
-  copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads);
+  // copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads); // TODO: 用了这个会报错misaligned，就先loop吧
+  turn = copyToShmemLoop(&sharedCollCtx.work.elems[0], &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads, turn);
   __syncthreads();
   
   if (sharedCollCtx.work.header.type == ncclWorkTypeColl) {
@@ -338,7 +339,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         }
 
         // ***** 先准备好sharedCollCtx *****
-        turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn);
+        turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, blkStatus.numActiveColls);
 
         // ***** 然后调用ofcclFunc *****
         ofcclFuncs[sharedCollCtx.work.header.funcIndex]();
@@ -372,14 +373,14 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     blkStatus.numActiveColls = 0;
     blkStatus.currActiveCollId = -1;
     blkStatus.sqReadFrontier = 0;
-    __threadfence_block();
+    // __threadfence_block();
   }
-  // __syncthreads();
+  __syncthreads();
   while (true) {
     for (int i = 0; i < TRAVERSE_TIMES; i++) {
       turn = traverseGlobalCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
     }
-    
+    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq @ %p", thrdCudaDev, bid, tid, sq);
     checkSQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx);
 
 thrd_common:
