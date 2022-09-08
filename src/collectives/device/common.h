@@ -208,15 +208,15 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
   int nthreads = blockDim.x;
   int bid = blockIdx.x;
 
-  int turn = copyToShmem(&ncclShmem.comm, comm);
+  int turn = copyToShmem(&ncclShmem.comm, comm); // loop
   // get address of channel without incurring indirect load from ncclDevCom::channels
   ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-  turn = copyToShmem(&ncclShmem.channel, channel, turn);
+  turn = copyToShmem(&ncclShmem.channel, channel, turn); // loop
 
   // To optimize for latency, (only) the first operation is passed as argument.
   if (bid == 0 && first.header.type != ncclWorkTypeUnused) {
     // Copy first elem to work and zero out the rest
-    copyToShmem(&ncclShmem.work, &first, tid, nthreads);
+    copyToShmem(&ncclShmem.work, &first, tid, nthreads); // oneshot
   }
   __syncthreads(); // publish ncclShmem
 

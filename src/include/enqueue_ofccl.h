@@ -51,8 +51,7 @@ typedef struct {
   int *globalThrdCount4Coll;
   int *globalCollIds;
   DevComm7WorkElem *globalDevComm7WorkElems;
-  ofcclShmemData *globalBlk2Coll2Shmem;
-  CollExecContext *globalCollExecContext;
+  CollCtx *globalBlk2CollId2CollCtx;
 } KernelThrdArgs;
 
 

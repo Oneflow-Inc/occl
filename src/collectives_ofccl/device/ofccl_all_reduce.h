@@ -10,10 +10,10 @@ namespace {
     const int nthreads = args->header.nWarps*WARP_SIZE;
     const int bid = args->bid;
     const int nChannels = args->nChannels;
-    ncclRing *ring = &ofcclShmem.channel.ring;
+    ncclRing *ring = &sharedCollCtx.channel.ring;
     int ringIx = ring->index;
     const ssize_t chunkSize = int(Proto::calcBytePerStep()/sizeof(T) * (Proto::Id == NCCL_PROTO_SIMPLE ? ALLREDUCE_CHUNKSTEPS : 1));
-    const int nranks = ofcclShmem.comm.nRanks;
+    const int nranks = sharedCollCtx.comm.nRanks;
     const ssize_t loopSize = nChannels*nranks*chunkSize; // 没有办法按照应用的buff的大小来切分chunk，而是需要从硬件的角度去指定chunkSize。所以可能要运行多次逻辑上的ringAllReduce操作。
     const ssize_t size = args->count;
 

@@ -6,7 +6,7 @@
 #include "devcomm.h"
 #include "op128_ofccl.h"
 
-extern __shared__ ofcclShmemData ofcclShmem;
+extern __shared__ CollCtx sharedCollCtx;
 
 // ***** 这些文件夹内部用的宏，而且本身不带NCCL关键字的，可以不改名 *****
 #if __CUDA_ARCH__ >= 800
@@ -18,8 +18,8 @@ extern __shared__ ofcclShmemData ofcclShmem;
 #define OFCCL_MAX_DEV_ARITY (NCCL_MAX_TREE_ARITY-1)  // Using balanced tree instead of split tree
 
 // ***** 接下来可以忽略所有和global函数定义相关的内容 *****
-typedef void(*ncclKern_t)();
-extern __device__ ncclKern_t ncclFuncs[];
+typedef void(*ofcclKern_t)();
+extern __device__ ofcclKern_t ofcclFuncs[];
 
 template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWorkElement {
@@ -51,7 +51,7 @@ struct RunWork {
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
   /*OFCCL_LOG(OFCCL, "in IMPL_COLL_FUNC, %s, %s, %s, %s, %s\n", #func, #algo, #proto, #devredop, #type);*/ /* 这里传模板参数的时候，应该是还是得传ncclFunc前缀的，这时定义在devcomm.h里的，我们应该不需要改 */ \
-  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&ofcclShmem.work); \
+  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.work); \
 }
 
 #define IMPL_COLL4(func, algo, devredop, type, ncclType) \

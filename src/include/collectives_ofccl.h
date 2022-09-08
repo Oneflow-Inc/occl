@@ -45,8 +45,8 @@ typedef struct {
   int counter;
   int logicHead;
 
-  const void *send_buffer;
-  void *recv_buffer;
+  const void *sendbuff;
+  void *recvbuff;
 
   bool quit;
 } SQE;
@@ -89,13 +89,13 @@ typedef struct {
   void* srcs[NCCL_MAX_DIRECT_ARITY+1];
   void* dsts[NCCL_MAX_DIRECT_ARITY+1];
   int totalSendSize[NCCL_MAX_SLICE_PER_CHUNK];
-} ofcclShmemGroup;
+} CollCtxGroup;
 
-// sizeof(ofcclShmemData)=42104, sizeof(ofcclShmemGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
+// sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
 typedef struct {
   union {
     uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
-    ofcclShmemGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
+    CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
   };
   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
   struct ncclDevComm comm;
@@ -104,11 +104,11 @@ typedef struct {
   struct ncclWork work;
   // 代表当前的表项对应的集合通信被调用，还没有执行完成。初始化置0；发现了相应的sqe之后置1；执行完成后置0。
   int executing;
-} ofcclShmemData;
-static_assert(offsetof(ofcclShmemData, work)%16 == 0, "shmem.work needs to be 16B aligned");
+  // int numDoneThrds;
+} CollCtx;
+static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem);
-
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

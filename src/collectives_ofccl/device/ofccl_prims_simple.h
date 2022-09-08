@@ -64,7 +64,7 @@ class Primitives<
   inline __device__ bool checkAbort(int &spins) {
     spins++;
     if (!(flags & Aborted) && spins == NCCL_SPINS_BEFORE_CHECK_ABORT) {
-      flags |= *ofcclShmem.comm.abortFlag ? Aborted : 0;
+      flags |= *sharedCollCtx.comm.abortFlag ? Aborted : 0;
       spins = 0;
     }
     return flags & Aborted;
@@ -81,7 +81,7 @@ class Primitives<
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         connStepCache = *connStepPtr;
         if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
-        //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", ofcclShmem.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
+        //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
       }
     }
 
@@ -89,8 +89,8 @@ class Primitives<
       if (isSendNotRecv && (flags & SizesFifoEnabled)) // proxy 相关，不用考虑
         connSizesFifoPtr[step%NCCL_STEPS] = nelts*sizeof(T);
 
-      void **ptrs = isSendNotRecv ? (ofcclShmem.groups[group].dsts + Dst)
-                                  : (ofcclShmem.groups[group].srcs + Src);
+      void **ptrs = isSendNotRecv ? (sharedCollCtx.groups[group].dsts + Dst)
+                                  : (sharedCollCtx.groups[group].srcs + Src);
       if (flags & OffsFifoEnabled) // proxy 相关，不用考虑
         ptrs[index] = connEltsFifo + loadInt(connOffsFifoPtr + (step%NCCL_STEPS))/sizeof(T);
       else if (isSendNotRecv && DirectSend) {
@@ -138,7 +138,7 @@ class Primitives<
     constexpr int Dst = DstBuf != -1;
 
     nelem = nelem < 0 ? 0 : nelem;
-    // stepSize(ofcclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T))
+    // stepSize(sharedCollCtx.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T))
     // SlicePerChunk = 2, StepPerSlice = 2
     int sliceSize = stepSize*StepPerSlice;
     sliceSize = max(divUp(nelem, 16*SlicePerChunk)*16, sliceSize/32);
@@ -178,35 +178,35 @@ class Primitives<
       do {
         sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
         if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)))
-          ofcclShmem.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
+          sharedCollCtx.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
-          ofcclShmem.groups[group].dsts[0] = userBuff + dstIx + offset;
+          sharedCollCtx.groups[group].dsts[0] = userBuff + dstIx + offset;
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
-        if (DirectRecv && ofcclShmem.groups[group].srcs[0] == ofcclShmem.groups[group].dsts[0]) {
+        if (DirectRecv && sharedCollCtx.groups[group].srcs[0] == sharedCollCtx.groups[group].dsts[0]) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send) {
             // (1-Send) is only there to avoid compilation errors in case MaxSend=0 (and Send=0).
             ReduceOrCopyMulti<Unroll, RedOp, T, 1, 1, 1, (1-Send)+MaxSend, 0>
               (tid, nworkers, nullptr, false,
-               1, (T const**)ofcclShmem.groups[group].srcs,
-               fan.nsend(), (T**)ofcclShmem.groups[group].dsts+1,
+               1, (T const**)sharedCollCtx.groups[group].srcs,
+               fan.nsend(), (T**)sharedCollCtx.groups[group].dsts+1,
                sliceSize);
           }
-        } else if (DirectSend && !DirectRecv && SrcBuf != Input && ofcclShmem.groups[group].dsts[Dst] == nullptr) {
+        } else if (DirectSend && !DirectRecv && SrcBuf != Input && sharedCollCtx.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
           ReduceOrCopyMulti<Unroll, RedOp, T, 1, 1, 1, 1, 0>
-            (tid, nworkers, ofcclShmem.redOpArgs, postOp,
-             Recv, (T const**)ofcclShmem.groups[group].srcs,
-             Dst, (T**)ofcclShmem.groups[group].dsts,
+            (tid, nworkers, sharedCollCtx.redOpArgs, postOp,
+             Recv, (T const**)sharedCollCtx.groups[group].srcs,
+             Dst, (T**)sharedCollCtx.groups[group].dsts,
              sliceSize);
         } else {
           constexpr int PreOpN = SrcBuf != Input ? 0 :
                                  DirectRecv*MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1+NCCL_MAX_DIRECT_ARITY) : 1;
           ReduceOrCopyMulti<Unroll, RedOp, T, Recv+Src, Recv*MaxRecv+Src, Send+Dst, Send*MaxSend+Dst, PreOpN>
-            (tid, nworkers, ofcclShmem.redOpArgs, postOp,
-             Recv*fan.nrecv()+Src, (T const**)ofcclShmem.groups[group].srcs,
-             Send*fan.nsend()+Dst, (T**)ofcclShmem.groups[group].dsts,
+            (tid, nworkers, sharedCollCtx.redOpArgs, postOp,
+             Recv*fan.nrecv()+Src, (T const**)sharedCollCtx.groups[group].srcs,
+             Send*fan.nsend()+Dst, (T**)sharedCollCtx.groups[group].dsts,
              sliceSize);
         }
         barrier(); // This barrier has a counterpart in following loop
@@ -253,7 +253,7 @@ class Primitives<
         *connStepPtr = step; // Return credits in case we rounded up.
       }
       if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
-        ofcclShmem.groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
+        sharedCollCtx.groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
         connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
         connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0; // 这个和proxy相关，先不关注。int *offsFifo;      // Buffer fifo from proxy to GPU，所以对GPU是recv
@@ -293,7 +293,7 @@ class Primitives<
         connStepPtr = conn->tail;
       }
       if (flags & RoleWaitSend) {
-        ofcclShmem.groups[group].sendConns[index] = conn; // WaitSend role saves since that's who needs it in setDataPtrs()
+        sharedCollCtx.groups[group].sendConns[index] = conn; // WaitSend role saves since that's who needs it in setDataPtrs()
         connStepPtr = conn->head;
         connStepCache = *connStepPtr;
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0;
@@ -332,7 +332,7 @@ class Primitives<
   __device__ void setDataPtrs(void const *inputBuf, void *outputBuf, uint64_t redOpArg, struct ncclWorkElemReg* e) {
     if (flags & RoleInput) { // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
       userBuff = (T*)inputBuf;
-      ofcclShmem.redOpArgs[0] = redOpArg;  // scaler for local input
+      sharedCollCtx.redOpArgs[0] = redOpArg;  // scaler for local input
     }
     if (flags & RoleOutput) userBuff = (T*)outputBuf; // 1 * 8 + 1 号线程是 RoleOutput 9
     bool recvProvider = flags == (flags|RoleWaitRecv|DirectWrite);
@@ -343,13 +343,13 @@ class Primitives<
     // 打log 显示上边5个变量全是0
 
     // if (!(recvProvider == 0 && sendAcceptor == 0 && sendProvider == 0 && recvAcceptor == 0 && regUsed == 0)) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, recvProvider=%d, sendAcceptor=%d, sendProvider=%d, recvAcceptor=%d, regUsed=%d", ofcclShmem.comm.rank, blockIdx.x, threadIdx.x, recvProvider, sendAcceptor, sendProvider, recvAcceptor, regUsed);
+    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, recvProvider=%d, sendAcceptor=%d, sendProvider=%d, recvAcceptor=%d, regUsed=%d", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, recvProvider, sendAcceptor, sendProvider, recvAcceptor, regUsed);
     // }
 
     // 模板参数 Direct 是 1
     if (Direct && recvProvider) {
       int spins = 0;
-      void *volatile *slot = ofcclShmem.groups[group].recvConns[index]->ptrExchange;
+      void *volatile *slot = sharedCollCtx.groups[group].recvConns[index]->ptrExchange;
       // Wait for consumer to consume previous value before trampling it.
       while (*slot != nullptr && !checkAbort(spins));
       directBuff = (T*)outputBuf;
@@ -360,7 +360,7 @@ class Primitives<
     }
     if (Direct && sendAcceptor) {
       int spins = 0;
-      void *volatile *slot = ofcclShmem.groups[group].sendConns[index]->ptrExchange;
+      void *volatile *slot = sharedCollCtx.groups[group].sendConns[index]->ptrExchange;
       void *ptr;
       while (true) {
         ptr = *slot;
@@ -372,9 +372,9 @@ class Primitives<
     }
     if (Direct && sendProvider) {
       int spins = 0;
-      void *volatile *slot = ofcclShmem.groups[group].sendConns[index]->ptrExchange;
-      volatile uint64_t* argSlot0 = ofcclShmem.groups[group].sendConns[index]->redOpArgExchange;
-      volatile uint64_t* argSlot1 = ofcclShmem.groups[group].sendConns[index]->redOpArgExchange+1;
+      void *volatile *slot = sharedCollCtx.groups[group].sendConns[index]->ptrExchange;
+      volatile uint64_t* argSlot0 = sharedCollCtx.groups[group].sendConns[index]->redOpArgExchange;
+      volatile uint64_t* argSlot1 = sharedCollCtx.groups[group].sendConns[index]->redOpArgExchange+1;
       // Wait for consumer to consume previous value before trampling it.
       while ((*slot != nullptr || *argSlot0 != 0 || *argSlot1 !=0) && !checkAbort(spins));
       // If there is no recv, then we are directly pulling from input buffer (e.g. directScatter)
@@ -390,9 +390,9 @@ class Primitives<
     }
     if (Direct && recvAcceptor) {
       int spins = 0;
-      void *volatile *slot = ofcclShmem.groups[group].recvConns[index]->ptrExchange;
-      volatile uint64_t* argSlot0 = ofcclShmem.groups[group].recvConns[index]->redOpArgExchange;
-      volatile uint64_t* argSlot1 = ofcclShmem.groups[group].recvConns[index]->redOpArgExchange+1;
+      void *volatile *slot = sharedCollCtx.groups[group].recvConns[index]->ptrExchange;
+      volatile uint64_t* argSlot0 = sharedCollCtx.groups[group].recvConns[index]->redOpArgExchange;
+      volatile uint64_t* argSlot1 = sharedCollCtx.groups[group].recvConns[index]->redOpArgExchange+1;
       void *ptr;
       while (true) {
         ptr = *slot;
@@ -408,7 +408,7 @@ class Primitives<
           arg1 = *argSlot1;
           if ((arg0 != 0 && arg1 != 0) || checkAbort(spins)) break;
         }
-        ofcclShmem.redOpArgs[1+index] = ((arg1 & 0xffffffff)<<32) | (arg0 & 0xffffffff);
+        sharedCollCtx.redOpArgs[1+index] = ((arg1 & 0xffffffff)<<32) | (arg0 & 0xffffffff);
       }
       *argSlot0 = 0; *argSlot1 = 0;
       *slot = nullptr;
@@ -421,7 +421,7 @@ class Primitives<
       void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint32_t group=0, struct ncclWorkElem* e = nullptr
     ):
     tid(tid),
-    stepSize(ofcclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
+    stepSize(sharedCollCtx.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
 
     // For send operations, we need an extra warp to overlap the threadfence and the copy
     this->nthreads = nthreads;
@@ -460,10 +460,10 @@ class Primitives<
     if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index]; // 同上
     
     // if (flags & RoleWaitRecv) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, flags=0x%X, invoke loadRecvConn", ofcclShmem.comm.rank, blockIdx.x, threadIdx.x, flags);
+    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, flags=0x%X, invoke loadRecvConn", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, flags);
     // }
-    loadRecvConn(&ofcclShmem.channel.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
-    loadSendConn(&ofcclShmem.channel.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
+    loadRecvConn(&sharedCollCtx.channel.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
+    loadSendConn(&sharedCollCtx.channel.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
 
     // inputBuf = sendbuff, outputBuf = recvbuff
     setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e); // 事实上也是需要被指定了flag的线程才会进行相应的工作
@@ -472,16 +472,16 @@ class Primitives<
   }
 
   __device__ ~Primitives() {
-    // Ensure ofcclShmem.groups[].send/recvConns are available
+    // Ensure sharedCollCtx.groups[].send/recvConns are available
     if (!(flags & ThreadsSynced))
       barrier();
     // Save steps for the next operation
     if (flags & (RolePostSend|RolePostRecv)) {
-      auto *conns = (flags & RolePostSend) ? ofcclShmem.groups[group].sendConns : ofcclShmem.groups[group].recvConns;
+      auto *conns = (flags & RolePostSend) ? sharedCollCtx.groups[group].sendConns : sharedCollCtx.groups[group].recvConns;
       conns[index]->step = step;
     }
     // Make sure all threads are done writing back conn->step and done using
-    // ofcclShmem.groups[group]
+    // sharedCollCtx.groups[group]
     barrier();
   }
 

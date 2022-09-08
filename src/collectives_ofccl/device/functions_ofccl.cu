@@ -2,8 +2,6 @@
 #include "collectives_ofccl.h"
 #include "common_ofccl.h"
 
-__shared__ ofcclShmemData ofcclShmem;
-
 #define OFCCL_FUNC5(func, algo, devredop, type, nullify) \
   MACRO_IF(nullify, nullptr, OFCCL_FUNC_NAME(func, algo, LL,     devredop, type)), \
   MACRO_IF(nullify, nullptr, OFCCL_FUNC_NAME(func, algo, LL128,  devredop, type)), \
@@ -80,7 +78,7 @@ __shared__ ofcclShmemData ofcclShmem;
   OFCCL_FUNCS3B(func, Sum)
 
 // Must be consistent with the ncclFuncSet enum
-__device__ ncclKern_t ofcclFuncs[1+ncclNumTypes+NCCL_NUM_FUNCTIONS*ncclNumDevRedOps*ncclNumTypes*NCCL_NUM_ALGORITHMS*NCCL_NUM_PROTOCOLS] = {
+__device__ ofcclKern_t ofcclFuncs[1+ncclNumTypes+NCCL_NUM_FUNCTIONS*ncclNumDevRedOps*ncclNumTypes*NCCL_NUM_ALGORITHMS*NCCL_NUM_PROTOCOLS] = {
 // Don't try to initialize the host shadow copy of this device-side global
 // variable. There is no host pointer to a device-side function, which
 // confuses clang. This will be fixed in the next clang release.

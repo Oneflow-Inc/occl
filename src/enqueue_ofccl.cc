@@ -613,12 +613,10 @@ static thread_local int hostCollIds[MAX_LENGTH];
 static thread_local int *globalCollIds;
 static thread_local DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
 static thread_local DevComm7WorkElem *globalDevComm7WorkElems;
-static thread_local ofcclShmemData *globalBlk2Coll2Shmem;
+static thread_local CollCtx *globalBlk2CollId2CollCtx;
 
 thread_local SQ *sq;
 thread_local CQ *cq;
-static thread_local CollExecContext *hostCollExecContext[MAX_LENGTH];
-thread_local CollExecContext *globalCollExecContext; // extern
 
 // for poller thread
 static thread_local pthread_t poller;
@@ -807,8 +805,7 @@ void *startKernel(void *args) {
   globalThrdCount4Coll = ((KernelThrdArgs *)args)->globalThrdCount4Coll;
   globalCollIds = ((KernelThrdArgs *)args)->globalCollIds;
   globalDevComm7WorkElems = ((KernelThrdArgs *)args)->globalDevComm7WorkElems;
-  globalBlk2Coll2Shmem = ((KernelThrdArgs *)args)->globalBlk2Coll2Shmem;
-  globalCollExecContext = ((KernelThrdArgs *)args)->globalCollExecContext;
+  globalBlk2CollId2CollCtx = ((KernelThrdArgs *)args)->globalBlk2CollId2CollCtx;
   
   checkRuntime(cudaSetDevice(thrdCudaDev));
 
@@ -816,16 +813,16 @@ void *startKernel(void *args) {
   
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
 
-  argsptrs[0] = &sq;
-  argsptrs[1] = &cq;
-  argsptrs[2] = &thrdCudaDev;
-  argsptrs[3] = &collCount;
-  argsptrs[4] = &globalCqes;
-  argsptrs[5] = &globalBlkCount4Coll;
-  argsptrs[6] = &globalThrdCount4Coll;
-  argsptrs[7] = &globalCollIds;
-  argsptrs[8] = &globalDevComm7WorkElems;
-  argsptrs[9] = &globalBlk2Coll2Shmem;
+  argsptrs[0]  = &sq;
+  argsptrs[1]  = &cq;
+  argsptrs[2]  = &thrdCudaDev;
+  argsptrs[3]  = &collCount;
+  argsptrs[4]  = &globalCqes;
+  argsptrs[5]  = &globalBlkCount4Coll;
+  argsptrs[6]  = &globalThrdCount4Coll;
+  argsptrs[7]  = &globalCollIds;
+  argsptrs[8]  = &globalDevComm7WorkElems;
+  argsptrs[9]  = &globalBlk2CollId2CollCtx;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -1007,7 +1004,7 @@ ncclResult_t ofcclPrepareDone() {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d, sizeof(ofcclShmemData)=%lu, sizeof(ofcclShmemGroup)=%lu, offsetof(struct ofcclShmemData, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct ofcclShmemData, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(ofcclShmemData)=%lu", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x, sizeof(ofcclShmemData), sizeof(ofcclShmemGroup), offsetof(ofcclShmemData, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(ofcclShmemData, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(ofcclShmemData));
+  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct CollCtx, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(CollCtx, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx));
   
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
@@ -1029,14 +1026,12 @@ ncclResult_t ofcclPrepareDone() {
 
   checkRuntime(cudaStreamCreate(&kernelStream));
 
-  checkRuntime(cudaMalloc(&globalBlk2Coll2Shmem, daemonKernelGridDim.x * MAX_LENGTH * sizeof(ofcclShmemData)));
-
-
+  checkRuntime(cudaMalloc(&globalBlk2CollId2CollCtx, daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
   
-  kernelThrdArgs = { sq, cq, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim, collCount, globalCqes, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2Coll2Shmem, globalCollExecContext };
+  kernelThrdArgs = { sq, cq, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim, collCount, globalCqes, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx };
   pthread_create(&kernelThrd, NULL, startKernel, &kernelThrdArgs);
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, kernelThrdArgs.cudaDev);
 

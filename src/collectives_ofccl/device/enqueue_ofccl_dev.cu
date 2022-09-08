@@ -1,12 +1,7 @@
-#include "collectives_ofccl.h"
-#include "op128_ofccl.h"
-#include "common_ofccl.h" // for ofcclShmemData
-
-// extern __shared__ ofcclShmemData ofcclShmem;
-
-static __shared__ int quit;
+#include "enqueue_ofccl_dev.h"
 
 // TODO: nccl最新的代码里，这部分的设计和实现都变了。
+// 
 // Copy src to dst and fill extra size with zeroes
 // 这个是保证在一次调用复制完最多512B，并且以16B为单位。
 // 这个不要求src dst同一类型
@@ -90,7 +85,16 @@ static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
   }
 }
 
-static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int *globalBlkCount4Coll, int thrdCudaDev) {
+// share mem用超了。
+__shared__ CollCtx sharedCollCtx; // 不能static，primitives要用
+
+static __shared__ BlkStatus blkStatus;
+// TODO: 下边这几个可以尝试用constant，先不急
+static __shared__ int sharedCollIds[MAX_LENGTH]; // prepareColl会接受用户传进来的collId，而prepareColl工作在每个rank上，我们不能假设各个rank会收到连续的collId，所以用一个数组把收到的collId整理起来，其实相当于是维护了一个map，但是cuda上没有map，只好用这种方式
+static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
+static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
+
+static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int thrdCudaDev) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int sqeCollId;
@@ -107,8 +111,8 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
 
   // 先判断一下相应的collId是不是该自己的bid处理，不该自己处理直接返回-1
   sqeCollId = target->collId;
-  // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> globalBlkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, globalBlkCount4Coll[sqeCollId]);
-  if (bid >= globalBlkCount4Coll[sqeCollId]) {
+  // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> sharedBlkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, sharedBlkCount4Coll[sqeCollId]);
+  if (bid >= sharedBlkCount4Coll[sqeCollId]) {
     return -1;
   } else {
     // 自己读到之后，更新相应的counter；至于读到的sqe对应的collId是不是该自己处理，是caller的事。
@@ -118,7 +122,7 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
     __threadfence_system();
     // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of collId %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
     
-    if (old_counter + 1 == globalBlkCount4Coll[sqeCollId]) {
+    if (old_counter + 1 == sharedBlkCount4Coll[sqeCollId]) {
       
       unsigned long long int old_head = atomicAdd(&sq->head, 1);
 
@@ -149,122 +153,238 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
   return 0;
 }
 
-// share mem用超了。
-// __shared__ ofcclShmemData ofcclShmem; // 不应该static
-static __shared__ int sharedCollIds[MAX_LENGTH];
-static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
-static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
 
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, ofcclShmemData *globalBlk2Coll2Shmem) {
-  uint64_t round = 0;
+static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
-  unsigned long long int sqReadFrontier = 0;
-  // int tempRound = 0;
-
-  // TODO: 构建任务列表
+  // 构建任务列表
   for (int i = 0; i < collCount; i++) {
     int collId = sharedCollIds[i] = globalCollIds[i];
-    // 这两个变量会限制很多行为。
+    // 以下这两个变量会限制很多行为。
     int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
     int thrdLimit = sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
     int nthreads = thrdLimit; // 需要按不同的集合通信分别指定。
-    int turn;
 
-    ofcclShmemData *globalShmem4Blk7Coll = globalBlk2Coll2Shmem + bid * MAX_LENGTH + collId;
+    // 每个block一份globalShmem
+    CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
     // ***** 移植ncclKernel的逻辑 *****
     if (bid < blkLimit && tid < thrdLimit) {
       ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
-      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->comm), comm, tid, nthreads);
-      turn = copyToShmemLoop(&(ofcclShmem.comm), comm, tid, nthreads);
-      // 不明白为啥能这样强转：get address of channel without incurring indirect load from ncclDevComm::channels
+      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->comm), comm, tid, nthreads, turn);
+      // 一个奇技淫巧：get address of channel without incurring indirect load from ncclDevComm::channels
       // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
       ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
-      __syncthreads();
+      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
 
       // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
-      turn = copyToShmemLoop(&(globalShmem4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用oneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
+      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用copyToShmemOneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
       // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
-      __syncthreads();
-
-      if (globalShmem4Blk7Coll->work.header.type == ncclWorkTypeColl) {
+    }
+    __syncthreads();
+    if (bid < blkLimit && tid < thrdLimit) {
+      if (globalCollCtx4Blk7Coll->work.header.type == ncclWorkTypeColl) {
         // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
         // 原来这个写法，应该是想修改we->redOpArg，不过修改we->redOpArg一个线程就够了，所以让理论上最多的线程来工作，咱们保留就好。
-        if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(globalShmem4Blk7Coll->work.elems[tid]));
+        if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(globalCollCtx4Blk7Coll->work.elems[tid]));
       } // 目前不用考虑其他ncclWorkType
-      __syncthreads();
+    }
+    __syncthreads();
 
+    if (bid < blkLimit && tid < thrdLimit) {
       if (tid == 0) {
-        globalShmem4Blk7Coll->executing = 0;
-        // OFCCL_LOG(OFCCL, "nthreads: globalShmem4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalShmem4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
+        globalCollCtx4Blk7Coll->executing = 0;
+        // globalCollCtx4Blk7Coll->numDoneThrds = 0;
+        // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
       }
-      __syncthreads();
+    }
+    __syncthreads();
+  }
+  return turn;
+}
+
+static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  
+  if (tid == 0) {
+    SQE target;
+    // TODO: really need system?? 之后可以看看__threadfence()会不会提高性能。
+    __threadfence_system(); // make sure read new head.
+    
+    if (blkStatus.sqReadFrontier < sq->head) {
+      // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
+      // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
+      blkStatus.sqReadFrontier = sq->head;
     }
 
+    // 能读到，假如是正常SQE，把信息在任务列表里记录一下；假如是quit，那也记录一下
+    // 读不到新东西那就算了
+    if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, blkStatus.sqReadFrontier) || sqRead(sq, blkStatus.sqReadFrontier, &target, thrdCudaDev) == -1) {
+      goto checkSQ_common;
+    } else {
+      blkStatus.sqReadFrontier++;
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get collId %d, blkStatus.sqReadFrontier updates to %llu", thrdCudaDev, bid, tid, target.collId, GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+      if (target.quit) {
+        blkStatus.quit = 1;
+        // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
+        goto checkSQ_common;
+      }
+
+      // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
+      int newActiveCollId = target.collId;
+      int blkLimit = sharedBlkCount4Coll[newActiveCollId];
+      if (bid < blkLimit) {
+        CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
+        globalCollCtx4Blk7Coll->executing = 1;
+        globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
+        globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
+        
+        // block的0号线程操作shmem，不用原子操作
+        blkStatus.numActiveColls += 1; // TODO 不同的block上，这个值可能会不同。
+      }
+    }
+  }
+checkSQ_common:
+  __syncthreads();
+}
+
+static __device__ void manipulateCQ(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  int blkLimit = sharedBlkCount4Coll[doneCollId];
+  
+  if (bid < blkLimit && tid == 0) {
+    // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
+    int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
+    __threadfence(); // cqes在global memory里边，全部thread关心。
+
+    if (old_counter + 1 == sharedBlkCount4Coll[doneCollId]) {
+      atomicExch(&globalCqes[doneCollId].counter, 0);
+      while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev) == -1) {
+        // tempRound++;
+        // if(tempRound % tempPrintRound == 0) OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> cqWrite fail, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+
+      }
+      // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, doneCollId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, doneCollId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+      __threadfence();
+    }
+  }
+  __syncthreads();
+}
+
+static __device__ int execColl(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collCount, int collId, int turn) {
+  // 先准备好sharedCollCtx，然后调用ofcclFunc
+  int tid = threadIdx.x;
+  int nthreads = sharedThrdCount4Coll[collId];
+  int bid = blockIdx.x;
+
+  // TODO 跑到底时候应该用不到这个。
+
+}
+
+static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  int nthreads = sharedThrdCount4Coll[collId];
+
+  turn = copyToShmemLoop(&sharedCollCtx.comm, &(globalCollCtx4Blk7Coll->comm), tid, nthreads, turn);
+  turn = copyToShmemLoop(&sharedCollCtx.channel, &(globalCollCtx4Blk7Coll->channel), tid, nthreads, turn);
+  copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads);
+  __syncthreads();
+  
+  if (sharedCollCtx.work.header.type == ncclWorkTypeColl) {
+    if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(sharedCollCtx.work.elems[tid]));
+  } // 目前不用考虑其他ncclWorkType
+  __syncthreads();
+  
+  return turn;
+}
+
+static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *globalCollCtx4Blk7Coll) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  int blkLimit = sharedBlkCount4Coll[doneCollId];
+
+  if (bid < blkLimit && tid == 0) {
+    blkStatus.numActiveColls -= 1;
+    blkStatus.currActiveCollId = -1;
+    globalCollCtx4Blk7Coll->executing = 0;
+  }
+}
+
+// TODO: 初步，我们让每个集合通信都跑到底。
+static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+
+  // int numSeenActiveColls = 0; // 想用这个和blkStatus.numActiveColls配合，减少下边的循环次数，不过涉及到线程间行为的同步，不太好搞定，先省略掉吧。
+
+  if (blkStatus.numActiveColls == 0) {
+    return turn;
+  }
+  for (int i = 0; i < collCount; i++) {
+    int collId = sharedCollIds[i];
+    int blkLimit = sharedBlkCount4Coll[collId];
+    int thrdLimit = sharedThrdCount4Coll[collId];
+    int nthreads = thrdLimit;
+    if (bid < blkLimit && tid < thrdLimit) { // TODO: 目前不得不认为所有线程都满足这个条件
+      CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
+      if (globalCollCtx4Blk7Coll->executing == 1) {
+        if (tid == 0) {
+          blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
+          __threadfence_block();
+        }
+
+        // ***** 先准备好sharedCollCtx *****
+        turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn);
+
+        // ***** 然后调用ofcclFunc *****
+        ofcclFuncs[sharedCollCtx.work.header.funcIndex]();
+  
+        // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
+        __syncthreads(); // 这里事实上进行了所有线程的同步，所以在跑到底的情况下，在这里保证了所有线程都执行结束了预期的集合通信操作。
+
+        // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
+        manipulateCQ(thrdCudaDev, collId, cq, globalCqes);
+        resetDoneColl(thrdCudaDev, collId, globalCollCtx4Blk7Coll);
+        // 应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
+      }
+    }
   }
 
+  return turn;
+}
+
+// TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx) {
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  
+  // int tempRound = 0;
+  int turn = 0;
+
+  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
+  
+  if (tid == 0) {
+    blkStatus.quit = 0;
+    blkStatus.numActiveColls = 0;
+    blkStatus.currActiveCollId = -1;
+    blkStatus.sqReadFrontier = 0;
+    __threadfence_block();
+  }
+  // __syncthreads();
   while (true) {
-    if (tid == 0) {
-      if (round++ == 0) {
-        // init shmem
-        quit = 0;
-        __threadfence_block();
-      }
-
-      SQE target;
-      // TODO: really need system?? 之后可以看看__threadfence()会不会提高性能。
-      __threadfence_system(); // make sure read new head.
-      if (sqReadFrontier < sq->head) {
-        // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
-        // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
-        sqReadFrontier = sq->head;
-      }
-      if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, sqReadFrontier) || sqRead(sq, sqReadFrontier, &target, sharedBlkCount4Coll, thrdCudaDev) == -1) {
-        goto thrd_common;
-      } else {
-        sqReadFrontier++;
-        // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get collId %d, sqReadFrontier updates to %llu", thrdCudaDev, bid, tid, target.collId, GetLogicFrontier(sq, sqReadFrontier));
-        if (target.quit) {
-          quit = 1;
-          // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, tid);
-          goto thrd_common;
-        }
-
-        // real work
-        // TODO: 在真正的ofccl代码里，需要在这里通过shmem把sendbuf，recvbuf分享出去，然后这个blk的全部线程开始执行
-        // 分配的时候注意限制tid，以及等待相应的tid报告完成
-        // 这里已经是每个线程各自工作了
-        
-
-
-
-
-
-
-        // 等待所有线程报告工作完成，0线程可以报告当前blk工作完成。
-        // 然后协调所有blk，发现所有blk都完成，最后一个blk发送CQE
-        int old_counter = atomicAdd(&(globalCqes[target.collId].counter), 1);
-        __threadfence(); // cqes在global memory里边，全部thread关心。
-
-        if (old_counter + 1 == sharedBlkCount4Coll[target.collId]) {
-          atomicExch(&globalCqes[target.collId].counter, 0);
-          while (cqWrite(cq, globalCqes + target.collId, thrdCudaDev) == -1) {
-            // tempRound++;
-            // if(tempRound % tempPrintRound == 0) OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> cqWrite fail, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
-
-          }
-          // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
-          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for collId %d, cqHead=%llu, cqTail=%llu", thrdCudaDev, bid, tid, target.collId, RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
-          __threadfence();
-        }
-      }
+    for (int i = 0; i < TRAVERSE_TIMES; i++) {
+      turn = traverseGlobalCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
     }
     
+    checkSQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx);
+
 thrd_common:
     __syncthreads();
-    if (quit == 1) {
+    if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
       return;
     }
