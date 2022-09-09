@@ -11,6 +11,8 @@
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000
 
+#define buffPrintNum 5
+
 #define RingBuffer_full(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
 
 #define RingBuffer_empty(B) (((B)->tail % (B)->length) == ((B)->head % (B)->length))

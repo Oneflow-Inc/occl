@@ -240,8 +240,16 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
         globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
         globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
         
+        // IF_CHECK 如果也好检查对错，把下边露出来
+        // float *sendptr = (float *)target.sendbuff;
+        float *sendptr = (float *)(globalCollCtx4Blk7Coll->work.elems[0].sendbuff);
+        for (int i = 0; i < buffPrintNum; i++) {
+          OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @%p sendbuff[%d]=%f", thrdCudaDev, bid, tid, i, target.sendbuff, *(sendptr + i));
+        }
+        
         // block的0号线程操作shmem，不用原子操作
         blkStatus.numActiveColls += 1; // TODO 不同的block上，这个值可能会不同。
+        __threadfence_block();
       }
     }
   }
@@ -312,7 +320,16 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
     blkStatus.numActiveColls -= 1;
     blkStatus.currActiveCollId = -1;
     globalCollCtx4Blk7Coll->executing = 0;
+    
+    // IF_CHECK 如果也好检查对错，把下边露出来
+    float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
+    float *ptr = (float *)sharedCollCtx.work.elems[0].recvbuff;
+    for (int i = 0; i < buffPrintNum; i++) {
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].sendbuff, i, *(sendptr + i));
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].recvbuff, i, *(ptr + i));
+    }
   }
+  __syncthreads();
 }
 
 // TODO: 初步，我们让每个集合通信都跑到底。
@@ -322,6 +339,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
   // int numSeenActiveColls = 0; // 想用这个和blkStatus.numActiveColls配合，减少下边的循环次数，不过涉及到线程间行为的同步，不太好搞定，先省略掉吧。
 
+  __threadfence_block();
   if (blkStatus.numActiveColls == 0) {
     return turn;
   }
