@@ -358,6 +358,8 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
 static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll) {
   int tid = threadIdx.x;
   if (tid == 0) {
+    // int bid = blockIdx.x;
+    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, saveExcutingCollCtx", thrdCudaDev, bid, tid);
     globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
     globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
     globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
@@ -367,6 +369,8 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
     globalCollCtx4Blk7Coll->offset4RingAllReduce = sharedCollCtx.offset4RingAllReduce;
     globalCollCtx4Blk7Coll->nelem4RingAllReduce = sharedCollCtx.nelem4RingAllReduce;
     globalCollCtx4Blk7Coll->chunk4RingAllReduce = sharedCollCtx.chunk4RingAllReduce;
+
+    blkStatus.totalCtxSwitchCnt++;
   }
 }
 
@@ -437,6 +441,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     blkStatus.numActiveColls = 0;
     blkStatus.currActiveCollId = -1;
     blkStatus.sqReadFrontier = 0;
+    blkStatus.totalCtxSwitchCnt = 0;
     // __threadfence_block();
   }
   __syncthreads();
@@ -451,6 +456,7 @@ thrd_common:
     __syncthreads();
     if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, blkStatus.totalCtxSwitchCnt);
       return;
     }
   }

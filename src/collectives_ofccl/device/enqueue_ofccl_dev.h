@@ -7,6 +7,8 @@ typedef struct {
   int numActiveColls;
   int currActiveCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
+
+  unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
 } BlkStatus;
 
 // 跑几次 traverseGlobalCollCtx 后才去 checkSQ
