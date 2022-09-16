@@ -1,3 +1,4 @@
+#include "common_ofccl.h"
 #include "devcomm.h"
 #include "collectives_ofccl.h"
 #include "ofccl_primitives.h"
@@ -22,7 +23,13 @@ namespace {
     Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
       (tid, nthreads, &ring->prev, &ring->next, args->sendbuff, args->recvbuff, args->redOpArg);
 
-    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
+    ssize_t offset = 0;
+    int nelem = 0;
+    int chunk = 0;
+    int currentStep = 0;
+    ssize_t gridOffset = 0;
+
+    for (gridOffset = sharedCollCtx.gridOffset4RingAllReduce; gridOffset < size; gridOffset += loopSize) {
       
       // 初步恢复执行后，这段计算realChunkSize的逻辑还是保留吧
       ssize_t realChunkSize;
@@ -44,44 +51,95 @@ namespace {
         return r - (r >= nranks ? nranks : 0);
       };
 
-      ssize_t offset;
-      int nelem;
-      int chunk;
+      // 这里不能直接赋值，因为这是在循环里，在恢复的上下文中的gridOffset对应的循环中，需要恢复，否则直接用0初始化。
+      if (gridOffset == sharedCollCtx.gridOffset4RingAllReduce) {
+        offset = sharedCollCtx.offset4RingAllReduce;
+        nelem = sharedCollCtx.nelem4RingAllReduce;
+        chunk = sharedCollCtx.chunk4RingAllReduce;
+        currentStep = sharedCollCtx.currentStep4RingAllReduce;
+      } else {
+        offset = 0;
+        nelem = 0;
+        chunk = 0;
+        currentStep = 0;
+      }
 
-      // 前 nrank 步完成 reduce-scatter 的过程，自己的一份数据，要经历所有rank的reduce，最终回到自己。所以需要发送nrank步。
-      chunk = modRanks(ringIx + nranks-1);
-      offset = calcOffset(chunk);
-      nelem = min(realChunkSize, size-offset);
-      prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer
-
-      // k-2 steps: reduce and copy to next GPU
-      for (int j=2; j<nranks; ++j) {
-        chunk = modRanks(ringIx + nranks-j);
+      if (currentStep < 1) {
+        chunk = modRanks(ringIx + nranks-1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
-        prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
+        prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer
+        // threadfence已经在genericOp里边做过了，这里不需要了，可以直接读
+        if (sharedCollCtx.saveCtx7Quit) {
+          goto run_ring_end;
+        }
+        currentStep++;
+      }
+
+      // k-2 steps: reduce and copy to next GPU
+      if (currentStep < nranks - 1) {
+        for (int j=currentStep + 1; j<nranks; ++j) { // j需要根据currentStep进行相应调整。原来j初值是2.
+          chunk = modRanks(ringIx + nranks-j);
+          offset = calcOffset(chunk);
+          nelem = min(realChunkSize, size-offset);
+          prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
+          if (sharedCollCtx.saveCtx7Quit) {
+            goto run_ring_end;
+          }
+          currentStep++;
+        }
       }
 
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
-      chunk = ringIx + 0;
-      offset = calcOffset(chunk);
-      nelem = min(realChunkSize, size-offset);
-      prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
-
-      // k-2 steps: copy to next GPU
-      for (int j=1; j<nranks-1; ++j) {
-        chunk = modRanks(ringIx + nranks-j);
+      if (currentStep < nranks){
+        chunk = ringIx + 0;
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
-        prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
+        prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
+        if (sharedCollCtx.saveCtx7Quit) {
+          goto run_ring_end;          
+        }
+        currentStep++;
+      }
+
+      // k-2 steps: copy to next GPU
+      if (currentStep < 2 * nranks - 2) {
+        for (int j=currentStep-nranks+1; j<nranks-1; ++j) { // j需要根据currentStep进行相应调整。原来j初值是1. 第一次进入时，currentStep=nranks, j=1
+          chunk = modRanks(ringIx + nranks-j);
+          offset = calcOffset(chunk);
+          nelem = min(realChunkSize, size-offset);
+          prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
+          if (sharedCollCtx.saveCtx7Quit) {
+            goto run_ring_end;
+          }
+          currentStep++;
+        }
       }
 
       // Make final copy from buffer to dest.
-      chunk = modRanks(ringIx + 1);
-      offset = calcOffset(chunk);
-      nelem = min(realChunkSize, size-offset);
-      prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
+      if (currentStep < 2 * nranks - 1) {
+        chunk = modRanks(ringIx + 1);
+        offset = calcOffset(chunk);
+        nelem = min(realChunkSize, size-offset);
+        prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
+        if (sharedCollCtx.saveCtx7Quit) {
+          goto run_ring_end;
+        }
+        currentStep++;
+      }
+    }
+  run_ring_end:
+    if (sharedCollCtx.saveCtx7Quit) {
+      // 说明是跑到一半要退出了，保存上下文
+      if (tid == 0) {
+        sharedCollCtx.offset4RingAllReduce = offset;
+        sharedCollCtx.nelem4RingAllReduce = nelem;
+        sharedCollCtx.chunk4RingAllReduce = chunk;
+        sharedCollCtx.currentStep4RingAllReduce = currentStep;
+
+        sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
+      }
     }
   }
 

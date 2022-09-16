@@ -1,3 +1,5 @@
+#include "collectives_ofccl.h"
+#include "common_ofccl.h"
 #include "debug.h"
 
 //                                       NCCL_STEPS(8)/2=4     NCCL_STEPS/4=2         2
@@ -78,10 +80,16 @@ class Primitives<
     if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
         ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8 
       int spins = 0;
+      int ctxSwitchCount = 0;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         connStepCache = *connStepPtr;
         if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
+        if (ctxSwitchCount++ >= CtxSwitchThreshold) {
+          sharedCollCtx.saveCtx7Quit = 1;
+          __threadfence_block();
+          return;
+        }
       }
     }
 
@@ -125,6 +133,7 @@ class Primitives<
     }
   }
 
+  // TODO: 需要搞个返回值，或者让runRing直接读shmem？
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
   template <int DirectRecv1, int DirectSend1, int Recv, int Send, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void genericOp(
@@ -142,8 +151,8 @@ class Primitives<
     // SlicePerChunk = 2, StepPerSlice = 2
     int sliceSize = stepSize*StepPerSlice;
     sliceSize = max(divUp(nelem, 16*SlicePerChunk)*16, sliceSize/32);
-    int slice = 0;
-    int offset = 0;
+    int slice = sharedCollCtx.slice4SimpleGenericOp;
+    int offset = sharedCollCtx.offset4SimpleGenericOp;
 
     if (tid < nworkers && offset < nelem) {
       // Worker-only loop for non-empty slices. Non-workers and empty slices are
@@ -183,6 +192,16 @@ class Primitives<
           sharedCollCtx.groups[group].dsts[0] = userBuff + dstIx + offset;
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
+        __threadfence_block();
+        if (sharedCollCtx.saveCtx7Quit == 1) {
+          barrier(); // 我们在这里准备直接返回，所以把相应的barrier调用了。
+          if (tid == 0) {
+            sharedCollCtx.slice4SimpleGenericOp = slice;
+            sharedCollCtx.offset4SimpleGenericOp = offset;
+            __threadfence_block();
+          }
+          return;
+        }
         if (DirectRecv && sharedCollCtx.groups[group].srcs[0] == sharedCollCtx.groups[group].dsts[0]) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send) {
@@ -230,6 +249,9 @@ class Primitives<
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
       barrier(); // Has couterpart in preceding worker-only loop.
+      if (sharedCollCtx.saveCtx7Quit == 1) {
+        return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
+      }
       if (Send && (flags & RolePostSend) && sliceSize > 0 && index == 0) __threadfence_system();
       __syncwarp();
       postPeer<Recv, Send>();
@@ -238,7 +260,7 @@ class Primitives<
     }
   }
 
-// TODO: 省略了 ScatterGatherOp
+  // TODO: 省略了 ScatterGatherOp
 
   // connIndex = group >> 16 = 0, e = nullptr，通过打log确认了，打log也确认了，经过loadRecvConn和loadSendConn，flags都没变。
   // 所以这两个函数的效果，就是设置了step，设置了connStepPtr，设置了connStepCache，设置了connEltsFifo，设置了ofcclShmem里的peer的conn

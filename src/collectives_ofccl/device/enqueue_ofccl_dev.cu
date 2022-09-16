@@ -86,6 +86,7 @@ static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
 }
 
 // share mem用超了。
+// TODO: 可以不同的algo、proto使用不同的数据类型，不过可以看看是不是有意义
 __shared__ CollCtx sharedCollCtx; // 不能static，primitives要用
 
 static __shared__ BlkStatus blkStatus;
@@ -191,12 +192,21 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
     }
     __syncthreads();
 
-    if (bid < blkLimit && tid < thrdLimit) {
-      if (tid == 0) {
-        globalCollCtx4Blk7Coll->executing = 0;
-        // globalCollCtx4Blk7Coll->numDoneThrds = 0;
-        // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
-      }
+    if (bid < blkLimit && tid == 0) {
+      globalCollCtx4Blk7Coll->executing = 0;
+      // globalCollCtx4Blk7Coll->numDoneThrds = 0;
+      
+      globalBlk2CollId2CollCtx->saveCtx7Quit = 0;
+      globalBlk2CollId2CollCtx->slice4SimpleGenericOp = 0;
+      globalBlk2CollId2CollCtx->offset4SimpleGenericOp = 0;
+
+      globalBlk2CollId2CollCtx->currentStep4RingAllReduce = 0;
+      globalBlk2CollId2CollCtx->gridOffset4RingAllReduce = 0;
+      // 事实上下边这3个变量不需要初始值
+      globalBlk2CollId2CollCtx->offset4RingAllReduce = 0;
+      globalBlk2CollId2CollCtx->nelem4RingAllReduce = 0;
+      globalBlk2CollId2CollCtx->chunk4RingAllReduce = 0;
+      // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
     }
     __syncthreads();
   }
@@ -291,7 +301,7 @@ static __device__ int execColl(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll,
 
 }
 
-static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn, int activeCount) {
+static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = sharedThrdCount4Coll[collId];
@@ -305,6 +315,20 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   if (sharedCollCtx.work.header.type == ncclWorkTypeColl) {
     if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(sharedCollCtx.work.elems[tid]));
   } // 目前不用考虑其他ncclWorkType
+  if (tid == 0) {
+    // TODO: 目前只有simple ring allreduce，之后考虑通用性和扩展性。
+    // 加载algo、proto、func相关的运行上下文。
+    sharedCollCtx.saveCtx7Quit = globalCollCtx4Blk7Coll->saveCtx7Quit; // 这个看起来也可以充当标记是否是跑了一半的标记位
+    sharedCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->slice4SimpleGenericOp;
+    sharedCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->offset4SimpleGenericOp;
+
+    // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.comm.nRanks - 1;
+    sharedCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->currentStep4RingAllReduce;
+    sharedCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->gridOffset4RingAllReduce;
+    sharedCollCtx.offset4RingAllReduce = globalCollCtx4Blk7Coll->offset4RingAllReduce;
+    sharedCollCtx.nelem4RingAllReduce = globalCollCtx4Blk7Coll->nelem4RingAllReduce;
+    sharedCollCtx.chunk4RingAllReduce = globalCollCtx4Blk7Coll->chunk4RingAllReduce;
+  }
   __syncthreads();
   
   return turn;
@@ -331,6 +355,21 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
   __syncthreads();
 }
 
+static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll) {
+  int tid = threadIdx.x;
+  if (tid == 0) {
+    globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
+    globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
+    globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
+  
+    globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
+    globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
+    globalCollCtx4Blk7Coll->offset4RingAllReduce = sharedCollCtx.offset4RingAllReduce;
+    globalCollCtx4Blk7Coll->nelem4RingAllReduce = sharedCollCtx.nelem4RingAllReduce;
+    globalCollCtx4Blk7Coll->chunk4RingAllReduce = sharedCollCtx.chunk4RingAllReduce;
+  }
+}
+
 // TODO: 初步，我们让每个集合通信都跑到底。
 static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn) {
   int bid = blockIdx.x;
@@ -343,9 +382,11 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
     return turn;
   }
   for (int i = 0; i < collCount; i++) {
+    // 下边这三个量是不变的。
     int collId = sharedCollIds[i];
     int blkLimit = sharedBlkCount4Coll[collId];
     int thrdLimit = sharedThrdCount4Coll[collId];
+
     int nthreads = thrdLimit;
     if (bid < blkLimit && tid < thrdLimit) { // TODO: 目前不得不认为所有线程都满足这个条件
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
@@ -356,18 +397,24 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         }
 
         // ***** 先准备好sharedCollCtx *****
-        turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, blkStatus.numActiveColls);
+        turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
 
         // ***** 然后调用ofcclFunc *****
         ofcclFuncs[sharedCollCtx.work.header.funcIndex]();
+        // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
+        if (sharedCollCtx.saveCtx7Quit == 1) {
+          saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll);
+        } else {
+          // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
+          // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
+          // 完成的时候才进行下边的调用，只是保存上下文退出不应该调用。
+          manipulateCQ(thrdCudaDev, collId, cq, globalCqes);
+          resetDoneColl(thrdCudaDev, collId, globalCollCtx4Blk7Coll);
+          // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
+        }
   
-        // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
         __syncthreads(); // 这里事实上进行了所有线程的同步，所以在跑到底的情况下，在这里保证了所有线程都执行结束了预期的集合通信操作。
 
-        // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
-        manipulateCQ(thrdCudaDev, collId, cq, globalCqes);
-        resetDoneColl(thrdCudaDev, collId, globalCollCtx4Blk7Coll);
-        // 应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
       }
     }
   }

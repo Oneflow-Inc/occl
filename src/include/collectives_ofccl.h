@@ -4,12 +4,15 @@
 #include "collectives.h"
 #include "devcomm.h"
 #include <pthread.h>
+#include <sys/types.h>
 
 // #define MAX_LENGTH 587 // 587不超0xc000 shmem的限制，588就超了(0xc00c)，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如587不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。
 #define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000
+
+#define CtxSwitchThreshold 10
 
 #define buffPrintNum 5
 
@@ -104,9 +107,25 @@ typedef struct {
   struct ncclChannel channel;
   uint64_t pad;
   struct ncclWork work;
+
+  /* ****** 上下文 ****** */
+
   // 代表当前的表项对应的集合通信被调用，还没有执行完成。初始化置0；发现了相应的sqe之后置1；执行完成后置0。
+  // 后边应该是需要16byte对齐，来使用oneShot的copyToShmem。
   int executing;
   // int numDoneThrds;
+
+  // ****** Prims Simple ******
+  int saveCtx7Quit; // 这个看起来也可以充当标记是否是跑了一半的标记位，而不需要给runRing，RunWork.run等增加返回值？
+  int slice4SimpleGenericOp;
+  int offset4SimpleGenericOp;
+
+  // ****** Ring AllReduce ******
+  int currentStep4RingAllReduce;
+  ssize_t gridOffset4RingAllReduce;
+  int offset4RingAllReduce;
+  int nelem4RingAllReduce;
+  int chunk4RingAllReduce;
 } CollCtx;
 static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 

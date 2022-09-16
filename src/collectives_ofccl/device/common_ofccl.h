@@ -33,16 +33,8 @@ struct RunWork {
   // This __forceinline__ is necessary. The compiler was inserting a function call
   // here from the LL ncclKernel.
   __device__ __forceinline__ void run(ncclWork *w) {
-    int wid = threadIdx.x / WARP_SIZE;
-    int inc = w->header.type == ncclWorkTypeRegColl ? sizeof(ncclWorkElemReg) / sizeof(ncclWorkElem) : 1;
-    #pragma unroll 1
-    for(int e=0; e < NCCL_MAX_WORK_ELEMENTS && w->elems[e].header.type != ncclWorkTypeUnused; e += inc) {
-      if (wid < w->header.nWarps)
-        RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[e]);
-        // if (threadIdx.x == 0) {
-        //   OFCCL_LOG(NCCL, "bid(%d), blockDim.x(%d), ncclWorkElem(%d)(with %d channels, %lu bytes each, lastChunkSize=%lu) done", blockIdx.x, blockDim.x, e, w->elems[e].nChannels, w->elems[e].count, w->elems[e].lastChunkSize);
-        // }
-    }
+    // 这里看起来不用动了。
+    RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[0]);
   }
 };
 
