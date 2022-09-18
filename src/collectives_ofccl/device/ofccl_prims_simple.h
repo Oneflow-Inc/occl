@@ -65,7 +65,7 @@ class Primitives<
 
   inline __device__ bool checkAbort(int &spins) {
     spins++;
-    if (!(flags & Aborted) && spins == NCCL_SPINS_BEFORE_CHECK_ABORT) {
+    if (!(flags & Aborted) && spins == OFCCL_SPINS_BEFORE_CHECK_ABORT) {
       flags |= *sharedCollCtx.comm.abortFlag ? Aborted : 0;
       spins = 0;
     }
@@ -79,16 +79,26 @@ class Primitives<
     const bool noSendWait = DirectSend && (flags & (DirectRead|DirectWrite)); // no wait in empty send (e.g. directScatter) or direct remote write
     if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
         ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8 
-      int spins = 0;
-      int ctxSwitchCount = 0;
+      // int spins = 0;
+      unsigned long long int ctxSwitchCounter = 0;
+
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %d, step + StepPerSlice = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
+
+        // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, waitPeer fall into while, ctxSwitchCounter = %llu, sharedCollCtx.saveCtx7Quit = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, ctxSwitchCounter, sharedCollCtx.saveCtx7Quit);
+        
         connStepCache = *connStepPtr;
-        if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
+        // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
-        if (ctxSwitchCount++ >= CtxSwitchThreshold) {
+        __threadfence_block();
+        if (ctxSwitchCounter++ >= CtxSwitchThreshold || sharedCollCtx.saveCtx7Quit == 1) {
           sharedCollCtx.saveCtx7Quit = 1;
           __threadfence_block();
-          return;
+
+          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, SHOULD RETURN!! ctxSwitchCounter = %llu, sharedCollCtx.saveCtx7Quit = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, ctxSwitchCounter, sharedCollCtx.saveCtx7Quit);
+          
+          return; // 使用return，而不是break。
         }
       }
     }
@@ -190,6 +200,9 @@ class Primitives<
           sharedCollCtx.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
           sharedCollCtx.groups[group].dsts[0] = userBuff + dstIx + offset;
+        // if (tid == 0) {
+        //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx.comm.rank, blockIdx.x, tid);
+        // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
         __threadfence_block();
@@ -249,6 +262,7 @@ class Primitives<
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
       barrier(); // Has couterpart in preceding worker-only loop.
+      __threadfence_block();
       if (sharedCollCtx.saveCtx7Quit == 1) {
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }

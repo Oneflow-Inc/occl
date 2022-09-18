@@ -5,7 +5,9 @@
 #include "reduce_kernel.h" // for reduction funcs
 #include "common_ofccl.h"
 
-#define NCCL_SPINS_BEFORE_CHECK_ABORT 1000000 // 本身有退出的机制，不过没有恢复的方法
+#define OFCCL_SPINS_BEFORE_CHECK_ABORT 1000000 // 本身有退出的机制，不过没有恢复的方法
+// #define CtxSwitchThreshold (1000000llu * 1000000llu)
+#define CtxSwitchThreshold (100llu)
 
 // TODO: now only Simple
 /* Protocol classes: ProtoSimple, ProtoLL, ProtoLL128

@@ -68,6 +68,11 @@ namespace {
         chunk = modRanks(ringIx + nranks-1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
+        
+        // if (tid == 0) {
+        //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, [< 1] currentStep = %d, offset = %d, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, offset, nelem, chunk);
+        // }
+
         prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer
         // threadfence已经在genericOp里边做过了，这里不需要了，可以直接读
         if (sharedCollCtx.saveCtx7Quit) {
@@ -82,6 +87,11 @@ namespace {
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
           nelem = min(realChunkSize, size-offset);
+        
+          // if (tid == 0) {
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, [< nranks - 1] currentStep = %d, offset = %d, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, offset, nelem, chunk);
+          // }
+
           prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
           if (sharedCollCtx.saveCtx7Quit) {
             goto run_ring_end;
@@ -96,6 +106,11 @@ namespace {
         chunk = ringIx + 0;
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
+        
+        // if (tid == 0) {
+        //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, [< nranks] currentStep = %d, offset = %d, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, offset, nelem, chunk);
+        // }
+
         prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
         if (sharedCollCtx.saveCtx7Quit) {
           goto run_ring_end;          
@@ -109,6 +124,11 @@ namespace {
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
           nelem = min(realChunkSize, size-offset);
+        
+          // if (tid == 0) {
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, [< 2 * nranks - 2] currentStep = %d, offset = %d, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, offset, nelem, chunk);
+          // }
+
           prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
           if (sharedCollCtx.saveCtx7Quit) {
             goto run_ring_end;
@@ -122,6 +142,10 @@ namespace {
         chunk = modRanks(ringIx + 1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
+        // if (tid == 0) {
+        //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, [< 2 * nranks - 1] currentStep = %d, offset = %d, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, offset, nelem, chunk);
+        // }
+
         prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
         if (sharedCollCtx.saveCtx7Quit) {
           goto run_ring_end;

@@ -2,6 +2,9 @@
 #include "op128_ofccl.h"
 #include "common_ofccl.h" // for CollCtx
 
+#define buffPrintNum 5
+#define buffPrintStart 120000 + 5469
+
 typedef struct {
   int quit;
   int numActiveColls;

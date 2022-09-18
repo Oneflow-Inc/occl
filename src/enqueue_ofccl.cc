@@ -704,7 +704,9 @@ static void cqDestroy(CQ *cq) {
 static int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
   pthread_mutex_lock(&cq->mutex);
   // tempRound++;
-  // if(tempRound % tempPrintRound == 0) OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), thrdCudaDev, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  // if(tempRound % tempPrintRound == 0) {
+  //   OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), thrdCudaDev, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  // }
 
   if (RingBuffer_empty(cq)) {
     pthread_mutex_unlock(&cq->mutex);
