@@ -375,7 +375,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
 
     blkStatus.totalCtxSwitchCnt++;
     
-    int bid = blockIdx.x;
+    // int bid = blockIdx.x;
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
   }
 }
@@ -413,9 +413,9 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         ofcclFuncs[sharedCollCtx.work.header.funcIndex]();
         // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
 
-        if (tid == 0) {
+        // if (tid == 0) {
           // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
-        }
+        // }
         __syncthreads();
 
         if (sharedCollCtx.saveCtx7Quit == 1) {
