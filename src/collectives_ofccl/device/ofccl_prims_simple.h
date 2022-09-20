@@ -84,19 +84,25 @@ class Primitives<
 
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %d, step + StepPerSlice = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
+      // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
 
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, waitPeer fall into while, ctxSwitchCounter = %llu, sharedCollCtx.saveCtx7Quit = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, ctxSwitchCounter, sharedCollCtx.saveCtx7Quit);
         
         connStepCache = *connStepPtr;
-        // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能
+        // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         __threadfence_block();
         if (ctxSwitchCounter++ >= CtxSwitchThreshold || sharedCollCtx.saveCtx7Quit == 1) {
           sharedCollCtx.saveCtx7Quit = 1;
           __threadfence_block();
 
-          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, SHOULD RETURN!! ctxSwitchCounter = %llu, sharedCollCtx.saveCtx7Quit = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, ctxSwitchCounter, sharedCollCtx.saveCtx7Quit);
+          // if ((flags & (Recv*RoleWaitRecv))) {
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv SHOULD RETURN!! connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
+          // }
+          // if ((flags & (Send*RoleWaitSend))) {
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend SHOULD RETURN!! connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+          // }
           
           return; // 使用return，而不是break。
         }
@@ -266,6 +272,7 @@ class Primitives<
       if (sharedCollCtx.saveCtx7Quit == 1) {
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }
+      // 注意到这里的内存保护，先插入fence，而在fence之前有个barrier，worker线程中的barrier是在数据搬运完成之后调用的，所以这里就保证了数据搬运完成，插入fence的顺序；在插入fence之后，在通过postPeer使tail对接收端可见，使head对发送端可见。
       if (Send && (flags & RolePostSend) && sliceSize > 0 && index == 0) __threadfence_system();
       __syncwarp();
       postPeer<Recv, Send>();
@@ -277,7 +284,7 @@ class Primitives<
   // TODO: 省略了 ScatterGatherOp
 
   // connIndex = group >> 16 = 0, e = nullptr，通过打log确认了，打log也确认了，经过loadRecvConn和loadSendConn，flags都没变。
-  // 所以这两个函数的效果，就是设置了step，设置了connStepPtr，设置了connStepCache，设置了connEltsFifo，设置了ofcclShmem里的peer的conn
+  // 所以这两个函数的效果，就是设置了step，设置了 connStepPtr ，设置了 connStepCache，设置了 connEltsFifo，设置了ofcclShmem里的peer的conn
   // SlicePerChunk=2, StepPerSlice=2
   __device__ __forceinline__ void loadRecvConn(ncclPeer *peer, int connIndex, struct ncclWorkElem* e) {
     if (flags & (RoleWaitRecv|RolePostRecv)) {
@@ -289,6 +296,7 @@ class Primitives<
         *connStepPtr = step; // Return credits in case we rounded up.
       }
       if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
+        // conn 来自于&peer->recv[connIndex].conn，构造函数里connIndex是0，所以不论这里的index是几，都是同一个conn，所以目前不用太关心
         sharedCollCtx.groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
         connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
         connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据

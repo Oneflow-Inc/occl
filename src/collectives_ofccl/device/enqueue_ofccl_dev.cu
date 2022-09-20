@@ -414,7 +414,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
 
         // if (tid == 0) {
-          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
+        //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
         // }
         __syncthreads();
 
