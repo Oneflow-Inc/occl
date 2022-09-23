@@ -82,7 +82,7 @@ class Primitives<
       // int spins = 0;
       unsigned long long int ctxSwitchCounter = 0;
 
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %d, step + StepPerSlice = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -152,10 +152,10 @@ class Primitives<
       step += StepPerSlice;
       *connStepPtr = step;
       if ((flags & (Recv*RolePostRecv))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv postPeer update head: *connStepPtr = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv postPeer update head: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
       }
       if ((flags & (Send*RolePostSend))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend postPeer update tail: *connStepPtr = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend postPeer update tail: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
       }
     }
   }
