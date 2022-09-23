@@ -22,8 +22,10 @@
 
 #define OFCCL_LOG_RANK_0(PRE, FMT, args...) do { if (thrdCudaDev==0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
-#define OFCCL_LOG_RANK_0_BLK_0_DEVSH(PRE, FMT, args...) do { if (sharedCollCtx.comm.rank==0 && blockIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_BLK_0(PRE, FMT, args...) do { if (blockIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_BLK_0_THRD_0(PRE, FMT, args...) do { if (blockIdx.x == 0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
+#define OFCCL_LOG_RANK_0_BLK_0_DEVSH(PRE, FMT, args...) do { if (sharedCollCtx.comm.rank==0 && blockIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 // #define OFCCL_LOG(PRE, FMT, args...) do {} while (0)
 // #define OFCCL_LOG1(PRE, FMT) do {} while (0)
 // #define OFCCL_LOG0(PRE) do {} while (0)

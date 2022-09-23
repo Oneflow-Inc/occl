@@ -161,6 +161,8 @@ namespace {
         sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
       }
     }
+
+    OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success", sharedCollCtx.comm.rank, blockIdx.x, tid);
   }
 
 

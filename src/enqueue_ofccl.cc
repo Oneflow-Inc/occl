@@ -961,6 +961,8 @@ ncclResult_t ofcclPrepareDone() {
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), thrdCudaDev, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
 
     hostCqes[collId].collId = collId;
+    hostBlkCount4Coll[collId] = gridDim4Coll[collId].x;
+    hostThrdCount4Coll[collId] = blockDim4Coll[collId].x;
 
     // check 确实一个comm对应了一个coll
     for (int k = 0; k < eqInfo->maxChannels; k++) {

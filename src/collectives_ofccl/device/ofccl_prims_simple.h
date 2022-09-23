@@ -82,7 +82,7 @@ class Primitives<
       // int spins = 0;
       unsigned long long int ctxSwitchCounter = 0;
 
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -97,10 +97,10 @@ class Primitives<
           sharedCollCtx.saveCtx7Quit = 1;
 
           if ((flags & (Recv*RoleWaitRecv))) {
-            OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv SHOULD RETURN!! connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
+            OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv SHOULD RETURN!! connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
           }
           if ((flags & (Send*RoleWaitSend))) {
-            OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend SHOULD RETURN!! connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+            OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend SHOULD RETURN!! connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
           }
           
           return; // 使用return，而不是break。
@@ -138,10 +138,10 @@ class Primitives<
       }
       step += StepPerSlice;
       if ((flags & (Recv*RoleWaitRecv))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv waitPeer success connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv waitPeer success connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
       }
       if ((flags & (Send*RoleWaitSend))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend waitPeer success connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend waitPeer success connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
       }
     }
   }
@@ -152,10 +152,10 @@ class Primitives<
       step += StepPerSlice;
       *connStepPtr = step;
       if ((flags & (Recv*RolePostRecv))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv postPeer update head: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv postPeer update head: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
       }
       if ((flags & (Send*RolePostSend))) {
-        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend postPeer update tail: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend postPeer update tail: *connStepPtr = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
       }
     }
   }
@@ -300,6 +300,14 @@ class Primitives<
       auto *conn = &peer->recv[connIndex].conn;
       step = conn->step; // uint64_t step;      // Keep where we are // 设置好就不会变了；每个线程有自己的值
       step = roundUp(step, SlicePerChunk*StepPerSlice); // return (x+y-1) - (x+y-1)%y;，就是向上取到y的倍数
+      
+      if ((flags & (RoleWaitRecv))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv load step = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+      if ((flags & (RolePostRecv))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv load step = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+
       if (flags & RolePostRecv) { // (ng - 2) * 8 + 0 号线程是 RolePostRecv
         connStepPtr = conn->head; // uint64_t *head;     // Local for send, remote for recv
         *connStepPtr = step; // Return credits in case we rounded up.
@@ -342,6 +350,14 @@ class Primitives<
       auto *conn = &peer->send[connIndex].conn;
       step = conn->step;
       step = roundUp(step, SlicePerChunk*StepPerSlice);
+
+      if ((flags & (RoleWaitSend))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend load step = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+      if ((flags & (RolePostSend))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend load step = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+
       if (flags & RolePostSend) {
         connStepPtr = conn->tail;
       }
@@ -532,6 +548,13 @@ class Primitives<
     if (flags & (RolePostSend|RolePostRecv)) {
       auto *conns = (flags & RolePostSend) ? sharedCollCtx.groups[group].sendConns : sharedCollCtx.groups[group].recvConns;
       conns[index]->step = step;
+      if ((flags & (RolePostRecv))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv save step = %llu to conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+      if ((flags & (RolePostSend))) {
+        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend save step = %llu to conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+      }
+
     }
     // Make sure all threads are done writing back conn->step and done using
     // sharedCollCtx.groups[group]
