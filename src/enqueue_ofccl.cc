@@ -961,23 +961,6 @@ ncclResult_t ofcclPrepareDone() {
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), thrdCudaDev, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
 
     hostCqes[collId].collId = collId;
-    int blkCount = hostBlkCount4Coll[collId] = gridDim4Coll[collId].x;
-    int thrdCount = hostThrdCount4Coll[collId] = blockDim4Coll[collId].x;
-
-    // 分析并记录每个coll的执行上下文
-    // ncclInfo *info = comm->asyncOps;
-    // ncclFunc_t collFn = info->coll;
-    // int algorithm = info->algorithm;
-    // int protocol = info->protocol;
-    // int contextCount = collExecContextCount[collFn][algorithm][protocol];
-    // hostCollExecContext[collId] = (CollExecContext *)calloc(blkCount * thrdCount, sizeof(CollExecContext));
-    // for (int j = 0; j < blkCount; j++) {
-    //   for (int k = 0; k < thrdCount; k++) {
-    //     (hostCollExecContext[collId] + j * thrdCount + k)->contextCount = contextCount;
-    //     (hostCollExecContext[collId] + j * thrdCount + k)->contexts = (int *)calloc(contextCount, sizeof(int));
-    //     // TODO: 填充contexts
-    //   }
-    // }
 
     // check 确实一个comm对应了一个coll
     for (int k = 0; k < eqInfo->maxChannels; k++) {
