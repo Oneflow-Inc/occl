@@ -82,7 +82,7 @@ class Primitives<
       // int spins = 0;
       unsigned long long int ctxSwitchCounter = 0;
 
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %d, step + StepPerSlice = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %d, step + StepPerSlice = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -93,16 +93,15 @@ class Primitives<
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         __threadfence_block();
-        if (ctxSwitchCounter++ >= CtxSwitchThreshold || sharedCollCtx.saveCtx7Quit == 1) {
+        if (ctxSwitchCounter++ >= CtxSwitchThreshold) {
           sharedCollCtx.saveCtx7Quit = 1;
-          __threadfence_block();
 
-          // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv SHOULD RETURN!! connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
-          // }
-          // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend SHOULD RETURN!! connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
-          // }
+          if ((flags & (Recv*RoleWaitRecv))) {
+            OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv SHOULD RETURN!! connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
+          }
+          if ((flags & (Send*RoleWaitSend))) {
+            OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend SHOULD RETURN!! connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+          }
           
           return; // 使用return，而不是break。
         }
@@ -138,6 +137,12 @@ class Primitives<
         ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*stepSize;
       }
       step += StepPerSlice;
+      if ((flags & (Recv*RoleWaitRecv))) {
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitRecv waitPeer success connStepCache = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache, step + StepPerSlice, isSendNotRecv);
+      }
+      if ((flags & (Send*RoleWaitSend))) {
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RoleWaitSend waitPeer success connStepCache + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+      }
     }
   }
 
@@ -146,6 +151,12 @@ class Primitives<
     if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
       step += StepPerSlice;
       *connStepPtr = step;
+      if ((flags & (Recv*RolePostRecv))) {
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostRecv postPeer update head: *connStepPtr = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+      }
+      if ((flags & (Send*RolePostSend))) {
+        OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, RolePostSend postPeer update tail: *connStepPtr = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr);
+      }
     }
   }
 
@@ -211,9 +222,8 @@ class Primitives<
         // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
-        __threadfence_block();
         if (sharedCollCtx.saveCtx7Quit == 1) {
-          barrier(); // 我们在这里准备直接返回，所以把相应的barrier调用了。
+          barrier(); // 我们在这里直接返回，跳过数据搬运，所以把相应的barrier调用了。
           if (tid == 0) {
             sharedCollCtx.slice4SimpleGenericOp = slice;
             sharedCollCtx.offset4SimpleGenericOp = offset;
@@ -268,7 +278,6 @@ class Primitives<
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
       barrier(); // Has couterpart in preceding worker-only loop.
-      __threadfence_block();
       if (sharedCollCtx.saveCtx7Quit == 1) {
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }
