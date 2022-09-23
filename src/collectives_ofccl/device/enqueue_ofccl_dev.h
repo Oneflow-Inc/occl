@@ -16,3 +16,13 @@ typedef struct {
 
 // 跑几次 traverseGlobalCollCtx 后才去 checkSQ
 #define TRAVERSE_TIMES 3
+
+#define OFCCL_SYNC_ALL_BAR_ID 4
+#define OFCCL_SYNC_COLL_WORKER_BAR_ID 6
+// Don't use barrier 0 as it's used by the final sync
+inline __device__ void ofcclBarrier(int barId, int numThreads) {
+  if (numThreads == WARP_SIZE)
+    __syncwarp();
+  else
+    asm volatile("bar.sync %0, %1;" :: "r"(barId), "r"(numThreads));
+}
