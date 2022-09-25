@@ -30,6 +30,8 @@
 // #define OFCCL_LOG1(PRE, FMT) do {} while (0)
 // #define OFCCL_LOG0(PRE) do {} while (0)
 
+#define OFCCL_LOG_FINAL(PRE, FMT, args...) printf("\n[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args)
+
 #define checkRuntime(op) __check_cuda_runtime((op), #op, __FILE__, __LINE__)
 
 inline bool __check_cuda_runtime(cudaError_t code, const char *op, const char *file,
