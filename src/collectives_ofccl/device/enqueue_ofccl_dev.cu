@@ -221,9 +221,16 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
   SQE target;
   // TODO: really need system?? 之后可以看看__threadfence()会不会提高性能。
   __threadfence_system(); // make sure read new head.
+  
+  unsigned long long int sqLLU = (unsigned long long int)sq;
+  unsigned long long int sqMASK = 0x111100000000llu & (unsigned long long int)sq;
+  sqLLU |= sqMASK;
+  sq = (SQ *)sqLLU;
 
   OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq @ %p", thrdCudaDev, bid, threadIdx.x, sq);
   OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq->head = %llu", thrdCudaDev, bid, threadIdx.x, sq->head);
+  
+  sq = (SQ *)sqLLU;
 
   if (blkStatus.sqReadFrontier < sq->head) {
     // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
