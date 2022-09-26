@@ -115,7 +115,7 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
   sqeCollId = target->collId;
   // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> sharedBlkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, sharedBlkCount4Coll[sqeCollId]);
   if (bid >= sharedBlkCount4Coll[sqeCollId]) {
-    return -1; // TODO: 所有block都应处理，blkLimit以外的直接标记完成就好。
+    return -1;
   } else {
     // 自己读到之后，更新相应的counter；至于读到的sqe对应的collId是不是该自己处理，是caller的事。
     // 如果发现自己读完之后，所有block都读了，那么commit read
@@ -381,12 +381,11 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
-// TODO: 初步，我们让每个集合通信都跑到底。
 static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
-  // int numSeenActiveColls = 0; // 想用这个和blkStatus.numActiveColls配合，减少下边的循环次数，不过涉及到线程间行为的同步，不太好搞定，先省略掉吧。
+  // int numSeenActiveColls = 0; // TODO: 想用这个和blkStatus.numActiveColls 配合，减少下边的循环次数，在block天然分化的前提下，看起来可以直接用。
 
   __threadfence_block();
   if (blkStatus.numActiveColls == 0) {

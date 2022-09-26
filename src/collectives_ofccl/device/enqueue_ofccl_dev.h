@@ -6,7 +6,7 @@
 #define buffPrintStart 120000 + 5469
 
 typedef struct {
-  int quit;
+  int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整
   int numActiveColls;
   int currActiveCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作

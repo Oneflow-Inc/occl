@@ -75,6 +75,7 @@ typedef struct {
 
 struct DevComm7WorkElem {
   struct ncclDevComm* comm;
+  // TODO: 或许会有扩展性问题。
   ncclWorkElem first;
 };
 
