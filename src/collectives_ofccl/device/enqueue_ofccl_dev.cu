@@ -262,10 +262,10 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
       globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
       
-      // IF_CHECK 这个没用
+      // IF_CHECK checkSQ里浅打印一下。这个没用
       // float *sendptr = (float *)target.sendbuff;
       // for (int i = 0; i < buffPrintNum; i++) {
-      //   OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @%p sendbuff[%d]=%f", thrdCudaDev, bid, threadIdx.x, i, target.sendbuff, *(sendptr + i));
+      //   OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @%p sendbuff[%d]=%f", thrdCudaDev, bid, threadIdx.x, target.sendbuff, i, *(sendptr + i));
       // }
       
       // block的0号线程操作shmem，不用原子操作

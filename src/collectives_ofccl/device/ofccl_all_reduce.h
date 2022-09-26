@@ -155,9 +155,9 @@ namespace {
     if (sharedCollCtx.saveCtx7Quit) {
       // 说明是跑到一半要退出了，保存上下文
       if (tid == 0) {
-        sharedCollCtx.offset4RingAllReduce = offset;
-        sharedCollCtx.nelem4RingAllReduce = nelem;
-        sharedCollCtx.chunk4RingAllReduce = chunk;
+        // sharedCollCtx.offset4RingAllReduce = offset;
+        // sharedCollCtx.nelem4RingAllReduce = nelem;
+        // sharedCollCtx.chunk4RingAllReduce = chunk;
         sharedCollCtx.currentStep4RingAllReduce = currentStep;
 
         sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
