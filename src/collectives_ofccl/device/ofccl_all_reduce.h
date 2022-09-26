@@ -52,17 +52,19 @@ namespace {
       };
 
       // 这里不能直接赋值，因为这是在循环里，在恢复的上下文中的gridOffset对应的循环中，需要恢复，否则直接用0初始化。
-      // if (gridOffset == sharedCollCtx.gridOffset4RingAllReduce) {
-      //   offset = sharedCollCtx.offset4RingAllReduce;
-      //   nelem = sharedCollCtx.nelem4RingAllReduce;
-      //   chunk = sharedCollCtx.chunk4RingAllReduce;
-      //   currentStep = sharedCollCtx.currentStep4RingAllReduce;
-      // } else {
-      //   offset = 0;
-      //   nelem = 0;
-      //   chunk = 0;
-      //   currentStep = 0;
-      // }
+      if (gridOffset == sharedCollCtx.gridOffset4RingAllReduce) {
+        // offset = sharedCollCtx.offset4RingAllReduce;
+        // nelem = sharedCollCtx.nelem4RingAllReduce;
+        // chunk = sharedCollCtx.chunk4RingAllReduce;
+
+        currentStep = sharedCollCtx.currentStep4RingAllReduce;
+      } else {
+        // offset = 0;
+        // nelem = 0;
+        // chunk = 0;
+
+        currentStep = 0;
+      }
 
       if (currentStep < 1) {
         chunk = modRanks(ringIx + nranks-1);
