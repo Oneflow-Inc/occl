@@ -246,7 +246,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
     blkStatus.sqReadFrontier++;
     if (target.quit) {
       blkStatus.quit = 1;
-      // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, threadIdx.x);
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, threadIdx.x);
       return;
     }
 
@@ -255,6 +255,9 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
     int blkLimit = sharedBlkCount4Coll[newActiveCollId];
     if (bid < blkLimit) {
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
+      if (globalCollCtx4Blk7Coll->executing == 1) {
+        OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+      }
       globalCollCtx4Blk7Coll->executing = 1;
       globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
@@ -347,7 +350,7 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
     blkStatus.currActiveCollId = -1;
     globalCollCtx4Blk7Coll->executing = 0;
     
-    /* IF_CHECK 如果也好检查对错，把下边露出来 */
+    /* IF_CHECK 如果要检查对错，把下边露出来 */
 
     // float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
     // float *ptr = (float *)sharedCollCtx.work.elems[0].recvbuff;
@@ -406,7 +409,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           __threadfence_block();
         }
 
-        // ***** 先准备好sharedCollCtx *****
+        // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
         
         // 只有真正的工作线程才执行
@@ -480,7 +483,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
 
       if (tid == 0) {
-        OFCCL_LOG_FINAL("OFCCL_FINAL", "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt);
+        OFCCL_LOG_FINAL(OFCCL_FINAL, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt);
       }
       return;
     }
