@@ -246,7 +246,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
     blkStatus.sqReadFrontier++;
     if (target.quit) {
       blkStatus.quit = 1;
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, threadIdx.x);
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, threadIdx.x);
       return;
     }
 
@@ -366,17 +366,18 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
 static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int thrdLimit) {
   int tid = threadIdx.x;
   if (tid == 0) {
-    globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
+    // globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
     globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
     globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
   
     globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
     globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
-    globalCollCtx4Blk7Coll->offset4RingAllReduce = sharedCollCtx.offset4RingAllReduce;
-    globalCollCtx4Blk7Coll->nelem4RingAllReduce = sharedCollCtx.nelem4RingAllReduce;
-    globalCollCtx4Blk7Coll->chunk4RingAllReduce = sharedCollCtx.chunk4RingAllReduce;
+    // globalCollCtx4Blk7Coll->offset4RingAllReduce = sharedCollCtx.offset4RingAllReduce;
+    // globalCollCtx4Blk7Coll->nelem4RingAllReduce = sharedCollCtx.nelem4RingAllReduce;
+    // globalCollCtx4Blk7Coll->chunk4RingAllReduce = sharedCollCtx.chunk4RingAllReduce;
 
     blkStatus.totalCtxSwitchCnt++;
+    blkStatus.currActiveCollId = -1;
     
     // int bid = blockIdx.x;
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
