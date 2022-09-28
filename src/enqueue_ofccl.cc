@@ -637,7 +637,7 @@ static SQ *sqCreate(int length) {
   sq->length = length + 1;
   sq->head = 0;
   sq->tail = 0;
-  checkRuntime(cudaMallocHost((void **)&(sq->buffer), sq->length));
+  checkRuntime(cudaMallocHost((void **)&(sq->buffer), sq->length * sizeof(SQE)));
   pthread_mutex_init(&sq->mutex, nullptr);
 
   return sq;
@@ -688,7 +688,7 @@ static CQ *cqCreate(int length) {
   cq->length = length + 1;
   cq->head = 0;
   cq->tail = 0;
-  checkRuntime(cudaMallocHost((void **)&(cq->buffer), cq->length));
+  checkRuntime(cudaMallocHost((void **)&(cq->buffer), cq->length * sizeof(CQE)));
   pthread_mutex_init(&cq->mutex, nullptr);
 
   return cq;
@@ -996,6 +996,7 @@ ncclResult_t ofcclPrepareDone() {
   sq = sqCreate(queueLength);
   cq = cqCreate(queueLength);
 
+  // TODO: 之后考虑换成ofccl/src/include/alloc.h里的宏。
   checkRuntime(cudaMalloc(&globalCqes, MAX_LENGTH * sizeof(CQE)));
   checkRuntime(cudaMemcpy(globalCqes, hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
 
