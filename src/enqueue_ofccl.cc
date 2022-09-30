@@ -24,7 +24,6 @@
 #include <math.h> // floor()
 #include <sched.h>
 #include <algorithm> // max
-#include <unordered_set>
 
 namespace {
 
@@ -585,50 +584,6 @@ static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NU
   }
 };
 
-// TODO: 之后考虑搞一个Context整理起来。
-static thread_local ofcclCommArgs ofcclCommList[MAX_LENGTH];
-static thread_local pthread_t ofcclPrepareThreads[MAX_LENGTH];
-static thread_local int collCount = 0;
-static thread_local std::unordered_set<ncclComm_t> seenComms;
-
-static thread_local dim3 daemonKernelGridDim;
-static thread_local dim3 daemonKernelBlockDim;
-static thread_local int queueLength = QLen;
-static thread_local dim3 gridDim4Coll[MAX_LENGTH];
-static thread_local dim3 blockDim4Coll[MAX_LENGTH];
-
-static thread_local pthread_t kernelThrd;
-static thread_local void *argsptrs[10];
-static thread_local cudaStream_t kernelStream;
-static thread_local KernelThrdArgs kernelThrdArgs;
-static thread_local int thrdCudaDev;
-
-static thread_local CQE hostCqes[MAX_LENGTH];
-static thread_local CQE *globalCqes;
-static thread_local int hostBlkCount4Coll[MAX_LENGTH];
-static thread_local int *globalBlkCount4Coll;
-static thread_local int hostThrdCount4Coll[MAX_LENGTH];
-static thread_local int *globalThrdCount4Coll;
-static thread_local int hostCollIds[MAX_LENGTH];
-static thread_local int *globalCollIds;
-static thread_local DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
-static thread_local DevComm7WorkElem *globalDevComm7WorkElems;
-static thread_local CollCtx *globalBlk2CollId2CollCtx;
-
-thread_local SQ *sq;
-thread_local CQ *cq;
-
-// for poller thread
-static thread_local pthread_t poller;
-static thread_local PollerArgs pollerArgs;
-static thread_local int *poll_start;
-static thread_local int *poll_stop;
-// 之后主线程里sqWrite对这个的修改，希望poller线程可以看到
-// static thread_local std::unordered_map<int, CallbackFunc> *collId2callback;
-// 不能使用静态分配的数组，否则无法赋值，需要动态分配，跨线程传递。
-static thread_local void **callbackArgList;
-thread_local CallbackFunc *callbacks;
-
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 static SQ *sqCreate(int length) {
@@ -650,8 +605,8 @@ static void sqDestroy(SQ *sq) {
   }
 }
 
-int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs) {
-  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), thrdCudaDev, sq);
+int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d, Enter sqWrite, sq @ %p", pthread_self(), rank, sq);
   pthread_mutex_lock(&sq->mutex);
 
   if (RingBuffer_full(sq)) {
@@ -671,12 +626,12 @@ int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *call
   pthread_mutex_unlock(&sq->mutex);
 
   if (sqe->collId != -1) {
-    callbacks[sqe->collId] = callback;
-    callbackArgList[sqe->collId] = callbackArgs;
+    rankCtx->callbacks[sqe->collId] = callback;
+    rankCtx->callbackArgList[sqe->collId] = callbackArgs;
   }
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
-  if (*poll_start == 0) {
-    *poll_start = 1;
+  if (rankCtx->poll_start == 0) {
+    rankCtx->poll_start = 1;
   }
   
   return 0;
@@ -701,11 +656,11 @@ static void cqDestroy(CQ *cq) {
   }
 }
 // thread_local static int tempRound = 0;
-static int cqRead(CQ *cq, CQE *target, int thrdCudaDev) {
+static int cqRead(CQ *cq, CQE *target, int rank) {
   pthread_mutex_lock(&cq->mutex);
   // tempRound++;
   // if(tempRound % tempPrintRound == 0) {
-  //   OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), thrdCudaDev, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  //   OFCCL_LOG(OFCCL, "<%lu> rank=%d enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
   // }
 
   if (RingBuffer_empty(cq)) {
@@ -733,14 +688,26 @@ void *ofcclAsyncThreadPreconnect(void* args_) {
   return args;
 }
 
-ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
-  if (collCount == 0) {
-    memset(ofcclCommList, 0, sizeof(ncclComm_t) * MAX_LENGTH); // legacy in ncclGroupStart
-  }
-  
+NCCL_API(ncclResult_t, ofcclInitRankCtx, ofcclRankCtx_t* rankCtx, int rank);
+ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
+  ncclResult_t ret = ncclSuccess;
+
+  ofcclRankCtx *newOfcclRankCtx = (ofcclRankCtx *)calloc(1, sizeof(ofcclRankCtx));
+  *rankCtx = newOfcclRankCtx;
+
+  newOfcclRankCtx->rank = rank;
+  newOfcclRankCtx->queueLength = QLen;
+  newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
+
+  // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy还是放到ofcclPrepareDone里边做
+
+  return ret;
+}
+
+ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx) {  
   ncclResult_t ret = ncclSuccess;
   
-  if (collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
+  if (rankCtx->collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
     OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %d",
           MAX_LENGTH);
     ret = ncclInvalidUsage;
@@ -760,16 +727,16 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId) {
 
   // ***** ncclAsyncColl(info->comm) *****
 
-  if (seenComms.find(info->comm) != seenComms.end()) {
+  if (rankCtx->seenComms.find(info->comm) != rankCtx->seenComms.end()) {
     OFCCL_LOG1(OFCCL_WARN, "Reuse ncclComm is not allowed");
     ret = ncclInvalidUsage;
     goto end;
   }
-  seenComms.insert(info->comm);
+  rankCtx->seenComms.insert(info->comm);
 
   // 调整为插到相应的collId那里。
-  ofcclCommList[collId].comm = info->comm;
-  hostCollIds[collCount++] = collId;
+  rankCtx->ofcclCommList[collId].comm = info->comm;
+  rankCtx->hostCollIds[rankCtx->collCount++] = collId;
 
   // ***** Ignore *****
   // NCCLCHECKGOTO(checkSetStream(info), ret, end);
@@ -792,109 +759,86 @@ end:
 }
 
 void *startKernel(void *args) {
-
-  // Setup thread_local variables using values from parent thread.
-  // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev in new thread is %d", pthread_self(), thrdCudaDev);
-  sq = ((KernelThrdArgs *)args)->sq;
-  cq = ((KernelThrdArgs *)args)->cq;
-  kernelStream = ((KernelThrdArgs *)args)->stream;
-  thrdCudaDev = ((KernelThrdArgs *)args)->cudaDev;
-  daemonKernelGridDim = ((KernelThrdArgs *)args)->gridDim;
-  daemonKernelBlockDim = ((KernelThrdArgs *)args)->blockDim;
-  collCount = ((KernelThrdArgs *)args)->collCount;
-  globalCqes = ((KernelThrdArgs *)args)->globalCqes;
-  globalBlkCount4Coll = ((KernelThrdArgs *)args)->globalBlkCount4Coll;
-  globalThrdCount4Coll = ((KernelThrdArgs *)args)->globalThrdCount4Coll;
-  globalCollIds = ((KernelThrdArgs *)args)->globalCollIds;
-  globalDevComm7WorkElems = ((KernelThrdArgs *)args)->globalDevComm7WorkElems;
-  globalBlk2CollId2CollCtx = ((KernelThrdArgs *)args)->globalBlk2CollId2CollCtx;
+  ofcclRankCtx *rankCtx = ((KernelThrdArgs *)args)->rankCtx;
   
-  checkRuntime(cudaSetDevice(thrdCudaDev));
+  checkRuntime(cudaSetDevice(rankCtx->rank));
 
   // TODO: 之后考虑按需启停kernel
   
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDimx=%d, blockDimx=%d", pthread_self(), thrdCudaDev, daemonKernelGridDim.x, daemonKernelBlockDim.x);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
 
-  argsptrs[0]  = &sq;
-  argsptrs[1]  = &cq;
-  argsptrs[2]  = &thrdCudaDev;
-  argsptrs[3]  = &collCount;
-  argsptrs[4]  = &globalCqes;
-  argsptrs[5]  = &globalBlkCount4Coll;
-  argsptrs[6]  = &globalThrdCount4Coll;
-  argsptrs[7]  = &globalCollIds;
-  argsptrs[8]  = &globalDevComm7WorkElems;
-  argsptrs[9]  = &globalBlk2CollId2CollCtx;
+  rankCtx->argsptrs[0]  = &rankCtx->sq;
+  rankCtx->argsptrs[1]  = &rankCtx->cq;
+  rankCtx->argsptrs[2]  = &rankCtx->rank;
+  rankCtx->argsptrs[3]  = &rankCtx->collCount;
+  rankCtx->argsptrs[4]  = &rankCtx->globalCqes;
+  rankCtx->argsptrs[5]  = &rankCtx->globalBlkCount4Coll;
+  rankCtx->argsptrs[6]  = &rankCtx->globalThrdCount4Coll;
+  rankCtx->argsptrs[7]  = &rankCtx->globalCollIds;
+  rankCtx->argsptrs[8]  = &rankCtx->globalDevComm7WorkElems;
+  rankCtx->argsptrs[9]  = &rankCtx->globalBlk2CollId2CollCtx;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
-  daemonKernelParam.gridDim = daemonKernelGridDim;
-  daemonKernelParam.blockDim = daemonKernelBlockDim;
+  daemonKernelParam.gridDim = rankCtx->daemonKernelGridDim;
+  daemonKernelParam.blockDim = rankCtx->daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
   // daemonKernelParam.sharedMem = 60 * 1024 * MAX_LENGTH;
-  daemonKernelParam.stream = kernelStream;
-  daemonKernelParam.args = argsptrs;
+  daemonKernelParam.stream = rankCtx->kernelStream;
+  daemonKernelParam.args = rankCtx->argsptrs;
 
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), thrdCudaDev, sq, cq, globalCqes, globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, collCount);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
   // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, globalCqes, globalBlkCount4Coll);
   
-  cudaStreamSynchronize(kernelStream);
+  cudaStreamSynchronize(rankCtx->kernelStream);
 
   return NULL;
 }
 
 void *startPoller(void *args) {
-  poll_start = ((PollerArgs *)args)->poll_start;
-  poll_stop = ((PollerArgs *)args)->poll_stop;
-  callbacks = ((PollerArgs *)args)->callbacks;
-  thrdCudaDev = ((PollerArgs *)args)->cudaDev;
-  checkRuntime(cudaSetDevice(thrdCudaDev));
-  cq = ((PollerArgs *)args)->cq;
-  callbackArgList = ((PollerArgs *)args)->callbackArgList;
-  while (*poll_start == 0) {
+  ofcclRankCtx *rankCtx = ((KernelThrdArgs *)args)->rankCtx;
+  
+  while (rankCtx->poll_start == 0) {
     sched_yield();
   }
 
-  while (*poll_stop == 0) {
+  while (rankCtx->poll_stop == 0) {
     CQE target;
-    if (cqRead(cq, &target, thrdCudaDev) == -1) {
+    if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
       sched_yield();
     } else {
       int collId = target.collId;
-      // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
-      // OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), thrdCudaDev, collId);
-      callbacks[collId](collId, callbackArgList[collId]);
+      // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      // OFCCL_LOG(OFCCL, "<%lu> rank=%d get cqe for collId %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
   }
 
   return nullptr;
 }
 
-NCCL_API(ncclResult_t, ofcclPrepareDone);
-ncclResult_t ofcclPrepareDone() {
+NCCL_API(ncclResult_t, ofcclPrepareDone, ofcclRankCtx_t rankCtx);
+ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   // ***** ncclGroupEnd() *****
-
-  CUDACHECK(cudaGetDevice(&thrdCudaDev));
-  // OFCCL_LOG(OFCCL, "<%lu> thrdCudaDev is %d", pthread_self(), thrdCudaDev);
   ncclResult_t ret = ncclSuccess;
 
   // int front_of_panel = -1;
 
   // ***** ncclAsyncThreadPreconnect threads *****
-  for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+  for (int i = 0; i < rankCtx->collCount; i++) {
+    ofcclCommArgs *args = rankCtx->ofcclCommList + rankCtx->hostCollIds[i];
     // ***** 目前应该是不会执行 *****
     if (args->comm->connect) {
-      pthread_create(&ofcclPrepareThreads[hostCollIds[i]], NULL, ofcclAsyncThreadPreconnect, &args);
+      pthread_create(&rankCtx->ofcclPrepareThreads[rankCtx->hostCollIds[i]], NULL, ofcclAsyncThreadPreconnect, &args);
     }
   }
-  for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+  for (int i = 0; i < rankCtx->collCount; i++) {
+    ofcclCommArgs *args = rankCtx->ofcclCommList + rankCtx->hostCollIds[i];
     if (args->comm->connect) {
-      int err = pthread_join(ofcclPrepareThreads[hostCollIds[i]], NULL);
+      int err = pthread_join(rankCtx->ofcclPrepareThreads[rankCtx->hostCollIds[i]], NULL);
       if (err != 0) {
         OFCCL_LOG(OFCCL_WARN, "Error waiting for pthread_join : %s", strerror(errno));
         return ncclSystemError;
@@ -908,16 +852,16 @@ ncclResult_t ofcclPrepareDone() {
   // ***** Skip related methods like scheduleRecv(), ncclSetupP2pKernel(), etc *****
 
   // ***** first for loop *****
-  for (int i = 0; i < collCount; i++) {
-    int collId = hostCollIds[i];
-    ofcclCommArgs *args = ofcclCommList + collId;
+  for (int i = 0; i < rankCtx->collCount; i++) {
+    int collId = rankCtx->hostCollIds[i];
+    ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
   }
   
   // ***** second for loop *****
-  for (int i = 0; i < collCount; i++) {
-    ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+  for (int i = 0; i < rankCtx->collCount; i++) {
+    ofcclCommArgs *args = rankCtx->ofcclCommList + rankCtx->hostCollIds[i];
     ncclComm_t comm = args->comm;
 
     // ***** omit cudaSetDevice related to stream *****
@@ -929,12 +873,12 @@ ncclResult_t ofcclPrepareDone() {
     // ***** omit ncclLaunchBarrier *****
   }
 
-  daemonKernelGridDim.x = 0;
-  daemonKernelBlockDim.x = 0;
+  rankCtx->daemonKernelGridDim.x = 0;
+  rankCtx->daemonKernelBlockDim.x = 0;
 
-  for (int i = 0; i < collCount; i++) {
-    int collId = hostCollIds[i];
-    ofcclCommArgs *args = ofcclCommList + collId;
+  for (int i = 0; i < rankCtx->collCount; i++) {
+    int collId = rankCtx->hostCollIds[i];
+    ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
     if (eqInfo->elemList->count() > 1) {
@@ -949,20 +893,20 @@ ncclResult_t ofcclPrepareDone() {
       OFCCL_LOG1(OFCCL_WARN, "comm->args.header.type should be ncclWorkTypeColl(1)");
       goto end;
     }
-    hostDevComm7WorkElems[collId].comm = comm->devComm;
-    hostDevComm7WorkElems[collId].first = comm->args;
+    rankCtx->hostDevComm7WorkElems[collId].comm = comm->devComm;
+    rankCtx->hostDevComm7WorkElems[collId].first = comm->args;
     
     struct cudaLaunchParams *params = comm->myParams;
-    daemonKernelGridDim.x = std::max(daemonKernelGridDim.x, params->gridDim.x);
-    daemonKernelBlockDim.x = std::max(daemonKernelBlockDim.x, params->blockDim.x);
-    gridDim4Coll[collId] = params->gridDim;
-    blockDim4Coll[collId] = params->blockDim;
+    rankCtx->daemonKernelGridDim.x = std::max(rankCtx->daemonKernelGridDim.x, params->gridDim.x);
+    rankCtx->daemonKernelBlockDim.x = std::max(rankCtx->daemonKernelBlockDim.x, params->blockDim.x);
+    rankCtx->gridDim4Coll[collId] = params->gridDim;
+    rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), thrdCudaDev, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
+    // OFCCL_LOG(OFCCL, "<%lu> rank=%d, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), rankCtx->rank, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
 
-    hostCqes[collId].collId = collId;
-    hostBlkCount4Coll[collId] = gridDim4Coll[collId].x;
-    hostThrdCount4Coll[collId] = blockDim4Coll[collId].x;
+    rankCtx->hostCqes[collId].collId = collId;
+    rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
+    rankCtx->hostThrdCount4Coll[collId] = rankCtx->blockDim4Coll[collId].x;
 
     // check 确实一个comm对应了一个coll
     for (int k = 0; k < eqInfo->maxChannels; k++) {
@@ -991,75 +935,70 @@ ncclResult_t ofcclPrepareDone() {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, daemonKernelGridDim.x=%d, daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct CollCtx, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu", pthread_self(), thrdCudaDev, collCount, daemonKernelGridDim.x, daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(CollCtx, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx));
+  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct CollCtx, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(CollCtx, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx));
   
-  sq = sqCreate(queueLength);
-  cq = cqCreate(queueLength);
+  rankCtx->sq = sqCreate(rankCtx->queueLength);
+  rankCtx->cq = cqCreate(rankCtx->queueLength);
 
   // TODO: 之后考虑换成ofccl/src/include/alloc.h里的宏。
-  checkRuntime(cudaMalloc(&globalCqes, MAX_LENGTH * sizeof(CQE)));
-  checkRuntime(cudaMemcpy(globalCqes, hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalCqes, MAX_LENGTH * sizeof(CQE)));
+  checkRuntime(cudaMemcpy(rankCtx->globalCqes, rankCtx->hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&globalBlkCount4Coll, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(globalBlkCount4Coll, hostBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalBlkCount4Coll, MAX_LENGTH * sizeof(int)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlkCount4Coll, rankCtx->hostBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(globalThrdCount4Coll, hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
+  checkRuntime(cudaMemcpy(rankCtx->globalThrdCount4Coll, rankCtx->hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&globalCollIds, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(globalCollIds, hostCollIds, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(int)));
+  checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
-  checkRuntime(cudaMemcpy(globalDevComm7WorkElems, hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
+  checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaStreamCreate(&kernelStream));
+  checkRuntime(cudaStreamCreate(&rankCtx->kernelStream));
 
-  checkRuntime(cudaMalloc(&globalBlk2CollId2CollCtx, daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
+  checkRuntime(cudaMalloc(&rankCtx->globalBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
   
-  kernelThrdArgs = { sq, cq, kernelStream, thrdCudaDev, daemonKernelGridDim, daemonKernelBlockDim, collCount, globalCqes, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx };
-  pthread_create(&kernelThrd, NULL, startKernel, &kernelThrdArgs);
-  // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), thrdCudaDev, kernelThrd, kernelThrdArgs.cudaDev);
+  rankCtx->kernelThrdArgs = { rankCtx };
+  pthread_create(&rankCtx->kernelThrd, NULL, startKernel, &rankCtx->kernelThrdArgs);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), rankCtx->rank, kernelThrd, kernelThrdArgs.cudaDev);
 
-  poll_start = (int *)calloc(1, sizeof(int));
-  poll_stop = (int *)calloc(1, sizeof(int));
-  callbacks = (CallbackFunc *)calloc(MAX_LENGTH, sizeof(CallbackFunc));
-  callbackArgList = (void **)calloc(MAX_LENGTH, sizeof(void *));
-  pollerArgs = { poll_start, poll_stop, callbacks, thrdCudaDev, cq, callbackArgList };
-  pthread_create(&poller, nullptr, startPoller, &pollerArgs);
+  rankCtx->pollerArgs = { rankCtx };
+  pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
 end:
-  CUDACHECK(cudaSetDevice(thrdCudaDev)); // do other clean-ups first before calling
+  CUDACHECK(cudaSetDevice(rankCtx->rank)); // do other clean-ups first before calling
   return ret;
 }
 
-NCCL_API(ncclResult_t, ofcclDestroy);
-ncclResult_t ofcclDestroy() {
+NCCL_API(ncclResult_t, ofcclDestroy, ofcclRankCtx_t rankCtx);
+ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
   // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
-  SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(sq), nullptr, nullptr, true };
-  sqWrite(sq, &sqe, thrdCudaDev, nullptr, nullptr);
+  SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(rankCtx->sq), nullptr, nullptr, true };
+  sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
 
-  pthread_join(kernelThrd, nullptr);
-  *poll_stop = 1;
-  pthread_join(poller, nullptr);
+  pthread_join(rankCtx->kernelThrd, nullptr);
+  rankCtx->poll_stop = 1;
+  pthread_join(rankCtx->poller, nullptr);
 
-  checkRuntime(cudaFree(globalCqes));
-  checkRuntime(cudaFree(globalBlkCount4Coll));
-  sqDestroy(sq);
-  cqDestroy(cq);
-
-  free(poll_start);
-  free(poll_stop);
-  free(callbacks);
-  free(callbackArgList);
+  checkRuntime(cudaFree(rankCtx->globalCqes));
+  checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
+  checkRuntime(cudaFree(rankCtx->globalThrdCount4Coll));
+  checkRuntime(cudaFree(rankCtx->globalCollIds));
+  checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
+  checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
+  sqDestroy(rankCtx->sq);
+  cqDestroy(rankCtx->cq);
 
   // ***** seems do not need to transverse ofcclCommList *****
-  collCount = 0;
+  rankCtx->collCount = 0;
   return ret;
 }
 
@@ -1087,7 +1026,7 @@ ncclResult_t ofcclDestroy() {
 
 // 下边这部分主要是和单点的send、recv相关，所以目前没有支持。
 //   for (int i = 0; i < collCount; i++) {
-//     ofcclCommArgs *args = ofcclCommList + hostCollIds[i];
+//     ofcclCommArgs *args = rankCtx->ofcclCommList + rankCtx->hostCollIds[i];
 //     ncclComm_t comm = args->comm;
 //     int node = comm->node;
 //     int nNodes = comm->nNodes;

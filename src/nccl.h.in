@@ -29,6 +29,8 @@ extern "C" {
 /* Opaque handle to communicator */
 typedef struct ncclComm* ncclComm_t;
 
+typedef struct ofcclRankCtx* ofcclRankCtx_t; // 但是这是怎么找到的？？
+
 // poller调用的时候把collId穿进去，lambda里边判断一下是不是自己等的。
 // using CallbackFunc = std::function<int(int)>;
 typedef int (*CallbackFunc)(int, void *);
@@ -201,6 +203,16 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 // ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
 // ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
 
+
+/*
+ * Create OfcclRankCtxOfcclRankCtx for one rank.
+ *
+ *
+ *
+ */
+ncclResult_t  ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank);
+ncclResult_t pofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank);
+
 /*
  * OFCCL prepare done, just like ncclGroupEnd()
  *
@@ -208,8 +220,8 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
  *
  *
  */
-ncclResult_t  ofcclPrepareDone();
-ncclResult_t pofcclPrepareDone();
+ncclResult_t  ofcclPrepareDone(ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareDone(ofcclRankCtx_t rankCtx);
 
 
 /*
@@ -219,8 +231,8 @@ ncclResult_t pofcclPrepareDone();
  *
  *
  */
-ncclResult_t  ofcclDestroy();
-ncclResult_t pofcclDestroy();
+ncclResult_t  ofcclDestroy(ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclDestroy(ofcclRankCtx_t rankCtx);
 
 /*
  * Reduce
@@ -286,8 +298,8 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
  * 
  * 
  */
-ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
-ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId);
+ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
 
 /*
  * OFCCL Run All-Reduce
@@ -300,8 +312,8 @@ ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclR
  * OFCCL manages the stream itself, client does not need to provide one.
  *
  */
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
-ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
 /*
  * Reduce-Scatter

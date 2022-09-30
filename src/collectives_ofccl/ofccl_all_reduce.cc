@@ -10,21 +10,18 @@
 #include "nccl.h"
 #include <pthread.h>
 
-extern thread_local SQ *sq;
-extern thread_local CQ *cq;
-
-NCCL_API(ncclResult_t, ofcclPrepareAllReduce, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId);
-ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId) {
+NCCL_API(ncclResult_t, ofcclPrepareAllReduce, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
   NVTX3_FUNC_RANGE_IN(ofccl_domain);
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     nullptr, nullptr, count, datatype, op, 0, comm, nullptr, /* Args */
     ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS };
-  return ofcclPrepareCollComm(&info, collId);
+  return ofcclPrepareCollComm(&info, collId, rankCtx);
   
 }
 
-NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs);
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs) {
+NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
 
   SQE sqe = { collId, 0, -1, sendbuff, recvbuff, false };
   int thrdCudaDev;
@@ -33,7 +30,7 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d ofcclRunAllReduce, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
-  while (sqWrite(sq, &sqe, thrdCudaDev, callback, callbackArgs) == -1) {
+  while (sqWrite(rankCtx->sq, &sqe, thrdCudaDev, callback, callbackArgs, rankCtx) == -1) {
 
   }
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);

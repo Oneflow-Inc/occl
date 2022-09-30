@@ -7,7 +7,7 @@
 
 #define OFCCL_SPINS_BEFORE_CHECK_ABORT 1000000 // 本身有退出的机制，不过没有恢复的方法
 // #define CtxSwitchThreshold (1000000llu * 1000000llu)
-#define CtxSwitchThreshold (10000llu)
+#define CtxSwitchThreshold (100llu)
 
 // TODO: now only Simple
 /* Protocol classes: ProtoSimple, ProtoLL, ProtoLL128

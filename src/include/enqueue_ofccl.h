@@ -15,13 +15,14 @@
 #include <cstddef>
 #include <cuda_runtime.h>
 #include <unordered_map>
+#include <unordered_set>
 
 // #define MAX_ASYNC_PANELS 32
 // #define MAX_ASYNC_OPS 128
 
-extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId);
+extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
 
-extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs);
+extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
 struct ofcclCommArgs {
   ncclResult_t ret;
@@ -29,33 +30,57 @@ struct ofcclCommArgs {
 };
 
 typedef struct {
-  int *poll_start;
-  int *poll_stop;
-  // std::unordered_map<int, CallbackFunc> *collId2callback;
-  CallbackFunc *callbacks;
-  int cudaDev;
-  CQ *cq;
-  void **callbackArgList;
+  ofcclRankCtx *rankCtx;
 } PollerArgs;
 
 typedef struct {
-  SQ *sq;
-  CQ *cq;
-  cudaStream_t stream;
-  int cudaDev;
-  dim3 gridDim;
-  dim3 blockDim;
-  int collCount;
-  CQE *globalCqes;
-  int *globalBlkCount4Coll;
-  int *globalThrdCount4Coll;
-  int *globalCollIds;
-  DevComm7WorkElem *globalDevComm7WorkElems;
-  CollCtx *globalBlk2CollId2CollCtx;
+  ofcclRankCtx *rankCtx;
 } KernelThrdArgs;
 
+struct ofcclRankCtx {
+  int rank;
 
+  ofcclCommArgs ofcclCommList[MAX_LENGTH];
+  pthread_t ofcclPrepareThreads[MAX_LENGTH];
+  int collCount;
+  std::unordered_set<ncclComm_t> seenComms;
 
+  dim3 daemonKernelGridDim;
+  dim3 daemonKernelBlockDim;
+  int queueLength;
+  dim3 gridDim4Coll[MAX_LENGTH];
+  dim3 blockDim4Coll[MAX_LENGTH];
+
+  pthread_t kernelThrd;
+  void *argsptrs[10];
+  cudaStream_t kernelStream;
+  KernelThrdArgs kernelThrdArgs;
+
+  CQE hostCqes[MAX_LENGTH];
+  CQE *globalCqes;
+  int hostBlkCount4Coll[MAX_LENGTH];
+  int *globalBlkCount4Coll;
+  int hostThrdCount4Coll[MAX_LENGTH];
+  int *globalThrdCount4Coll;
+  int hostCollIds[MAX_LENGTH];
+  int *globalCollIds;
+  DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
+  DevComm7WorkElem *globalDevComm7WorkElems;
+  CollCtx *globalBlk2CollId2CollCtx;
+  
+  SQ *sq;
+  CQ *cq;
+
+  // for poller thread
+  // TODO: 考虑用mutex保证互斥访问。
+  pthread_t poller;
+  PollerArgs pollerArgs;
+  int poll_start;
+  int poll_stop;
+  
+  void *callbackArgList[MAX_LENGTH];
+  CallbackFunc callbacks[MAX_LENGTH];
+};
 
 
 #endif // End include guard
