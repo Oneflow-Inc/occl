@@ -22,6 +22,8 @@ namespace {
 
     Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
       (tid, nthreads, &ring->prev, &ring->next, args->sendbuff, args->recvbuff, args->redOpArg);
+    
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> create prims, gridOffset=%ld, size = %ld, currentStep = %d, maxStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, sharedCollCtx.gridOffset4RingAllReduce, size, sharedCollCtx.currentStep4RingAllReduce, 2 * nranks - 1);
 
     ssize_t offset = 0;
     int nelem = 0;
@@ -161,6 +163,7 @@ namespace {
         sharedCollCtx.currentStep4RingAllReduce = currentStep;
 
         sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
       }
     }
     // else {

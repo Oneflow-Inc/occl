@@ -7,7 +7,7 @@
 // 这个不要求src dst同一类型
 template<typename Tdst, typename Tsrc>
 static __device__ void copyToShmemOneShot(Tdst *dst, Tsrc const *src, int tid, int nthreads) { // nccl的这个的函数签名里有个nthreads参数，但是并没有用，应该是为了和下边那个作区分，现在我们可以区分开了，反而带上nthreads是区分不开的。
-  static_assert(sizeof(Tdst)%(2*sizeof(uint64_t)) == 0 && sizeof(Tsrc)%(2*sizeof(uint64_t)) == 0,
+  static_assert(sizeof(Tdst)%(2*sizeof(uint64_t )) == 0 && sizeof(Tsrc)%(2*sizeof(uint64_t)) == 0,
       "copyToShmemOneShot needs sizes which are multiple of 16B");
   static_assert(sizeof(Tdst) >= sizeof(Tsrc), "Tdst size is too small");
   static_assert(sizeof(Tdst) <= WARP_SIZE*2*sizeof(uint64_t), "copyToShmemOneShot limited to 512B to make sure it can always be done in one cycle");
@@ -222,15 +222,15 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
   // TODO: really need system?? 之后可以看看__threadfence()会不会提高性能。
   __threadfence_system(); // make sure read new head.
   
-  unsigned long long int sqLLU = (unsigned long long int)sq;
-  unsigned long long int sqMASK = 0x111100000000llu & (unsigned long long int)sq;
-  sqLLU |= sqMASK;
-  sq = (SQ *)sqLLU;
+  // unsigned long long int sqLLU = (unsigned long long int)sq;
+  // unsigned long long int sqMASK = 0x111100000000llu & (unsigned long long int)sq;
+  // sqLLU |= sqMASK;
+  // sq = (SQ *)sqLLU;
 
   // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq @ %p", thrdCudaDev, bid, threadIdx.x, sq);
   // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq->head = %llu", thrdCudaDev, bid, threadIdx.x, sq->head);
   
-  sq = (SQ *)sqLLU;
+  // sq = (SQ *)sqLLU;
 
   if (blkStatus.sqReadFrontier < sq->head) {
     // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
@@ -416,13 +416,15 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         // 只有真正的工作线程才执行
         if (tid < thrdLimit) {
           // ***** 然后调用ofcclFunc *****
+
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.work.header.funcIndex, sharedCollCtx.saveCtx7Quit);
+
           ofcclFuncs[sharedCollCtx.work.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
           // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
           // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d]() return", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, sharedCollCtx.work.header.funcIndex);
   
-          // if (tid == 0) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
-          // }
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
+  
           ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 
           if (sharedCollCtx.saveCtx7Quit == 1) {

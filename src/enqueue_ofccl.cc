@@ -170,10 +170,10 @@ static ncclResult_t ofcclComputeColl(struct ncclInfo* info /* input */, struct n
 
   work->header.funcIndex = FUNC_INDEX(info->coll, info->opFull.op, info->datatype, info->algorithm, info->protocol);
 
-  int stepSize   = info->comm->buffSizes[info->protocol]/NCCL_STEPS;
+  int stepSize = info->comm->buffSizes[info->protocol]/NCCL_STEPS;
   int chunkSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->chunkSteps : 1;
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
-  int chunkSize  = stepSize*chunkSteps;
+  int chunkSize = stepSize*chunkSteps;
 
   // Compute lastChunkSize
   if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_SIMPLE) {
@@ -765,18 +765,18 @@ void *startKernel(void *args) {
 
   // TODO: 之后考虑按需启停kernel
   
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d after KernelThrd set daemonKernelGridDim, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
 
-  rankCtx->argsptrs[0]  = &rankCtx->sq;
-  rankCtx->argsptrs[1]  = &rankCtx->cq;
-  rankCtx->argsptrs[2]  = &rankCtx->rank;
-  rankCtx->argsptrs[3]  = &rankCtx->collCount;
-  rankCtx->argsptrs[4]  = &rankCtx->globalCqes;
-  rankCtx->argsptrs[5]  = &rankCtx->globalBlkCount4Coll;
-  rankCtx->argsptrs[6]  = &rankCtx->globalThrdCount4Coll;
-  rankCtx->argsptrs[7]  = &rankCtx->globalCollIds;
-  rankCtx->argsptrs[8]  = &rankCtx->globalDevComm7WorkElems;
-  rankCtx->argsptrs[9]  = &rankCtx->globalBlk2CollId2CollCtx;
+  rankCtx->argsptrs[0] = &rankCtx->sq;
+  rankCtx->argsptrs[1] = &rankCtx->cq;
+  rankCtx->argsptrs[2] = &rankCtx->rank;
+  rankCtx->argsptrs[3] = &rankCtx->collCount;
+  rankCtx->argsptrs[4] = &rankCtx->globalCqes;
+  rankCtx->argsptrs[5] = &rankCtx->globalBlkCount4Coll;
+  rankCtx->argsptrs[6] = &rankCtx->globalThrdCount4Coll;
+  rankCtx->argsptrs[7] = &rankCtx->globalCollIds;
+  rankCtx->argsptrs[8] = &rankCtx->globalDevComm7WorkElems;
+  rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -787,7 +787,7 @@ void *startKernel(void *args) {
   daemonKernelParam.stream = rankCtx->kernelStream;
   daemonKernelParam.args = rankCtx->argsptrs;
 
-  OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
+  // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
 
@@ -897,8 +897,8 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
     rankCtx->hostDevComm7WorkElems[collId].first = comm->args;
     
     struct cudaLaunchParams *params = comm->myParams;
-    rankCtx->daemonKernelGridDim.x = std::max(rankCtx->daemonKernelGridDim.x, params->gridDim.x);
-    rankCtx->daemonKernelBlockDim.x = std::max(rankCtx->daemonKernelBlockDim.x, params->blockDim.x);
+    rankCtx->daemonKernelGridDim = dim3(std::max(rankCtx->daemonKernelGridDim.x, params->gridDim.x));
+    rankCtx->daemonKernelBlockDim = dim3(std::max(rankCtx->daemonKernelBlockDim.x, params->blockDim.x));
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
