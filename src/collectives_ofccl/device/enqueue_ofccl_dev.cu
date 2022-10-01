@@ -198,6 +198,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
       // globalCollCtx4Blk7Coll->numDoneThrds = 0;
       
       globalBlk2CollId2CollCtx->saveCtx7Quit = 0;
+      globalBlk2CollId2CollCtx->loadAgain = 0;
       globalBlk2CollId2CollCtx->slice4SimpleGenericOp = 0;
       globalBlk2CollId2CollCtx->offset4SimpleGenericOp = 0;
 
@@ -324,6 +325,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 
     // sharedCollCtx.saveCtx7Quit = globalCollCtx4Blk7Coll->saveCtx7Quit; // 这个看起来也可以充当标记是否是跑了一半的标记位
     sharedCollCtx.saveCtx7Quit = 0; // 每次加载的时候，重置。
+    sharedCollCtx.loadAgain = globalCollCtx4Blk7Coll->loadAgain;
     sharedCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->slice4SimpleGenericOp;
     sharedCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->offset4SimpleGenericOp;
 
@@ -349,6 +351,7 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
     blkStatus.numActiveColls -= 1;
     blkStatus.currActiveCollId = -1;
     globalCollCtx4Blk7Coll->executing = 0;
+    globalCollCtx4Blk7Coll->loadAgain = 0;
     
     /* IF_CHECK 如果要检查对错，把下边露出来 */
 
@@ -367,6 +370,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   int tid = threadIdx.x;
   if (tid == 0) {
     // globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
+    globalCollCtx4Blk7Coll->loadAgain = sharedCollCtx.loadAgain;
     globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
     globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
   
@@ -423,7 +427,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
           // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d]() return", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, sharedCollCtx.work.header.funcIndex);
   
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, before ofcclBarrier, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, before ofcclBarrier, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
   
           ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 

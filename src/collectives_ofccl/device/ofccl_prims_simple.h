@@ -95,6 +95,7 @@ class Primitives<
         __threadfence_block();
         if (ctxSwitchCounter++ >= CtxSwitchThreshold) {
           sharedCollCtx.saveCtx7Quit = 1;
+          sharedCollCtx.loadAgain = 1;
 
           if ((flags & (Recv*RoleWaitRecv))) {
             OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
@@ -316,7 +317,9 @@ class Primitives<
     if (flags & (RoleWaitRecv|RolePostRecv)) {
       auto *conn = &peer->recv[connIndex].conn;
       step = conn->step; // uint64_t step;      // Keep where we are // 设置好就不会变了；每个线程有自己的值
-      step = roundUp(step, SlicePerChunk*StepPerSlice); // return (x+y-1) - (x+y-1)%y;，就是向上取到y的倍数
+      if (sharedCollCtx.loadAgain == 0) {
+        step = roundUp(step, SlicePerChunk*StepPerSlice); // return (x+y-1) - (x+y-1)%y;，就是向上取到y的倍数
+      }
       
       // if ((flags & (RoleWaitRecv))) {
       //   OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
@@ -366,7 +369,9 @@ class Primitives<
     if (flags & (RoleWaitSend|RolePostSend)) {
       auto *conn = &peer->send[connIndex].conn;
       step = conn->step;
-      step = roundUp(step, SlicePerChunk*StepPerSlice);
+      if (sharedCollCtx.loadAgain == 0) {
+        step = roundUp(step, SlicePerChunk*StepPerSlice);
+      }
 
       // if ((flags & (RoleWaitSend))) {
       //   OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load step(tail) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
