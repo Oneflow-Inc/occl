@@ -24,6 +24,7 @@
 
 #define OFCCL_LOG_THRD_0(PRE, FMT, args...) do { if (threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define OFCCL_LOG_BLK_0(PRE, FMT, args...) do { if (blockIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_BLK_1(PRE, FMT, args...) do { if (blockIdx.x == 1) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define OFCCL_LOG_BLK_0_THRD_0(PRE, FMT, args...) do { if (blockIdx.x == 0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
 #define OFCCL_LOG_RANK_0_BLK_0_DEVSH(PRE, FMT, args...) do { if (sharedCollCtx.comm.rank==0 && blockIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
