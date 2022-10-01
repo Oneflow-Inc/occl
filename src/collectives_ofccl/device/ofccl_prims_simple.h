@@ -303,7 +303,8 @@ class Primitives<
       slice += 1;
     }
     // waitPeer后边加了subBarrier来进行同步，但是postPeer后边没有任何同步方式，我们修改了nccl的行为方式，原来waitPeer那里可以无限等，现在假如了更加积极的主动跳过的方法，不加一个同步的话，postPeer里的工作本身并不轻松，可能导致block内线程的分化。
-    __syncthreads();
+    // TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    __syncthreads(); // TODO: 但或许这里只有打印log的时候才能起到防止分化的作用。一般执行的时候应该用不到。否则nccl原来也会加上的。
   }
 
   // TODO: 省略了 ScatterGatherOp
