@@ -29,7 +29,7 @@ struct ProtoSimple {
     return sharedCollCtx.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
   }
   // Granularity of data bytes transferred per thread.
-  __device__ static int calcBytePerGrain() {
+  __device__ static int calcBytePerGrain() { 
     return sizeof(uint64_t); // Bogus value? Nobody queries this metric for simple.
   }
   // Group width is how many consecutive group values a subchannel occupies.
