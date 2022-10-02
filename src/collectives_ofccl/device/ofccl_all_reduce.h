@@ -55,16 +55,8 @@ namespace {
 
       // 这里不能直接赋值，因为这是在循环里，在恢复的上下文中的gridOffset对应的循环中，需要恢复，否则直接用0初始化。
       if (gridOffset == sharedCollCtx.gridOffset4RingAllReduce) {
-        // offset = sharedCollCtx.offset4RingAllReduce;
-        // nelem = sharedCollCtx.nelem4RingAllReduce;
-        // chunk = sharedCollCtx.chunk4RingAllReduce;
-
         currentStep = sharedCollCtx.currentStep4RingAllReduce;
       } else {
-        // offset = 0;
-        // nelem = 0;
-        // chunk = 0;
-
         currentStep = 0;
       }
 
@@ -167,9 +159,6 @@ namespace {
     if (sharedCollCtx.saveCtx7Quit == 1) {
       // 说明是跑到一半要退出了，保存上下文
       if (tid == 0) {
-        // sharedCollCtx.offset4RingAllReduce = offset;
-        // sharedCollCtx.nelem4RingAllReduce = nelem;
-        // sharedCollCtx.chunk4RingAllReduce = chunk;
         sharedCollCtx.currentStep4RingAllReduce = currentStep;
 
         sharedCollCtx.gridOffset4RingAllReduce = gridOffset;

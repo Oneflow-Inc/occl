@@ -121,9 +121,6 @@ typedef struct {
   // ****** Ring AllReduce ******
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
-  int offset4RingAllReduce;
-  int nelem4RingAllReduce;
-  int chunk4RingAllReduce;
 } CollCtx;
 static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 

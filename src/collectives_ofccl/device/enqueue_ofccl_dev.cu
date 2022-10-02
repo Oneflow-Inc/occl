@@ -204,10 +204,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
 
       globalBlk2CollId2CollCtx->currentStep4RingAllReduce = 0;
       globalBlk2CollId2CollCtx->gridOffset4RingAllReduce = 0;
-      // 事实上下边这3个变量不需要初始值
-      globalBlk2CollId2CollCtx->offset4RingAllReduce = 0;
-      globalBlk2CollId2CollCtx->nelem4RingAllReduce = 0;
-      globalBlk2CollId2CollCtx->chunk4RingAllReduce = 0;
+
       // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
     }
     __syncthreads();
@@ -332,9 +329,6 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.comm.nRanks - 1;
     sharedCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->currentStep4RingAllReduce;
     sharedCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->gridOffset4RingAllReduce;
-    sharedCollCtx.offset4RingAllReduce = globalCollCtx4Blk7Coll->offset4RingAllReduce;
-    sharedCollCtx.nelem4RingAllReduce = globalCollCtx4Blk7Coll->nelem4RingAllReduce;
-    sharedCollCtx.chunk4RingAllReduce = globalCollCtx4Blk7Coll->chunk4RingAllReduce;
   }
   __syncthreads();
   
@@ -350,9 +344,17 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
   if (bid < blkLimit && tid == 0) {
     blkStatus.numActiveColls -= 1;
     blkStatus.currActiveCollId = -1;
+
     globalCollCtx4Blk7Coll->executing = 0;
     globalCollCtx4Blk7Coll->loadAgain = 0;
-    
+    globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
+
+    // 需要把上下文也重置了，不然多次运行会有问题。
+    globalCollCtx4Blk7Coll->slice4SimpleGenericOp = 0;
+    globalCollCtx4Blk7Coll->offset4SimpleGenericOp = 0;
+    globalCollCtx4Blk7Coll->currentStep4RingAllReduce = 0;
+    globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
+
     /* IF_CHECK 如果要检查对错，把下边露出来 */
 
     // float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
@@ -376,9 +378,6 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   
     globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
     globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
-    // globalCollCtx4Blk7Coll->offset4RingAllReduce = sharedCollCtx.offset4RingAllReduce;
-    // globalCollCtx4Blk7Coll->nelem4RingAllReduce = sharedCollCtx.nelem4RingAllReduce;
-    // globalCollCtx4Blk7Coll->chunk4RingAllReduce = sharedCollCtx.chunk4RingAllReduce;
 
     blkStatus.totalCtxSwitchCnt++;
     blkStatus.currActiveCollId = -1;
