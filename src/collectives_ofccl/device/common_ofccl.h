@@ -38,7 +38,6 @@ struct RunWork {
   }
 };
 
-// TODO: 参数里直接用ofcclShmem.work吗？
 // Examples :     AllReduce, RING, LL,    Sum,   uint8
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \

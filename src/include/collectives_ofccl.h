@@ -130,7 +130,6 @@ extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCou
 // ***** 保留FUNC_INDEX *****
 
 // ***** 现在应该只需要个funcName *****
-// TODO: 可能需要初始化和真正执行两份function name；也可能只搞一个function，不过通过参数区分是初始化还是真正执行。倾向于后者。
 #define OFCCL_FUNC_NAME(func, algo, proto, devredop, type) \
   ofcclFunction_##func##_##algo##_##proto##_##devredop##_##type
 

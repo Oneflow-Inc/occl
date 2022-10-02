@@ -412,8 +412,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
           // __threadfence_block(); // 主要这里有个fence操作，所以可能会带来分化的危险。
         }
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!! debug
-        __syncthreads(); // 这里同步线程，那上边就不用插入fence了。
+        // __syncthreads(); // 没必要为了这么个玩意浪费同步。这里同步线程，那上边就不用插入fence了。
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
