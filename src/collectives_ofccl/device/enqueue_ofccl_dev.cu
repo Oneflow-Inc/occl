@@ -411,8 +411,10 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
       if (globalCollCtx4Blk7Coll->executing == 1) {
         if (tid == 0) {
           blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
-          __threadfence_block();
+          // __threadfence_block(); // 主要这里有个fence操作，所以可能会带来分化的危险。
         }
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!! debug
+        __syncthreads(); // 这里同步线程，那上边就不用插入fence了。
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
@@ -431,11 +433,14 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   
           ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclBarrier returns", thrdCudaDev, bid, tid);
+          // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclBarrier returns", thrdCudaDev, bid, tid);
 
           if (sharedCollCtx.saveCtx7Quit == 1) {
             saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, thrdLimit);
           } else {
+            
+            // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, complete collId = %d", thrdCudaDev, bid, tid, collId);
+
             // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
             // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
             // 完成的时候才进行下边的调用，只是保存上下文退出不应该调用。
@@ -477,17 +482,23 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   __syncthreads();
   while (true) {
     for (int i = 0; i < TRAVERSE_TIMES; i++) {
+      // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseGlobalCollCtx, (%d / %d), blkStatus.numActiveColls = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
+
       turn = traverseGlobalCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
-      // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, traverseGlobalCollCtx return, (%d / %d)", sharedCollCtx.comm.rank, blockIdx.x, tid, i, TRAVERSE_TIMES);
+      
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, traverseGlobalCollCtx return, (%d / %d)", sharedCollCtx.comm.rank, blockIdx.x, tid, i, TRAVERSE_TIMES);
     }
     if (tid == 0) {
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ, sq @ %p, blkStatus.numActiveColls=%d, blkStatus.currActiveCollId=%d, blkStatus.totalCtxSwitchCnt=%d", thrdCudaDev, bid, tid, localSq, blkStatus.numActiveColls, blkStatus.currActiveCollId, blkStatus.totalCtxSwitchCnt);
       
-      // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ, sq @ %p", sharedCollCtx.comm.rank, blockIdx.x, tid, localSq);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ, sq @ %p", sharedCollCtx.comm.rank, blockIdx.x, tid, localSq);
+
       checkSQ(thrdCudaDev, localSq, globalBlk2CollId2CollCtx);
     }
-
     __syncthreads();
+
+    // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after checkSQ", sharedCollCtx.comm.rank, blockIdx.x, tid);
+    
     if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
 
