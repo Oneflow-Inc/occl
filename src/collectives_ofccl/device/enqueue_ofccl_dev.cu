@@ -392,13 +392,17 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
-  // int numSeenActiveColls = 0; // TODO: 想用这个和blkStatus.numActiveColls 配合，减少下边的循环次数，在block天然分化的前提下，看起来可以直接用。
+  int numSeenActiveColls = 0; // 用这个和blkStatus.numActiveColls 配合，减少下边的循环次数，在block天然分化的前提下，看起来可以直接用。
 
   __threadfence_block();
   if (blkStatus.numActiveColls == 0) {
     return turn;
   }
   for (int i = 0; i < collCount; i++) {
+    if (numSeenActiveColls >= blkStatus.numActiveColls) {
+      break;
+    }
+
     // 下边这三个量是不变的。
     int collId = sharedCollIds[i];
     int blkLimit = sharedBlkCount4Coll[collId];
@@ -413,6 +417,8 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           // __threadfence_block(); // 主要这里有个fence操作，所以可能会带来分化的危险。
         }
         // __syncthreads(); // 没必要为了这么个玩意浪费同步。这里同步线程，那上边就不用插入fence了。
+
+        numSeenActiveColls++;
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
