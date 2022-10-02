@@ -314,7 +314,7 @@ class Primitives<
       offset += sliceSize;
       slice += 1;
     }
-    // waitPeer后边加了subBarrier来进行同步，但是postPeer后边没有任何同步方式，我们修改了nccl的行为方式，原来waitPeer那里可以无限等，现在假如了更加积极的主动跳过的方法，不加一个同步的话，postPeer里的工作本身并不轻松，可能导致block内线程的分化。
+    // waitPeer后边加了subBarrier来进行同步，但是postPeer后边没有任何同步方式，我们修改了nccl的行为方式，原来waitPeer那里可以无限等，现在加入了更加积极的主动跳过的方法，不加一个同步的话，postPeer里的工作本身并不轻松，可能导致block内线程的分化。
 
     __syncthreads(); // 需要保留，不过相对nccl应该就就失掉了多一个warp专门做fence的优化。
   }
