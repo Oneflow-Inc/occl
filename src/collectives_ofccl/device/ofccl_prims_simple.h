@@ -47,6 +47,8 @@ class Primitives<
   };
   uint64_t volatile *connStepPtr;
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
+
+  uint64_t genericOpExecCnt; // 每个线程的本地变量，标记genericOp跑了几次，和ctx.loadAgain配合判断是否是恢复上下文后的第一次执行，如果是，那么genericOp里的slice和offset要从ctx里读。
   
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -99,14 +101,14 @@ class Primitives<
 
           if ((flags & (Recv*RoleWaitRecv))) {
             // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-            OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-            // OFCCL_LOG_RANK_1_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-            // OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+            // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+            // OFCCL_LOG_RANK_1_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+            // OFCCL_LOG_RANK_0_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
             // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
           }
           if ((flags & (Send*RoleWaitSend))) {
             // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-            OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+            // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
             // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
           }
           
@@ -148,12 +150,12 @@ class Primitives<
       if ((flags & (Recv*RoleWaitRecv))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv);
 
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, updated step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, updated step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
       if ((flags & (Send*RoleWaitSend))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
 
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, updated step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, updated step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
     }
   }
@@ -165,14 +167,14 @@ class Primitives<
       *connStepPtr = step;
       if ((flags & (Recv*RolePostRecv))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
         // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
       }
       if ((flags & (Send*RolePostSend))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
-        // OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
-        // OFCCL_LOG_RANK_1_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
+        // OFCCL_LOG_RANK_0_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
+        // OFCCL_LOG_RANK_1_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
         // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
       }
     }
@@ -196,8 +198,15 @@ class Primitives<
     // SlicePerChunk = 2, StepPerSlice = 2
     int sliceSize = stepSize*StepPerSlice;
     sliceSize = max(divUp(nelem, 16*SlicePerChunk)*16, sliceSize/32);
-    int slice = sharedCollCtx.slice4SimpleGenericOp;
-    int offset = sharedCollCtx.offset4SimpleGenericOp;
+
+    // bugfix: ！！！！！！！！！！！！！不应该每次都从ctx里边恢复！！！！！！！！！！！！！！
+    // 之后刚恢复回来那次，才应该读保存的ctx。
+    int slice = 0;
+    int offset = 0;
+    if (genericOpExecCnt++ == 0 && sharedCollCtx.loadAgain == 1) {
+      slice = sharedCollCtx.slice4SimpleGenericOp;
+      offset = sharedCollCtx.offset4SimpleGenericOp;
+    }
 
     if (tid < nworkers && offset < nelem) {
       // Worker-only loop for non-empty slices. Non-workers and empty slices are
@@ -325,14 +334,14 @@ class Primitives<
       }
       
       if ((flags & (RoleWaitRecv))) {
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        // OFCCL_LOG_RANK_1_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        // OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_RANK_1_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_RANK_0_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
       if ((flags & (RolePostRecv))) {
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        // OFCCL_LOG_RANK_1_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        // OFCCL_LOG_RANK_0_BLK_0_DEVSH(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_RANK_1_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_RANK_0_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
 
       if (flags & RolePostRecv) { // (ng - 2) * 8 + 0 号线程是 RolePostRecv
@@ -519,6 +528,7 @@ class Primitives<
       void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint32_t group=0, struct ncclWorkElem* e = nullptr
     ):
     tid(tid),
+    genericOpExecCnt(0),
     stepSize(sharedCollCtx.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
 
     // For send operations, we need an extra warp to overlap the threadfence and the copy
@@ -579,12 +589,12 @@ class Primitives<
       conns[index]->step = step;
       if ((flags & (RolePostRecv))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
         // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
       if ((flags & (RolePostSend))) {
         // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
-        OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
+        // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
         // OFCCL_LOG_BLK_1(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, step);
       }
 
