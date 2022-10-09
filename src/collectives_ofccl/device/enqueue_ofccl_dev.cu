@@ -65,6 +65,7 @@ static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthread
 
 // 这个的目的应该是在“切片并行复制”之后，恢复标量的语义
 // 但是没用，而且在buffer里的数据是0.5，或者其他数字时，导致卡住。log发现buffer里的数字是0.25，可以正常运行，并且没有进入这里。所以直接注释了吧。
+// TODO: 但是这里卡住，总还是怪怪的。有空看看吧。
 // static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
 //   if (we->header.type != ncclWorkTypeUnused && we->redOpArgIsPtr) {
 //     /* redOpArg is a pointer to the scalar value, so we'll dereference it
