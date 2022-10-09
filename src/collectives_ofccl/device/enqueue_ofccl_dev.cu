@@ -260,11 +260,11 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
       globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
       
-      // IF_CHECK checkSQ里浅打印一下。这个没用
-      // float *sendptr = (float *)target.sendbuff;
-      // for (int i = 0; i < buffPrintNum; i++) {
-      //   OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @%p sendbuff[%d]=%f", thrdCudaDev, bid, threadIdx.x, target.sendbuff, i, *(sendptr + i));
-      // }
+      // IF_CHECK checkSQ里收到sqe的时候浅打印一下初始sendbuff。作用一般。
+      float *sendptr = (float *)target.sendbuff;
+      for (int i = 0; i < buffPrintNum; i++) {
+        OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @%p sendbuff[%d]=%f", thrdCudaDev, bid, threadIdx.x, target.sendbuff, i, *(sendptr + i));
+      }
       
       // block的0号线程操作shmem，不用原子操作
       blkStatus.numActiveColls += 1;
@@ -357,12 +357,12 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
 
     /* IF_CHECK 如果要检查对错，把下边露出来 */
 
-    // float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
-    // float *ptr = (float *)sharedCollCtx.work.elems[0].recvbuff;
-    // for (int i = buffPrintStart; i < buffPrintStart+buffPrintNum; i++) {
-    //   OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].sendbuff, i, *(sendptr + i));
-    //   OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].recvbuff, i, *(ptr + i));
-    // }
+    float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
+    float *ptr = (float *)sharedCollCtx.work.elems[0].recvbuff;
+    for (int i = buffPrintStart; i < buffPrintStart+buffPrintNum; i++) {
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].sendbuff, i, *(sendptr + i));
+      OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].recvbuff, i, *(ptr + i));
+    }
 
   }
   ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
