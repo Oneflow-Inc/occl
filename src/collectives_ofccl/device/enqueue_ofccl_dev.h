@@ -3,7 +3,7 @@
 #include "common_ofccl.h" // for CollCtx
 
 #define buffPrintNum 5
-#define buffPrintStart 120000 + 5469
+#define buffPrintStart 0 // 120000 + 5469
 
 typedef struct {
   int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整

@@ -34,6 +34,7 @@ struct RunWork {
   // here from the LL ncclKernel.
   __device__ __forceinline__ void run(ncclWork *w) {
     // 这里看起来不用动了。
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before RunWorkElement", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x);
     RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[0]);
   }
 };
