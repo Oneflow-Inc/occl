@@ -79,7 +79,7 @@ namespace {
       }
 
       // k-2 steps: reduce and copy to next GPU
-      if (currentStep < nranks - 1) {
+      if (currentStep < nranks - 1) { // 2卡不执行这里。
         for (int j=currentStep + 1; j<nranks; ++j) { // j需要根据currentStep进行相应调整。原来j初值是2.
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
@@ -118,7 +118,7 @@ namespace {
       }
 
       // k-2 steps: copy to next GPU
-      if (currentStep < 2 * nranks - 2) {
+      if (currentStep < 2 * nranks - 2) { // 2卡不执行这里
         for (int j=currentStep-nranks+1; j<nranks-1; ++j) { // j需要根据currentStep进行相应调整。原来j初值是1. 第一次进入时，currentStep=nranks, j=1
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
