@@ -26,7 +26,8 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   SQE sqe = { collId, 0, -1, sendbuff, recvbuff, false };
   int thrdCudaDev;
   checkRuntime(cudaGetDevice(&thrdCudaDev));
-  
+
+  ofcclPrepareDone(rankCtx);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d ofcclRunAllReduce, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> rank=%d Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 

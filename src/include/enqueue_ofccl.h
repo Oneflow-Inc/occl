@@ -37,8 +37,12 @@ typedef struct {
   ofcclRankCtx *rankCtx;
 } KernelThrdArgs;
 
+// TODO: 不是线程安全的。
 struct ofcclRankCtx {
   int rank;
+
+  int inited; // TODO: 现阶段没什么用，是之后为了daemonKernel按需启停用的，防止再跑一遍prepareDone里初始化数据结构的代码。
+  int daemonKernelStarted;
 
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
