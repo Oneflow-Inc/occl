@@ -631,7 +631,9 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   }
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
   if (rankCtx->poll_start == 0) {
+    pthread_mutex_lock(&rankCtx->poller_mutex);
     rankCtx->poll_start = 1;
+    pthread_mutex_unlock(&rankCtx->poller_mutex);
   }
   
   return 0;
@@ -701,6 +703,9 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
 
   newOfcclRankCtx->inited = 0;
   newOfcclRankCtx->daemonKernelStarted = 0;
+  newOfcclRankCtx->pollerThreadStarted = 0;
+  checkRuntime(cudaMallocHost(&newOfcclRankCtx->volunteerQuit, sizeof(int)));
+  *newOfcclRankCtx->volunteerQuit = 0;
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy还是放到ofcclPrepareDone里边做
 
@@ -780,6 +785,7 @@ void *startKernel(void *args) {
   rankCtx->argsptrs[7] = &rankCtx->globalCollIds;
   rankCtx->argsptrs[8] = &rankCtx->globalDevComm7WorkElems;
   rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
+  rankCtx->argsptrs[10] = &rankCtx->volunteerQuit;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -793,10 +799,10 @@ void *startKernel(void *args) {
   // OFCCL_LOG(OFCCL, "<%lu> rank=%d, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
 
   checkRuntime(cudaLaunchKernel(daemonKernelParam.func, daemonKernelParam.gridDim, daemonKernelParam.blockDim, daemonKernelParam.args, daemonKernelParam.sharedMem, daemonKernelParam.stream));
-
-  // daemonKernel<<<gridDimx, blockDimx, 0, stream>>>(sq, cq, globalCqes, globalBlkCount4Coll);
   
   cudaStreamSynchronize(rankCtx->kernelStream);
+
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, startKernel thread prepare to exit", pthread_self(), rankCtx->rank);
 
   return NULL;
 }
@@ -804,11 +810,27 @@ void *startKernel(void *args) {
 void *startPoller(void *args) {
   ofcclRankCtx *rankCtx = ((KernelThrdArgs *)args)->rankCtx;
   
-  while (rankCtx->poll_start == 0) {
+  while (true) {
+    // 原来的while (rankCtx->poll_start == 0)扩展成下边这样
+    pthread_mutex_lock(&rankCtx->poller_mutex);
+    if (rankCtx->poll_start == 1) {
+      pthread_mutex_unlock(&rankCtx->poller_mutex);
+      break;
+    }
+    pthread_mutex_unlock(&rankCtx->poller_mutex);
+
     sched_yield();
   }
 
-  while (rankCtx->poll_stop == 0) {
+  while (true) {
+    // 原来的while (rankCtx->poll_stop == 0)扩展成下边这样
+    pthread_mutex_lock(&rankCtx->poller_mutex);
+    if (rankCtx->poll_stop == 1) {
+      pthread_mutex_unlock(&rankCtx->poller_mutex);
+      break;
+    }
+    pthread_mutex_unlock(&rankCtx->poller_mutex);
+
     CQE target;
     if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
       sched_yield();
@@ -820,6 +842,7 @@ void *startPoller(void *args) {
     }
   }
 
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, startPoller thread prepare to exit", pthread_self(), rankCtx->rank);
   return nullptr;
 }
 
@@ -827,6 +850,13 @@ NCCL_API(ncclResult_t, ofcclPrepareDone, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   // ***** ncclGroupEnd() *****
   ncclResult_t ret = ncclSuccess;
+
+  if (*rankCtx->volunteerQuit == 1) {
+    // 主动退出后，被OfcclRunFUNC调用，这时需要执行一下对kernel线程的wait操作，方便下边启动新的daemonKernel线程
+    pthread_join(rankCtx->kernelThrd, nullptr);
+    rankCtx->daemonKernelStarted = 0;
+  }
+
   if (!rankCtx->inited) {
     
     OFCCL_LOG(OFCCL_INFO, "Rank %d get %d colls", rankCtx->rank, rankCtx->collCount);
@@ -969,6 +999,8 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
     // make sure Memcpy to globalBlkCount4Coll finish
     checkRuntime(cudaDeviceSynchronize());
 
+    pthread_mutex_init(&rankCtx->poller_mutex, nullptr);
+
     rankCtx->inited = 1;
   }
   
@@ -976,11 +1008,14 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
     rankCtx->kernelThrdArgs = { rankCtx };
     pthread_create(&rankCtx->kernelThrd, NULL, startKernel, &rankCtx->kernelThrdArgs);
     // OFCCL_LOG(OFCCL, "<%lu> rank=%d create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), rankCtx->rank, kernelThrd, kernelThrdArgs.cudaDev);
+    rankCtx->daemonKernelStarted = 1;
+  }
 
+  if (!rankCtx->pollerThreadStarted) {
     rankCtx->pollerArgs = { rankCtx };
     pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-    rankCtx->daemonKernelStarted = 1;
+    rankCtx->pollerThreadStarted = 1;
   }
 
 end:
@@ -998,8 +1033,13 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
 
   pthread_join(rankCtx->kernelThrd, nullptr);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, pthread_join startKernel thread", pthread_self(), rankCtx->rank);
+
+  pthread_mutex_lock(&rankCtx->poller_mutex);
   rankCtx->poll_stop = 1;
+  pthread_mutex_unlock(&rankCtx->poller_mutex);
   pthread_join(rankCtx->poller, nullptr);
+  OFCCL_LOG(OFCCL, "<%lu> rank=%d, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
 
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));

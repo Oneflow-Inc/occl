@@ -159,7 +159,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 
-static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn) {
+static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn, int *volunteerQuit) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = blockDim.x;
@@ -170,51 +170,60 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
     int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
     sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
 
-    // 每个block一份globalShmem
-    CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
+    // 下边这部分逻辑在在volunteerQuit == 1的情况下不执行。
+    if (*volunteerQuit == 1) {
+      // 每个block一份globalShmem
+      CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
-    // ***** 移植ncclKernel的逻辑 *****
-    if (bid < blkLimit) {
-      ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
-      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->comm), comm, tid, nthreads, turn);
-      // 一个奇技淫巧：get address of channel without incurring indirect load from ncclDevComm::channels
-      // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
-      ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
+      // ***** 移植ncclKernel的逻辑 *****
+      if (bid < blkLimit) {
+        ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
+        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->comm), comm, tid, nthreads, turn);
+        // 一个奇技淫巧：get address of channel without incurring indirect load from ncclDevComm::channels
+        // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
+        ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
+        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
 
-      // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
-      turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用copyToShmemOneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
-      // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
-      __syncthreads();
+        // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
+        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用copyToShmemOneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
+        // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
+        __syncthreads();
 
-      // if (globalCollCtx4Blk7Coll->work.header.type == ncclWorkTypeColl) {
-      //   // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
-      //   // 原来这个写法，应该是想修改we->redOpArg，不过修改we->redOpArg一个线程就够了，所以让理论上最多的线程来工作，咱们保留就好。
-      //   if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(globalCollCtx4Blk7Coll->work.elems[tid]));
-      // } // 目前不用考虑其他ncclWorkType
-      // __syncthreads();
-      
-      if (tid == 0) {
-        globalCollCtx4Blk7Coll->executing = 0;
-        // globalCollCtx4Blk7Coll->numDoneThrds = 0;
+        // if (globalCollCtx4Blk7Coll->work.header.type == ncclWorkTypeColl) {
+        //   // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
+        //   // 原来这个写法，应该是想修改we->redOpArg，不过修改we->redOpArg一个线程就够了，所以让理论上最多的线程来工作，咱们保留就好。
+        //   if (tid < NCCL_MAX_WORK_ELEMENTS) ofcclRedopPtrDeref(&(globalCollCtx4Blk7Coll->work.elems[tid]));
+        // } // 目前不用考虑其他ncclWorkType
+        // __syncthreads();
         
-        globalBlk2CollId2CollCtx->saveCtx7Quit = 0;
-        globalBlk2CollId2CollCtx->loadAgain = 0;
-        globalBlk2CollId2CollCtx->slice4SimpleGenericOp = 0;
-        globalBlk2CollId2CollCtx->offset4SimpleGenericOp = 0;
+        if (tid == 0) {
+          globalCollCtx4Blk7Coll->executing = 0;
+          // globalCollCtx4Blk7Coll->numDoneThrds = 0;
+          
+          globalBlk2CollId2CollCtx->saveCtx7Quit = 0;
+          globalBlk2CollId2CollCtx->loadAgain = 0;
+          globalBlk2CollId2CollCtx->slice4SimpleGenericOp = 0;
+          globalBlk2CollId2CollCtx->offset4SimpleGenericOp = 0;
 
-        globalBlk2CollId2CollCtx->currentStep4RingAllReduce = 0;
-        globalBlk2CollId2CollCtx->gridOffset4RingAllReduce = 0;
+          globalBlk2CollId2CollCtx->currentStep4RingAllReduce = 0;
+          globalBlk2CollId2CollCtx->gridOffset4RingAllReduce = 0;
 
-        // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
+          // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
+          
+          // 整个grid里出一个线程来设置就好了。
+          if (bid == 0) {
+            *volunteerQuit = 0;
+          }
+        }
+        __syncthreads();
       }
-      __syncthreads();
     }
   }
   return turn;
 }
 
-static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx) {
+// 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
+static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt) {
   int bid = blockIdx.x;
   // int tempThrdCudaDev = thrdCudaDev;
   
@@ -241,8 +250,13 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
   // 能读到，假如是正常SQE，把信息在任务列表里记录一下；假如是quit，那也记录一下
   // 读不到新东西那就算了
   if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, blkStatus.sqReadFrontier) || sqRead(sq, blkStatus.sqReadFrontier, &target, thrdCudaDev) == -1) {
+    *failCnt += 1;
+    if (blkStatus.numActiveColls > 0) {
+      *failCnt = 0;
+    }
     return;
   } else {
+    *failCnt = 0;
     blkStatus.sqReadFrontier++;
     if (target.quit) {
       blkStatus.quit = 1;
@@ -484,7 +498,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *volunteerQuit) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   SQ *localSq = sq;
@@ -495,7 +509,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // int tempRound = 0;
   int turn = 0;
 
-  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
+  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn, volunteerQuit);
   
   if (tid == 0) {
     blkStatus.quit = 0;
@@ -506,6 +520,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     // __threadfence_block();
   }
   __syncthreads();
+
+  int checkSQFailCnt = 0;
   while (true) {
     for (int i = 0; i < TRAVERSE_TIMES; i++) {
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseGlobalCollCtx, (%d / %d), blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
@@ -521,7 +537,15 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ, sq @ %p", thrdCudaDev, blockIdx.x, tid, localSq);
 
-      checkSQ(thrdCudaDev, localSq, globalBlk2CollId2CollCtx);
+      checkSQ(thrdCudaDev, localSq, globalBlk2CollId2CollCtx, &checkSQFailCnt);
+      
+      // 只有0号线程才会执行checkSQ，自然只有0号线程才会更改checkSQFailCnt，并且进行相应调整。
+      // TODO: 在收到了新sqe，或者当前任务队列不空的时候，可以重置这个cnt
+      if (checkSQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
+        // 主动退出。
+        *volunteerQuit = 1;
+        blkStatus.quit = 1;
+      }
     }
     __syncthreads();
 
