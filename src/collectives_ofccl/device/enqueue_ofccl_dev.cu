@@ -370,6 +370,10 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
 
     // float *sendptr = (float *)sharedCollCtx.work.elems[0].sendbuff;
     // float *ptr = (float *)sharedCollCtx.work.elems[0].recvbuff;
+    // // for (int i = 0; i < 0+buffPrintNum; i++) {
+    // //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].sendbuff, i, *(sendptr + i));
+    // //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].recvbuff, i, *(ptr + i));
+    // // }
     // for (int i = buffPrintStart; i < buffPrintStart+buffPrintNum; i++) {
     //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].sendbuff, i, *(sendptr + i));
     //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%f", thrdCudaDev, bid, tid, sharedCollCtx.work.elems[0].recvbuff, i, *(ptr + i));
@@ -485,7 +489,6 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx) {
-  int bid = blockIdx.x;
   int tid = threadIdx.x;
   SQ *localSq = sq;
   
@@ -526,7 +529,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
 
-      OFCCL_LOG_FINAL(OFCCL_FINAL, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt);
+      // OFCCL_LOG_FINAL(OFCCL_FINAL, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, blockIdx.x, tid, collCount, blkStatus.totalCtxSwitchCnt);
       return;
     }
   }

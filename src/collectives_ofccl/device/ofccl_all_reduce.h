@@ -154,19 +154,21 @@ namespace {
         }
         currentStep++;
       }
+      // OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, size, realChunkSize, chunk, offset, nelem);
+      OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, size, realChunkSize, chunk, offset, nelem);
     }
   run_ring_end:
     if (sharedCollCtx.saveCtx7Quit == 1) {
       // 说明是跑到一半要退出了，保存上下文
-      if (tid == 0) {
-        sharedCollCtx.currentStep4RingAllReduce = currentStep;
+      // if (tid == 0) {
+      //   sharedCollCtx.currentStep4RingAllReduce = currentStep;
 
-        sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
-        // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
-      }
+      //   sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
+      //   OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+      // }
     }
     // else {
-    //   OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, loopSize);
+    //   OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, loopSize);
     // }
   }
 
