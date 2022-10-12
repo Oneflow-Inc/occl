@@ -11,6 +11,7 @@
 #include "group.h"
 #include "debug.h"
 #include "collectives_ofccl.h"
+#include "nccl.h"
 
 #include <cstddef>
 #include <cuda_runtime.h>
@@ -21,6 +22,8 @@
 // #define MAX_ASYNC_OPS 128
 
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclStaticPrepareDone(ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclDynamicPrepareDone(ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
