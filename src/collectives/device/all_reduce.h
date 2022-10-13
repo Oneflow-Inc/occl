@@ -66,6 +66,9 @@ namespace {
       chunk = modRanks(ringIx + nranks-1);
       offset = calcOffset(chunk);
       nelem = min(realChunkSize, size-offset);
+
+      // int currentStep = 0;
+      // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer 
 
       // k-2 steps: reduce and copy to next GPU
@@ -73,6 +76,7 @@ namespace {
         chunk = modRanks(ringIx + nranks-j);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
+        // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
         prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
       }
 
@@ -81,6 +85,7 @@ namespace {
       chunk = ringIx + 0;
       offset = calcOffset(chunk);
       nelem = min(realChunkSize, size-offset);
+      // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
 
       // k-2 steps: copy to next GPU
@@ -88,6 +93,7 @@ namespace {
         chunk = modRanks(ringIx + nranks-j);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
+        // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
         prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
       }
 
@@ -95,6 +101,7 @@ namespace {
       chunk = modRanks(ringIx + 1);
       offset = calcOffset(chunk);
       nelem = min(realChunkSize, size-offset);
+      // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
     }
   }

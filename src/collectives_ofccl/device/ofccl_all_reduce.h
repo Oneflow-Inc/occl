@@ -9,7 +9,7 @@ namespace {
   __device__ __forceinline__ void runRing(ncclWorkElem *args) {
     const int tid = threadIdx.x;
     const int nthreads = args->header.nWarps*WARP_SIZE;
-    const int bid = args->bid;
+    const int bid = blockIdx.x; // TODO: 可以修复一下args->bid;
     const int nChannels = args->nChannels;
     ncclRing *ring = &sharedCollCtx.channel.ring;
     int ringIx = ring->index;
@@ -67,6 +67,7 @@ namespace {
         
         // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before prims.send. [< 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, offset, nelem, chunk);
         // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>. gridOffset = %ld, currentStep = %d, before prims.send", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+        // OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld(bid = %d), nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, gridOffset, size, realChunkSize, chunk, offset, bid, nelem);
         prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer
         // threadfence已经在genericOp里边做过了，这里不需要了，可以直接读
         if (sharedCollCtx.saveCtx7Quit == 1) {
@@ -87,6 +88,7 @@ namespace {
 
           // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before prims.recvReduceSend. [< nranks - 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, offset, nelem, chunk);
           // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>. gridOffset = %ld, currentStep = %d, before prims.recvReduceSend", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, gridOffset, size, realChunkSize, chunk, offset, nelem);
           prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
           if (sharedCollCtx.saveCtx7Quit == 1) {
             // if (tid == 0) {
@@ -107,6 +109,7 @@ namespace {
 
         // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directRecvReduceCopySend. [< nranks] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, offset, nelem, chunk);
         // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>. gridOffset = %ld, currentStep = %d, before prims.directRecvReduceCopySend", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+        // OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, gridOffset, size, realChunkSize, chunk, offset, nelem);
         prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
         if (sharedCollCtx.saveCtx7Quit == 1) {
           // if (tid == 0) {
@@ -126,6 +129,7 @@ namespace {
 
           // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directRecvCopySend. [< 2 * nranks - 2] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, offset, nelem, chunk);
           // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>. gridOffset = %ld, currentStep = %d, before prims.directRecvCopySend", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, gridOffset, size, realChunkSize, chunk, offset, nelem);
           prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
           if (sharedCollCtx.saveCtx7Quit == 1) {
             // if (tid == 0) {
@@ -145,6 +149,7 @@ namespace {
 
         // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directRecv. [< 2 * nranks - 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, offset, nelem, chunk);
         // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>. gridOffset = %ld, currentStep = %d, before prims.directRecv", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+        // OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, currentStep, gridOffset, size, realChunkSize, chunk, offset, nelem);
         prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
         if (sharedCollCtx.saveCtx7Quit == 1) {
           // if (tid == 0) {
@@ -155,17 +160,16 @@ namespace {
         currentStep++;
       }
       // OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, size, realChunkSize, chunk, offset, nelem);
-      OFCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, size, realChunkSize, chunk, offset, nelem);
     }
   run_ring_end:
     if (sharedCollCtx.saveCtx7Quit == 1) {
       // 说明是跑到一半要退出了，保存上下文
-      // if (tid == 0) {
-      //   sharedCollCtx.currentStep4RingAllReduce = currentStep;
+      if (tid == 0) {
+        sharedCollCtx.currentStep4RingAllReduce = currentStep;
+        sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
 
-      //   sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
-      //   OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
-      // }
+        // OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep);
+      }
     }
     // else {
     //   OFCCL_LOG_RANK_0_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.comm.rank, blockIdx.x, tid, gridOffset, currentStep, loopSize);

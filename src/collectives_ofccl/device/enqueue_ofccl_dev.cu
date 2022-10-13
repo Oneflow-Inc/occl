@@ -529,7 +529,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
 
-      // OFCCL_LOG_FINAL(OFCCL_FINAL, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, blockIdx.x, tid, collCount, blkStatus.totalCtxSwitchCnt);
+      OFCCL_LOG_FINAL(OFCCL_FINAL, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, blockIdx.x, tid, collCount, blkStatus.totalCtxSwitchCnt);
       return;
     }
   }
