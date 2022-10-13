@@ -50,6 +50,20 @@ inline bool __check_cuda_runtime(cudaError_t code, const char *op, const char *f
   return true;
 }
 
+// #define ofcclNcclCheck(op) __check_nccl_runtime((op), #op, __FILE__, __LINE__)
+
+// inline bool __check_nccl_runtime(cudaError_t code, const char *op, const char *file,
+//                           int line) {
+//   if (code != cudaSuccess) {
+//     const char *err_message = ncclGetErrorString(code);
+//     printf("runtime error %s:%d  %s failed. \n  message = %s\n",
+//            file, line, op, err_message);
+//     cudaGetLastError();
+//     return false;
+//   }
+//   return true;
+// }                                                            
+
 // Conform to pthread and NVTX standard
 #define NCCL_THREAD_NAMELEN 16
 

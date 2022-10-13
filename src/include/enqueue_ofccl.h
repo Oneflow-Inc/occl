@@ -22,8 +22,8 @@
 // #define MAX_ASYNC_OPS 128
 
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
-extern ncclResult_t ofcclStaticPrepareDone(ofcclRankCtx_t rankCtx);
-extern ncclResult_t ofcclDynamicPrepareDone(ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclRunDaemonKernel(ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 

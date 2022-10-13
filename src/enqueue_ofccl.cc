@@ -852,7 +852,7 @@ void *startPoller(void *args) {
 }
 
 // 为了volunteer Quit进行的调整
-ncclResult_t ofcclStaticPrepareDone(ofcclRankCtx_t rankCtx) {
+ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
   
   if (!rankCtx->inited) {
@@ -1001,12 +1001,19 @@ ncclResult_t ofcclStaticPrepareDone(ofcclRankCtx_t rankCtx) {
 
     rankCtx->inited = 1;
   }
+  
+  if (!rankCtx->pollerThreadStarted) {
+    rankCtx->pollerArgs = { rankCtx };
+    pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
+
+    rankCtx->pollerThreadStarted = 1;
+  }
 end:
   // CUDACHECK(cudaSetDevice(rankCtx->rank)); // do other clean-ups first before calling
   return ret;
 }
 
-ncclResult_t ofcclDynamicPrepareDone(ofcclRankCtx_t rankCtx) {
+ncclResult_t ofcclRunDaemonKernel(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
   if (*rankCtx->volunteerQuit == 1) {
     if (rankCtx->daemonKernelStarted == 1) {
@@ -1015,25 +1022,13 @@ ncclResult_t ofcclDynamicPrepareDone(ofcclRankCtx_t rankCtx) {
     }
     // 主动退出后，被OfcclRunFUNC调用，这时需要执行一下对kernel线程的wait操作，方便下边启动新的daemonKernel线程
     pthread_join(rankCtx->kernelThrd, nullptr);
-
-    // pthread_join(rankCtx->poller, nullptr);
-    // rankCtx->pollerThreadStarted = 0;
   }
-
   
   if (!rankCtx->daemonKernelStarted) {
     rankCtx->kernelThrdArgs = { rankCtx };
     pthread_create(&rankCtx->kernelThrd, NULL, startKernel, &rankCtx->kernelThrdArgs);
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> create <%lu>, kernelThrdArgs.cudaDev = %d", pthread_self(), rankCtx->rank, kernelThrd, kernelThrdArgs.cudaDev);
     rankCtx->daemonKernelStarted = 1;
-  }
-
-  // TODO: volunteerQuit的行为在kernel里边发起，所以要控制poller线程的话，就需要把rankCtx->poll_start/stop也变成cudaMallocHost分配的指针，然后在kernel里操作。这个工作做了的话，少一个一直积极轮询的线程，对性能是有帮助的。不过可以在block协调退出的工作之后加上，这个值可以不搞成一个block一个副本，在所有block都协商好退出之后，设置一下。
-  if (!rankCtx->pollerThreadStarted) {
-    rankCtx->pollerArgs = { rankCtx };
-    pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
-
-    rankCtx->pollerThreadStarted = 1;
   }
 end:
   return ret;
@@ -1046,9 +1041,9 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   
   OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, enter ofcclPrepareDone, *rankCtx->volunteerQuit = %d, rankCtx->inited = %d, rankCtx->daemonKernelStarted = %d, rankCtx->pollerThreadStarted = %d", pthread_self(), rankCtx->rank, *rankCtx->volunteerQuit, rankCtx->inited, rankCtx->daemonKernelStarted, rankCtx->pollerThreadStarted);
 
-  NCCLCHECKGOTO(ofcclStaticPrepareDone(rankCtx), ret, end);
+  NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 
-  NCCLCHECKGOTO(ofcclDynamicPrepareDone(rankCtx), ret, end);
+  NCCLCHECKGOTO(ofcclRunDaemonKernel(rankCtx), ret, end);
 
 end:
   return ret;
