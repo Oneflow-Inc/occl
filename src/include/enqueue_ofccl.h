@@ -11,6 +11,7 @@
 #include "group.h"
 #include "debug.h"
 #include "collectives_ofccl.h"
+#include "nccl.h"
 
 #include <cstddef>
 #include <cuda_runtime.h>
@@ -21,6 +22,8 @@
 // #define MAX_ASYNC_OPS 128
 
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclStaticPrepareDone(ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclDynamicPrepareDone(ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
@@ -37,8 +40,14 @@ typedef struct {
   ofcclRankCtx *rankCtx;
 } KernelThrdArgs;
 
+// TODO: 不是线程安全的。
 struct ofcclRankCtx {
   int rank;
+
+  int inited; // TODO: 现阶段没什么用，是之后为了daemonKernel按需启停用的，防止再跑一遍prepareDone里初始化数据结构的代码。
+  int daemonKernelStarted;
+  int pollerThreadStarted;
+  int *volunteerQuit; // 按需启停的状态记录，cudaMallocHost分配。
 
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
@@ -52,7 +61,7 @@ struct ofcclRankCtx {
   dim3 blockDim4Coll[MAX_LENGTH];
 
   pthread_t kernelThrd;
-  void *argsptrs[10];
+  void *argsptrs[11];
   cudaStream_t kernelStream;
   KernelThrdArgs kernelThrdArgs;
 
@@ -72,9 +81,9 @@ struct ofcclRankCtx {
   CQ *cq;
 
   // for poller thread
-  // TODO: 考虑用mutex保证互斥访问。
   pthread_t poller;
   PollerArgs pollerArgs;
+  pthread_mutex_t poller_mutex; // 应该用mutex保护起来，因为这里的变量承担了“实时传递控制命令”的作用，poller线程在反复轮询这个值，而且相应的赋值还不是原子的。与其他单纯记录状态的变量相比，更需要被mutex保护。
   int poll_start;
   int poll_stop;
   

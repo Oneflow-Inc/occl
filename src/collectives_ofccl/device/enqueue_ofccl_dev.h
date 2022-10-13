@@ -18,6 +18,7 @@ typedef struct {
 
 // 跑几次 traverseGlobalCollCtx 后才去 checkSQ
 #define TRAVERSE_TIMES 10
+#define TOLERANT_FAIL_CHECK_SQ_CNT 5
 
 #define OFCCL_SYNC_ALL_BAR_ID 4
 #define OFCCL_SYNC_COLL_WORKER_BAR_ID 6

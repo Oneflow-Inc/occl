@@ -6,8 +6,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-// #define MAX_LENGTH 587 // 587不超0xc000 shmem的限制，588就超了(0xc00c)，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如587不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。
-#define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
+#define MAX_LENGTH 581 // 581恰好不超0xc000 shmem的限制，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如581不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。也可以考虑用constant
+// #define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000
@@ -124,7 +124,7 @@ typedef struct {
 } CollCtx;
 static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *volunteerQuit);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****
