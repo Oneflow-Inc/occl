@@ -158,7 +158,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 
-static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn, int *volunteerQuit) {
+static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn, int *globalVolunteerQuit) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = blockDim.x;
@@ -169,8 +169,8 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
     int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
     sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
 
-    // 下边这部分逻辑在在volunteerQuit == 1的情况下不执行。
-    if (*volunteerQuit == 1) {
+    // 下边这部分逻辑在在globalVolunteerQuit[bid] == 1的情况下不执行。
+    if (*(globalVolunteerQuit + bid) == 0) {
       // 每个block一份globalShmem
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
@@ -209,10 +209,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
 
           // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
           
-          // 整个grid里出一个线程来设置就好了。
-          if (bid == 0) {
-            *volunteerQuit = 0;
-          }
+          *(globalVolunteerQuit + bid) = 0;
         }
         __syncthreads();
       }
@@ -222,7 +219,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
 }
 
 // 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
-static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt) {
+static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit) {
   int bid = blockIdx.x;
   // int tempThrdCudaDev = thrdCudaDev;
   
@@ -231,7 +228,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
   __threadfence_system(); // make sure read new head and tail.
 
   // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq @ %p", thrdCudaDev, bid, threadIdx.x, sq);
-  OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq->head = %llu, sq->tail = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, threadIdx.x, sq->head, sq->tail, blkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq->head = %llu, sq->tail = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, threadIdx.x, sq->head, sq->tail, blkStatus.numActiveColls);
 
   if (blkStatus.sqReadFrontier < sq->head) {
     // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
@@ -252,7 +249,10 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
     blkStatus.sqReadFrontier++;
     if (target.quit) {
       blkStatus.quit = 1;
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit", thrdCudaDev, bid, threadIdx.x);
+      if (bid == 0) {
+        *finallyQuit = 1;
+      }
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Main Thrd of Blk quit, *finallyQuit = %d", thrdCudaDev, bid, threadIdx.x, *finallyQuit);
       return;
     }
 
@@ -456,14 +456,14 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         if (tid < thrdLimit) {
           // ***** 然后调用ofcclFunc *****
 
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.work.header.funcIndex, sharedCollCtx.saveCtx7Quit);
-          ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit); // ！！！！！！为了打印log加的！！！！
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.work.header.funcIndex, sharedCollCtx.saveCtx7Quit);
+          // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit); // ！！！！！！为了打印log加的！！！！
 
           ofcclFuncs[sharedCollCtx.work.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
           // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
           // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d]() return", thrdCudaDev, blockIdx.x, threadIdx.x, sharedCollCtx.work.header.funcIndex);
   
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, before ofcclBarrier, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs returns, before ofcclBarrier, sharedCollCtx.saveCtx7Quit = %d", thrdCudaDev, bid, tid, sharedCollCtx.saveCtx7Quit);
   
           ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 
@@ -496,17 +496,18 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *volunteerQuit) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit) {
+  int bid = blockIdx.x;
   int tid = threadIdx.x;
   SQ *localSq = sq;
   
-  OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
+  OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, globalVolunteerQuit = %d", thrdCudaDev, blockIdx.x, tid, *(globalVolunteerQuit + bid));
   __syncthreads(); // ！！！！！！！为了打印log加的！
   
   // int tempRound = 0;
   int turn = 0;
 
-  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn, volunteerQuit);
+  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn, globalVolunteerQuit);
   
   if (tid == 0) {
     blkStatus.quit = 0;
@@ -534,14 +535,14 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ, sq @ %p", thrdCudaDev, blockIdx.x, tid, localSq);
 
-      checkSQ(thrdCudaDev, localSq, globalBlk2CollId2CollCtx, &checkSQFailCnt);
+      checkSQ(thrdCudaDev, localSq, globalBlk2CollId2CollCtx, &checkSQFailCnt, finallyQuit);
       
       // 只有0号线程才会执行checkSQ，自然只有0号线程才会更改checkSQFailCnt，并且进行相应调整。
       if (checkSQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
         // 主动退出。
-        *volunteerQuit = 1; // TODO: 这里很多个block都会设置，需要有一个各个block协同的机制。
+        *(globalVolunteerQuit + bid) = 1;
         blkStatus.quit = 1;
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, volunteerQuit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
       }
     }
     __syncthreads();
@@ -551,9 +552,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     
     if (blkStatus.quit == 1) {
       // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> quit", thrdCudaDev, bid, tid);
+      OFCCL_LOG_FINAL(OFCCL_FINAL_OR_VOLUNTEER_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt);
 
-
-      OFCCL_LOG_FINAL(OFCCL_FINAL_OR_VOLUNTEER_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, blockIdx.x, tid, collCount, blkStatus.totalCtxSwitchCnt);
       return;
     }
   }

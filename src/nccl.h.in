@@ -213,10 +213,21 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 ncclResult_t  ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank);
 ncclResult_t pofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank);
 
+
 /*
+ * As the name tells.
+ *
+ *
+ *
+ *
+ */
+ncclResult_t  ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx);
+
+/*
+ * !!!!!!!!!!!!!!!!! ALMOST DEPRECATED !!!!!!!!!!!!!!!!!
+ *
  * OFCCL prepare done, just like ncclGroupEnd()
- *
- *
  *
  *
  */

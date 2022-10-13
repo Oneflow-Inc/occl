@@ -27,16 +27,13 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   int thrdCudaDev;
   checkRuntime(cudaGetDevice(&thrdCudaDev));
   
-  // 为了volunteer quit的调整
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> invoke ofcclFinalizeRankCtx7StartHostThrds from ofcclRunAllReduce", pthread_self(), thrdCudaDev);
-  ofcclFinalizeRankCtx7StartHostThrds(rankCtx);
+  // volunteer quit的情况下，ofcclRunAllReduce只需要往sq里写入sqe就好。
+
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> ofcclRunAllReduce, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
   while (sqWrite(rankCtx->sq, &sqe, thrdCudaDev, callback, callbackArgs, rankCtx) == -1) {}
   
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> invoke ofcclRunDaemonKernel from ofcclRunAllReduce", pthread_self(), thrdCudaDev);
-  ofcclRunDaemonKernel(rankCtx);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> insert sqe for collId %d", pthread_self(), thrdCudaDev, collId);
 
   return ncclSuccess;
