@@ -855,6 +855,25 @@ void *startKernel7SqObserver(void *args) {
       OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
     }
 
+    // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
+    // cudaError_t result = cudaStreamQuery(rankCtx->kernelStream);
+
+    // if (result == cudaSuccess) { // kernel执行完了，退出来了。
+    //   // kernel此时没在运行，有三种情况：没有启动；volunteer quit；以及看到了quit sqe，最终退出。
+    //   // 除了最后一种情况，其他两种情况都需要启动kernel。
+      
+    //   OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    //   if (*rankCtx->finallyQuit) {
+    //     return nullptr;
+    //   }
+
+    //   startKernel(rankCtx);
+    // } else if (result == cudaErrorNotReady) {// kernel还在执行，啥也不用做，满足预期：收到sqe的时候，kernel还在执行，有机会看到新写入的sqe，然后要保证rankCtx->finallyQuit被kernel设置，才舍得退出，应该保证了最终一致性。
+    //   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel STILL RUN, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    // } else { // unexpected
+    //   checkRuntime(result);
+    // }
+
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，知道kernel自己看到quit sqe，这应该对了，保证最终一致性。
     OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
