@@ -7,15 +7,6 @@
 // 4096 : 32K的一半
 // 134217728 : 1G的一半
 
-typedef struct {
-  int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整
-  int numActiveColls;
-  int currActiveCollId;
-  unsigned long long int sqReadFrontier; // 每个block的0号线程操作
-
-  unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
-} BlkStatus;
-
 // 跑几次 traverseGlobalCollCtx 后才去 checkSQ
 #define TRAVERSE_TIMES 10
 #define TOLERANT_FAIL_CHECK_SQ_CNT 5

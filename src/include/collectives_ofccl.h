@@ -86,6 +86,16 @@ typedef struct {
 } CollExecContext;
 
 typedef struct {
+  int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整
+  int numActiveColls;
+  int currActiveCollId;
+  unsigned long long int sqReadFrontier; // 每个block的0号线程操作
+
+  unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
+  unsigned long long int tatalVolunteerQuitCnt; // 同上
+} BlkStatus;
+
+typedef struct {
   ncclConnInfo *recvConns[NCCL_MAX_DIRECT_ARITY];
   ncclConnInfo *sendConns[NCCL_MAX_DIRECT_ARITY];
   void* srcs[NCCL_MAX_DIRECT_ARITY+1];
@@ -124,7 +134,7 @@ typedef struct {
 } CollCtx;
 static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

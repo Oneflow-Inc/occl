@@ -622,7 +622,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
 
   sq->tail += 1;
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -684,7 +684,7 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
 
   __sync_synchronize();
 
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
 
   // pthread_mutex_unlock(&cq->mutex);
 
@@ -787,6 +787,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
   rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuit;
   rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
+  rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -805,7 +806,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
 void *startPoller(void *args) {
   ofcclRankCtx *rankCtx = ((PollerArgs *)args)->rankCtx;
 
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, startPoller thread START", pthread_self(), rankCtx->rank);
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, startPoller thread START", pthread_self(), rankCtx->rank);
   
   while (true) {
     // 原来的while (rankCtx->poll_start == 0)扩展成下边这样
@@ -833,12 +834,12 @@ void *startPoller(void *args) {
       sched_yield();
     } else {
       int collId = target.collId;
-      OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for collId %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for collId %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
   }
 
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, startPoller thread prepare to exit", pthread_self(), rankCtx->rank);
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, startPoller thread prepare to exit", pthread_self(), rankCtx->rank);
   return nullptr;
 }
 
@@ -852,7 +853,7 @@ void *startKernel7SqObserver(void *args) {
     if (noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
       sem_wait(&rankCtx->getNewSqeSema);
       // 这个函数返回，说明等来了一个新的sqe写入。
-      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
     }
 
     // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
@@ -875,7 +876,7 @@ void *startKernel7SqObserver(void *args) {
     // }
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，知道kernel自己看到quit sqe，这应该对了，保证最终一致性。
-    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
       break;
     }
@@ -1033,6 +1034,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
 
+  checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
+
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
 
@@ -1068,7 +1071,7 @@ end:
 
 NCCL_API(ncclResult_t, ofcclDestroy, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
-  OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
+  // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
   pthread_mutex_lock(&rankCtx->observer_mutex);
@@ -1083,7 +1086,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   rankCtx->poll_stop = 1;
   pthread_mutex_unlock(&rankCtx->poller_mutex);
   pthread_join(rankCtx->poller, nullptr);
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
 

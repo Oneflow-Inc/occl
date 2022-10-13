@@ -53,6 +53,8 @@ struct ofcclRankCtx {
   pthread_t kernel7SqObserver;
   ObserverThrdArgs observerThrdArgs;
 
+  BlkStatus *globalBlkStatus; // 由于volunteer quit，需要保存、恢复blkStatus
+
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
   int collCount;
@@ -64,7 +66,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH];
 
-  void *argsptrs[12];
+  void *argsptrs[13];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
