@@ -3,7 +3,9 @@
 #include "common_ofccl.h" // for CollCtx
 
 #define buffPrintNum 5
-#define buffPrintStart 0 // 120000 + 5469
+#define buffPrintStart 4095 
+// 4096 : 32K的一半
+// 134217728 : 1G的一半
 
 typedef struct {
   int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整
