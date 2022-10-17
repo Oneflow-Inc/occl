@@ -90,6 +90,7 @@ typedef struct {
   int numActiveColls;
   int currActiveCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
+  int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
   unsigned long long int tatalVolunteerQuitCnt; // 同上

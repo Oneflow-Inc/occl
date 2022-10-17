@@ -44,7 +44,7 @@ struct ofcclRankCtx {
   int rank;
 
   int *hostVolunteerQuit;
-  int *globalVolunteerQuit; // 各个block按需启停的状态记录
+  int *globalVolunteerQuit; // 当前执行内，是否要volunteerQuit的控制信息，0号block是主导。
   int *finallyQuit; // 只有一个int，最后收到quit sqe的时候，由0号block设置。因为startKernel7SqObserver线程里是在cudaStreamQuery返回cudaSuccess，表明kernel运行完退出，才会去查finallyQuit，这时候如果发现finallyQuit=1，那么可以有很大信心认为所有block都是最终退出了。
 
   sem_t getNewSqeSema;

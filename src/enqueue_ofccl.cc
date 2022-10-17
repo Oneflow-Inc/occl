@@ -619,7 +619,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   }
   sqe->logicHead = (int)RingBuffer_logic_tail(sq);
   *RingBuffer_get_tail(sq) = *sqe;
-  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of collId %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of coll_id = %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
 
   sq->tail += 1;
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
@@ -627,7 +627,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   pthread_mutex_unlock(&sq->mutex);
 
   if (sqe->collId != -1) {
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> set callback for collId %d", pthread_self(), rankCtx->rank, sqe->collId);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> set callback for coll_id = %d", pthread_self(), rankCtx->rank, sqe->collId);
     rankCtx->callbacks[sqe->collId] = callback;
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
   }
@@ -834,7 +834,7 @@ void *startPoller(void *args) {
       sched_yield();
     } else {
       int collId = target.collId;
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for collId %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
   }
@@ -890,7 +890,7 @@ NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankC
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
   
-  OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
+  // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
   // int front_of_panel = -1;
 
@@ -969,7 +969,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, comm of collId(%d) (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), rankCtx->rank, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
+    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, comm of coll_id = %d (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d", pthread_self(), rankCtx->rank, collId, comm->nChannels, params->gridDim.x, params->blockDim.x);
 
     rankCtx->hostCqes[collId].collId = collId;
     rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
