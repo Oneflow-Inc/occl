@@ -569,7 +569,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
         myGlobalBlkStatus->tatalVolunteerQuitCnt = blkStatus.tatalVolunteerQuitCnt;
 
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
         // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
       }
     }
