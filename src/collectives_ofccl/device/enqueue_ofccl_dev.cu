@@ -159,7 +159,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
 }
 
 
-static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn, int *globalVolunteerQuit) {
+static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = blockDim.x;
@@ -530,6 +530,11 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       blkStatus.totalCtxSwitchCnt = myGlobalBlkStatus->totalCtxSwitchCnt;
       blkStatus.tatalVolunteerQuitCnt = myGlobalBlkStatus->tatalVolunteerQuitCnt;
     }
+
+    // 每次kernel启动后重置volunteer quit的控制信息
+    if (bid == 0) {
+      atomicExch(globalVolunteerQuit, 0);
+    }
   }
   __syncthreads();
   
@@ -540,7 +545,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // int tempRound = 0;
   int turn = 0;
 
-  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn, globalVolunteerQuit);
+  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
   
   int checkSQFailCnt = 0;
   while (true) {
@@ -567,25 +572,26 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         // 主动退出。
         // 区别对待0号blk和其他。0号决定退出，其他才可以退。
         if (bid == 0) {
-          
-        } else {
-
+          atomicExch(globalVolunteerQuit, 1);
         }
-        BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
+        __threadfence(); // device. // TODO: 是否真的必要？
+        if (*globalVolunteerQuit == 1) { // 0和其他blk都进入这里。编号较大的blk在0号block没退出的情况下，可以继续循环执行checkSQ，可以发现blkStatus.sqReadFrontier < sq->head，从而将checkSQFailCnt置零。
+          BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
-        myGlobalBlkStatus->hasVolunteerQuitted = 1;
-        blkStatus.quit = 1;
-        ++blkStatus.tatalVolunteerQuitCnt;
+          myGlobalBlkStatus->hasVolunteerQuitted = 1;
+          blkStatus.quit = 1;
+          ++blkStatus.tatalVolunteerQuitCnt;
 
-        // 保存blkstatus
-        myGlobalBlkStatus->numActiveColls = blkStatus.numActiveColls;
-        myGlobalBlkStatus->currActiveCollId = blkStatus.currActiveCollId;
-        myGlobalBlkStatus->sqReadFrontier = blkStatus.sqReadFrontier;
-        myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
-        myGlobalBlkStatus->tatalVolunteerQuitCnt = blkStatus.tatalVolunteerQuitCnt;
+          // 保存blkstatus
+          myGlobalBlkStatus->numActiveColls = blkStatus.numActiveColls;
+          myGlobalBlkStatus->currActiveCollId = blkStatus.currActiveCollId;
+          myGlobalBlkStatus->sqReadFrontier = blkStatus.sqReadFrontier;
+          myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
+          myGlobalBlkStatus->tatalVolunteerQuitCnt = blkStatus.tatalVolunteerQuitCnt;
 
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
-        // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+          // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+        }
       }
     }
     __syncthreads();
