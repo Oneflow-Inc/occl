@@ -622,7 +622,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of coll_id = %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
 
   sq->tail += 1;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -850,10 +850,10 @@ void *startKernel7SqObserver(void *args) {
     pthread_mutex_lock(&rankCtx->observer_mutex);
     int noMoreSqes = rankCtx->noMoreSqes;
     pthread_mutex_unlock(&rankCtx->observer_mutex);
-    if (noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
+    if (!noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
       sem_wait(&rankCtx->getNewSqeSema);
       // 这个函数返回，说明等来了一个新的sqe写入。
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
+      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
     }
 
     // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
