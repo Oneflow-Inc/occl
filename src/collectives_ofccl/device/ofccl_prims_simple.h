@@ -99,12 +99,12 @@ class Primitives<
           sharedCollCtx.saveCtx7Quit = 1;
           sharedCollCtx.loadAgain = 1;
 
-          // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d], connStepPtr = %p) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepPtr, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          // }
-          // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          // }
+          if ((flags & (Recv*RoleWaitRecv))) {
+            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, SHOULD RETURN!! connStepCache(tail from Rank[%d], connStepPtr = %p) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepPtr, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          }
+          if ((flags & (Send*RoleWaitSend))) {
+            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          }
           
           return; // 使用return，而不是break。
         }
@@ -141,11 +141,12 @@ class Primitives<
         ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*stepSize;
       }
       step += StepPerSlice;
+
       // if ((flags & (Recv*RoleWaitRecv))) {
-      //   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success connStepCache(tail from Rank[%d]) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step + StepPerSlice, isSendNotRecv);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success connStepCache(tail from Rank[%d]) = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks, connStepCache, step, isSendNotRecv);
       // }
       // if ((flags & (Send*RoleWaitSend))) {
-      //   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
       // }
     }
   }
@@ -155,12 +156,13 @@ class Primitives<
     if (flags & (Recv*RolePostRecv | Send*RolePostSend)) {
       step += StepPerSlice;
       *connStepPtr = step;
-      // if ((flags & (Recv*RolePostRecv))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
-      // }
-      // if ((flags & (Send*RolePostSend))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
-      // }
+
+      if ((flags & (Recv*RolePostRecv))) {
+        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (sharedCollCtx.comm.rank - 1 + sharedCollCtx.comm.nRanks) % sharedCollCtx.comm.nRanks);
+      }
+      if ((flags & (Send*RolePostSend))) {
+        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (sharedCollCtx.comm.rank + 1) % sharedCollCtx.comm.nRanks);
+      }
     }
   }
 
@@ -516,7 +518,7 @@ class Primitives<
     this->group = group & (uint16_t)0xFFFF; // 还是 0. ring的情况下，group一直是0。
     int connIndex = group >> 16; // 还是 0.
 
-    int nrecv=0, nsend=0; // 后边两行代码之后，变成nrecv=1, nsend=1
+    int nrecv=0, nsend=0; // 后边两行代码之后，变成nrecv=1, nsend=1，这也是因为ring AllReduce，上下游只有一个peer吧。
     while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
     while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
     this->fan = Fan(nrecv, nsend); // 相当于调用 __device__ FanSymmetric<1>(1, 1)
