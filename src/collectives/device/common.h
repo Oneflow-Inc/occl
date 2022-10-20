@@ -260,6 +260,10 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     }
     __syncthreads();
 
+    
+    NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nthreads=%d, blockDim.x = %d, ncclShmem.work.header.nWarps = %u", ncclShmem.comm.rank, blockIdx.x, tid, nthreads, blockDim.x, ncclShmem.work.header.nWarps);
+    NCCL_LOG_RANK_0_THRD_100(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nthreads=%d, blockDim.x = %d, ncclShmem.work.header.nWarps = %u", ncclShmem.comm.rank, blockIdx.x, tid, nthreads, blockDim.x, ncclShmem.work.header.nWarps);
+
     // int fn = Fn;
     // int algo = Algo;
     // int proto = Proto;

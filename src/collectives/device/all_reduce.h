@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "common.h"
 #include "devcomm.h"
 #include "collectives.h"
 #include "primitives.h"
@@ -16,7 +17,8 @@ namespace {
     const int nthreads = args->header.nWarps*WARP_SIZE;
     const int bid = args->bid;
     const int nChannels = args->nChannels;
-    // OFCCL_LOG(NCCL, "nChannels=%d, blockDim.x=%d, bid=%d, tid=%d", nChannels, blockDim.x, bid, tid);
+    NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
+    NCCL_LOG_RANK_0_THRD_100(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
     ncclRing *ring = &ncclShmem.channel.ring;
     int ringIx = ring->index;
     const ssize_t chunkSize = int(Proto::calcBytePerStep()/sizeof(T) * (Proto::Id == NCCL_PROTO_SIMPLE ? ALLREDUCE_CHUNKSTEPS : 1));
@@ -34,8 +36,8 @@ namespace {
 
     Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
       (tid, nthreads, &ring->prev, &ring->next, args->sendbuff, args->recvbuff, args->redOpArg);
-
-    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
+    ssize_t gridOffset = 0;
+    for (; gridOffset < size; gridOffset += loopSize) {
       
       // 初步恢复执行后，这段计算realChunkSize的逻辑还是保留吧
       ssize_t realChunkSize;
@@ -104,6 +106,7 @@ namespace {
       // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
     }
+    NCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, loopSize = %ld", ncclShmem.comm.rank, blockIdx.x, tid, gridOffset, loopSize);
   }
 
   template<typename T, typename RedOp, typename Proto>

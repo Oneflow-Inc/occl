@@ -246,7 +246,7 @@ struct ncclChannel {
       int id;
 
       // Communication structures
-      struct ncclPeer* peers;
+      struct ncclPeer* peers; // 这里搞个指针，是为了按照nRanks灵活分配
       struct ncclPeer* devPeers;
 
       // Operation list for aggregation

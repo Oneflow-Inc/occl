@@ -365,7 +365,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
   struct ncclWorkElem* elem = work->elems;
   struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
 
-  int nChannels = elem->nChannels;
+  int nChannels = elem->nChannels; // ofcclComputeColl里边直接复制getAlgoInfo里存在ncclInfo里的计算结果
   size_t channelSize = elem->count*ncclTypeSize(proxyOp->dtype)/elem->nChannels;
   enum ncclWorkElemType workElemType = proxyOp->redOp == ncclNumOps ? ncclWorkTypeColl : ncclWorkTypeRegColl;  // redOp is only set when using CollNet
   

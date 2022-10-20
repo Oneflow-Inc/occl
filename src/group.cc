@@ -312,7 +312,6 @@ sched_delta:
     }
   }
 
-  // OFCCL_LOG1(NCCL, "Prepare channel done");
 
   /* Collectives are done in three steps :
    * 0. Save kernels previously enqueued. Compute channel, algo, proto, etc.
@@ -324,6 +323,8 @@ sched_delta:
    * prevent some ranks from launching their network threads, which would
    * prevent the NCCL call from completing, blocking the cudaFree call.
    */
+
+  // OFCCL_LOG(NCCL, "ncclGroupIndex = %d", ncclGroupIndex); // group包的init也会跑到这里。
 
   // Check whether we are in cuda graph mode
   NCCLCHECK(ncclCalloc(&graphs, ncclGroupIndex));

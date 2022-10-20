@@ -354,7 +354,7 @@ ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
     NCCLCHECK(ncclCpuBarrierOut(comm));
   } else {
     // OFCCL_LOG1(NCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");  
-    // OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->args=%p, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->args, params->sharedMem);
+    OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->sharedMem);
     CUDACHECK(cudaLaunchKernel(params->func, params->gridDim, params->blockDim, params->args, params->sharedMem, params->stream));
   }
 
@@ -475,7 +475,7 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
       WARN("Error : no algorithm/protocol available");
       return ncclInternalError;
     }
-    //if (comm->rank == 0) INFO(NCCL_TUNING, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
+    // OFCCL_LOG(NCCL, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
     TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);
   }
 
@@ -522,7 +522,7 @@ static ncclResult_t getPatternInfo(struct ncclInfo* info) {
     case ncclFuncReduceScatter:
     case ncclFuncAllGather:
       info->pattern = ncclPatternRing; break;
-    case ncclFuncAllReduce:
+    case ncclFuncAllReduce: // 简单的AllReduce，如果用ring会被设置成ncclPatternRingTwice
       info->pattern = info->algorithm == NCCL_ALGO_COLLNET ? ncclPatternCollTreeUpDown : info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
     default:
       WARN("Unknown pattern for collective %d algorithm %d", info->coll, info->algorithm);
@@ -583,6 +583,7 @@ comp_next:
 
   work->header.funcIndex = FUNC_INDEX(info->coll, info->opFull.op, info->datatype, info->algorithm, info->protocol);
 
+  // prims里用的一些变量是在这里计算的
   int stepSize   = info->comm->buffSizes[info->protocol]/NCCL_STEPS;
   int chunkSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->chunkSteps : 1;
   int sliceSteps = (info->protocol == NCCL_PROTO_SIMPLE && info->algorithm == NCCL_ALGO_RING) ? info->sliceSteps : 1;
@@ -743,9 +744,9 @@ static ncclResult_t ncclSetupCollKernel(struct ncclInfo* info) {
 
   // Determine grid size
   struct cudaLaunchParams* params = comm->myParams;
-  params->gridDim.x += info->nChannels;
+  params->gridDim.x += info->nChannels; // getAlgoInfo计算的
   params->gridDim.x = std::min<unsigned>(params->gridDim.x, comm->nChannels);
-  params->blockDim.x = std::max<unsigned>(params->blockDim.x, info->nThreads);
+  params->blockDim.x = std::max<unsigned>(params->blockDim.x, info->nThreads); // getAlgoInfo计算的
   comm->enqueueInfo->maxChannels = params->gridDim.x;  // params may be varied by a second graph hence we need to capture it here
 
   // Inline the first kernel
@@ -808,7 +809,7 @@ static inline int getNextChannel(ncclComm_t comm, int aggMode) {
 // Setup aggregated kernels
 // Op info has been previously saved in comm->asyncOps
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
-  // OFCCL_LOG(NCCL, "comm->asyncOpCount=%d", comm->asyncOpCount);
+  OFCCL_LOG(NCCL, "comm->asyncOpCount=%d", comm->asyncOpCount);
   if (comm->asyncOpCount == 0) {
     return ncclSuccess;
   } else if (comm->asyncOpCount == 1) {
@@ -832,7 +833,10 @@ ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
       channelSize = NCCL_AGG_CHANNEL_SIZE * std::min(16, comm->nRanks);
     }
     // Reduce the per-channel size if we cannot fully utilize the channels
+    // NCCL_MIN_CHANNEL_SIZE = 8 * 64 = 512
     while (comm->asyncTotalSize < channelSize * comm->nChannels && channelSize > NCCL_MIN_CHANNEL_SIZE) channelSize /= 2;
+    // 打log确认了comm->nChannels是在comm创建时候就确定好的。
+    // OFCCL_LOG(NCCL, "comm->asyncOpCount = %d, comm->asyncTotalSize = %lu, channelSize = %lu, comm->nChannels = %d", comm->asyncOpCount, comm->asyncTotalSize, channelSize, comm->nChannels);
     // Check whether the ops have same reduce and data types (and hence can be packed in same ncclWork)
     int channelUsed = 0;
     int homogeneous = 1;
@@ -855,8 +859,9 @@ ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
     total.nBytes = comm->asyncTotalSize;
     total.nChannels = std::min(channelUsed, comm->nChannels);
     int perChannelOps = DIVUP(channelUsed, total.nChannels);
-    if (homogeneous) NCCLCHECK(getAlgoInfo(&total, allCollNetSupport, perChannelOps));
+    if (homogeneous) NCCLCHECK(getAlgoInfo(&total, allCollNetSupport, perChannelOps)); // 确定info->algo, proto, nChannels, nThreads
     // Set for each op
+    OFCCL_LOG(NCCL, "homogeneous = %d, total.nBytes= %lu, total.nChannels = %d", homogeneous, total.nBytes, total.nChannels);
     for (int c = 0; c < comm->asyncOpCount; c++) {
       struct ncclInfo* info = comm->asyncOps+c;
       if (homogeneous) {
@@ -866,12 +871,13 @@ ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
         info->nThreads = total.nThreads;
       }
       NCCLCHECK(ncclSetupCollKernel(info));
+      OFCCL_LOG(NCCL, "%dth ncclInfo, info->nThreads = %d, info->nChannels = %d", c, info->nThreads, info->nChannels);
     }
     comm->args.header.type = ncclWorkTypeUnused;  // disable inline argument
   }
   // Reset counters
   comm->asyncOpCount = 0;
-  comm->asyncTotalSize = 0;
+  comm->asyncTotalSize = 0; // 在ncclEnqueueCheck的时候，如果发现是group模式里，就会把新加入的这个集合通信的buffer大小累加到comm的一个域
   return ncclSuccess;
 }
 
@@ -1135,6 +1141,7 @@ ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* 
   }
   comm->collOpCount++;
   // OFCCL_LOG(NCCL, "after comm->collOpCount++, comm->rank=%d, comm->collOpCount=%lu", comm->rank, comm->collOpCount);
+  OFCCL_LOG(NCCL, "elem->nChannels = %u, elem->header.nWarps = %u", elem->nChannels, elem->header.nWarps);
   return ncclSuccess;
 }
 
@@ -1371,7 +1378,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   int savedDev = -1;
   // Check arguments
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
-  // OFCCL_LOG(NCCL, "info->comm->checkPointers is %s, info->comm->cudaDev is %d", info->comm->checkPointers ? "ture" : "false", info->comm->cudaDev);
+  OFCCL_LOG(NCCL, "info->comm->checkPointers is %s, info->comm->cudaDev is %d, info->comm->nChannels = %d", info->comm->checkPointers ? "ture" : "false", info->comm->cudaDev, info->comm->nChannels);
   if (isAsync && info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&savedDev), ret, end);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, end);

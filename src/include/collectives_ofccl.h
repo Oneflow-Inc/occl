@@ -114,7 +114,7 @@ typedef struct {
   struct ncclDevComm comm;
   struct ncclChannel channel;
   uint64_t pad;
-  struct ncclWork work;
+  struct ncclWork work; // TODO: 可以考虑把这个换成workElem，省点shmem。
 
   /* ****** 上下文 ****** */
 
