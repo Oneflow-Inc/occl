@@ -60,7 +60,7 @@ static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthread
       n -= nthreads; // “一轮”完成 nthreads个8 Byte的复制。
     }
   }
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> hello", sharedCollCtx.comm.rank, blockIdx.x, tid);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> hello", sharedCollCtx.rank, blockIdx.x, tid);
   return turn;
 }
 
@@ -85,7 +85,7 @@ static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthread
 //       we->redOpArg = *reinterpret_cast<uint32_t*>(we->redOpArg);
 //     else
 //       we->redOpArg = *reinterpret_cast<uint64_t*>(we->redOpArg);
-//     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, we->redOpArgIsPtr = %d, we->redOpArg = %llu", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, we->redOpArgIsPtr, we->redOpArg);
+//     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, we->redOpArgIsPtr = %d, we->redOpArg = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, we->redOpArgIsPtr, we->redOpArg);
 //   }
 // }
 
@@ -366,26 +366,26 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   //       connStepPtr = conn->head; // uint64_t *head;
   //       globalConnStepPtr = globalConn->head; // uint64_t *head;
 
-  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load connStepPtr(head) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
-  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, globalConnStepPtr(head) @ %p, globalStep = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load connStepPtr(head) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, globalConnStepPtr(head) @ %p, globalStep = %llu from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
   //     }
   //     if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
   //       connStepPtr = conn->tail; // uint64_t *tail;
   //       globalConnStepPtr = globalConn->tail; // uint64_t *tail;
         
-  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load connStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
-  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, globalConnStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load connStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, globalConnStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
   //     }
   //   }
   //   // if (flags & (RoleWaitSend|RolePostSend)) {
   //   //   conn = &peer->send[0].conn;
   //   //   if (flags & RolePostSend) {
   //   //     connStepPtr = conn->tail;
-  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load connStepPtr(tail) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
+  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load connStepPtr(tail) @ %p from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, connStepPtr, collId);
   //   //   }
   //   //   if (flags & RoleWaitSend) {
   //   //     connStepPtr = conn->head;
-  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load connStepPtr(headOfPeer) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
+  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load connStepPtr(headOfPeer) @ %p from conns for coll_id = %d", sharedCollCtx.rank, blockIdx.x, tid, connStepPtr, collId);
   //   //   }
   //   // }
   //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
@@ -412,7 +412,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     sharedCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->slice4SimpleGenericOp;
     sharedCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->offset4SimpleGenericOp;
 
-    // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.comm.nRanks - 1;
+    // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.nRanks - 1;
     sharedCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->currentStep4RingAllReduce;
     sharedCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->gridOffset4RingAllReduce;
   }

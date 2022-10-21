@@ -33,7 +33,7 @@ struct RunWork {
   // This __forceinline__ is necessary. The compiler was inserting a function call
   // here from the LL ncclKernel.
   __device__ __forceinline__ void run(ncclWork *w) {
-    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before RunWorkElement, w->header.nWarps = %u", sharedCollCtx.comm.rank, blockIdx.x, threadIdx.x, w->header.nWarps);
+    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before RunWorkElement, w->header.nWarps = %u", sharedCollCtx.rank, blockIdx.x, threadIdx.x, w->header.nWarps);
     int wid = threadIdx.x / WARP_SIZE;
     if (wid < w->header.nWarps) {
       RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[0]);

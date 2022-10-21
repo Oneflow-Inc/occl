@@ -105,16 +105,36 @@ typedef struct {
 } CollCtxGroup;
 
 // sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
+// 准备抛弃旧的collCtx结构，只保留我们需要的。
 typedef struct {
-  union {
-    uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
-    CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
-  };
+  // union {
+  //   uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
+  //   CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
+  // };
+  // uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+  // struct ncclDevComm comm;
+  // struct ncclChannel channel;
+  // uint64_t pad;
+  // struct ncclWork work; // TODO: 可以考虑把这个换成workElem，省点shmem。
+
+  /* ****** 手动加载用得到的shmemData ****** */
+  CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
-  struct ncclDevComm comm;
-  struct ncclChannel channel;
-  uint64_t pad;
-  struct ncclWork work; // TODO: 可以考虑把这个换成workElem，省点shmem。
+
+  // 来自channel.ring
+  int ringPrev;
+  int ringNext;
+  int ringIndex;
+
+  // 来自channel
+  struct ncclPeer* devPeers;
+
+  // 来自comm(devComm, 不是普通comm)
+  int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
+  int nRanks;
+  volatile uint32_t *abortFlag;
+  int buffSizes[NCCL_NUM_PROTOCOLS];
+
 
   /* ****** 上下文 ****** */
 
@@ -133,7 +153,6 @@ typedef struct {
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
 } CollCtx;
-static_assert(offsetof(CollCtx, work)%16 == 0, "shmem.work needs to be 16B aligned");
 
 extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
