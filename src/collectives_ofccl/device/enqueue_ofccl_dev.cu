@@ -304,92 +304,92 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   // turn = copyToShmemLoop(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work), tid, nthreads, turn);
   __syncthreads(); // 全部线程都执行，可以使用这个同步。
 
-  { // 打印加载到prims里的channel.peer.conn的相关信息
-    int RoleInput = 0x01,
-        RoleOutput = 0x02,
-        RoleWaitRecv = 0x04,
-        RoleWaitSend = 0x08,
-        RolePostSend = 0x10,
-        RolePostRecv = 0x20,
-        Aborted = 0x40,
-        OffsFifoEnabled = 0x80,
-        SizesFifoEnabled = 0x100,
-        DirectWrite = 0x200,
-        DirectRead = 0x400,
-        ThreadsSynced = 0x800;
-    int nrecv=1, nsend=1;
-    int ThreadPerSync = 8;
-    int g = tid / ThreadPerSync; // 当前线程属于哪个 “g”
-    int ng = nthreads / ThreadPerSync; // 一共有几个 “g”
-    int index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
-    int flags = 0;
-    if (g == 0) {
-      if (index < nrecv) flags |= RoleWaitRecv; // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
-      if (index == nrecv) flags |= RoleInput; // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
-    } else if (g == 1) {
-      if (index < nsend) flags |= RoleWaitSend; // 1 * 8 + 0 号线程是 RoleWaitSend 8 
-      if (index == nsend) flags |= RoleOutput; // 1 * 8 + 1 号线程是 RoleOutput 9
-    } else if (g == ng - 2) { // 从 ng - 3 到 ng 都是属于最后一个warp的。
-      if (index < nrecv) flags |= RolePostRecv; // (ng - 2) * 8 + 0 号线程是 RolePostRecv(0x20) 272
-    } else if (g == ng - 1) {
-      if (index < nsend) flags |= RolePostSend; // (ng - 1) * 8 + 0 号线程是 RolePostSend(0x10) 280
-    }
-    int peerIdx = 0;
-    int globalPeerIdx = 0;
-    ncclRing *ring = &sharedCollCtx.channel.ring;
-    ncclRing *globalRing = &globalCollCtx4Blk7Coll->channel.ring;
+  // { // 打印加载到prims里的channel.peer.conn的相关信息
+  //   int RoleInput = 0x01,
+  //       RoleOutput = 0x02,
+  //       RoleWaitRecv = 0x04,
+  //       RoleWaitSend = 0x08,
+  //       RolePostSend = 0x10,
+  //       RolePostRecv = 0x20,
+  //       Aborted = 0x40,
+  //       OffsFifoEnabled = 0x80,
+  //       SizesFifoEnabled = 0x100,
+  //       DirectWrite = 0x200,
+  //       DirectRead = 0x400,
+  //       ThreadsSynced = 0x800;
+  //   int nrecv=1, nsend=1;
+  //   int ThreadPerSync = 8;
+  //   int g = tid / ThreadPerSync; // 当前线程属于哪个 “g”
+  //   int ng = nthreads / ThreadPerSync; // 一共有几个 “g”
+  //   int index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
+  //   int flags = 0;
+  //   if (g == 0) {
+  //     if (index < nrecv) flags |= RoleWaitRecv; // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
+  //     if (index == nrecv) flags |= RoleInput; // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
+  //   } else if (g == 1) {
+  //     if (index < nsend) flags |= RoleWaitSend; // 1 * 8 + 0 号线程是 RoleWaitSend 8 
+  //     if (index == nsend) flags |= RoleOutput; // 1 * 8 + 1 号线程是 RoleOutput 9
+  //   } else if (g == ng - 2) { // 从 ng - 3 到 ng 都是属于最后一个warp的。
+  //     if (index < nrecv) flags |= RolePostRecv; // (ng - 2) * 8 + 0 号线程是 RolePostRecv(0x20) 272
+  //   } else if (g == ng - 1) {
+  //     if (index < nsend) flags |= RolePostSend; // (ng - 1) * 8 + 0 号线程是 RolePostSend(0x10) 280
+  //   }
+  //   int peerIdx = 0;
+  //   int globalPeerIdx = 0;
+  //   ncclRing *ring = &sharedCollCtx.channel.ring;
+  //   ncclRing *globalRing = &globalCollCtx4Blk7Coll->channel.ring;
     
-    int const *recvPeers = &ring->prev;
-    int const *sendPeers = &ring->next;
-    int const *globalRecvPeers = &globalRing->prev;
-    int const *globalSendPeers = &globalRing->next;
+  //   int const *recvPeers = &ring->prev;
+  //   int const *sendPeers = &ring->next;
+  //   int const *globalRecvPeers = &globalRing->prev;
+  //   int const *globalSendPeers = &globalRing->next;
 
-    if (flags & (RoleWaitRecv|RolePostRecv)) peerIdx = recvPeers[index];
-    if (flags & (RoleWaitSend|RolePostSend)) peerIdx = sendPeers[index];
-    if (flags & (RoleWaitRecv|RolePostRecv)) globalPeerIdx = globalRecvPeers[index];
-    if (flags & (RoleWaitSend|RolePostSend)) globalPeerIdx = globalSendPeers[index];
+  //   if (flags & (RoleWaitRecv|RolePostRecv)) peerIdx = recvPeers[index];
+  //   if (flags & (RoleWaitSend|RolePostSend)) peerIdx = sendPeers[index];
+  //   if (flags & (RoleWaitRecv|RolePostRecv)) globalPeerIdx = globalRecvPeers[index];
+  //   if (flags & (RoleWaitSend|RolePostSend)) globalPeerIdx = globalSendPeers[index];
 
-    ncclPeer *peer = &sharedCollCtx.channel.devPeers[peerIdx];
-    ncclPeer *globalPeer = &globalCollCtx4Blk7Coll->channel.devPeers[globalPeerIdx];
+  //   ncclPeer *peer = &sharedCollCtx.channel.devPeers[peerIdx];
+  //   ncclPeer *globalPeer = &globalCollCtx4Blk7Coll->channel.devPeers[globalPeerIdx];
 
-    uint64_t volatile *connStepPtr;
-    uint64_t volatile *globalConnStepPtr;
+  //   uint64_t volatile *connStepPtr;
+  //   uint64_t volatile *globalConnStepPtr;
     
-    struct ncclConnInfo *conn;
-    struct ncclConnInfo *globalConn;
+  //   struct ncclConnInfo *conn;
+  //   struct ncclConnInfo *globalConn;
 
-    if (flags & (RoleWaitRecv|RolePostRecv)) {
-      conn = &peer->recv[0].conn;
-      globalConn = &globalPeer->recv[0].conn;
+  //   if (flags & (RoleWaitRecv|RolePostRecv)) {
+  //     conn = &peer->recv[0].conn;
+  //     globalConn = &globalPeer->recv[0].conn;
 
-      if (flags & RolePostRecv) { // (ng - 2) * 8 + 0 号线程是 RolePostRecv
-        connStepPtr = conn->head; // uint64_t *head;
-        globalConnStepPtr = globalConn->head; // uint64_t *head;
+  //     if (flags & RolePostRecv) { // (ng - 2) * 8 + 0 号线程是 RolePostRecv
+  //       connStepPtr = conn->head; // uint64_t *head;
+  //       globalConnStepPtr = globalConn->head; // uint64_t *head;
 
-        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load connStepPtr(head) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
-        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, globalConnStepPtr(head) @ %p, globalStep = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
-      }
-      if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
-        connStepPtr = conn->tail; // uint64_t *tail;
-        globalConnStepPtr = globalConn->tail; // uint64_t *tail;
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load connStepPtr(head) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, globalConnStepPtr(head) @ %p, globalStep = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
+  //     }
+  //     if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
+  //       connStepPtr = conn->tail; // uint64_t *tail;
+  //       globalConnStepPtr = globalConn->tail; // uint64_t *tail;
         
-        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load connStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
-        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, globalConnStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
-      }
-    }
-    // if (flags & (RoleWaitSend|RolePostSend)) {
-    //   conn = &peer->send[0].conn;
-    //   if (flags & RolePostSend) {
-    //     connStepPtr = conn->tail;
-    //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load connStepPtr(tail) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
-    //   }
-    //   if (flags & RoleWaitSend) {
-    //     connStepPtr = conn->head;
-    //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load connStepPtr(headOfPeer) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
-    //   }
-    // }
-    __syncwarp(); // ！！！！！！为了打印log加的！！！！
-  }
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load connStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, *connStepPtr, collId);
+  //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, globalConnStepPtr(tailOfPeer) @ %p, step = %llu from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, globalConnStepPtr, *globalConnStepPtr, collId);
+  //     }
+  //   }
+  //   // if (flags & (RoleWaitSend|RolePostSend)) {
+  //   //   conn = &peer->send[0].conn;
+  //   //   if (flags & RolePostSend) {
+  //   //     connStepPtr = conn->tail;
+  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load connStepPtr(tail) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
+  //   //   }
+  //   //   if (flags & RoleWaitSend) {
+  //   //     connStepPtr = conn->head;
+  //   //       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load connStepPtr(headOfPeer) @ %p from conns for coll_id = %d", sharedCollCtx.comm.rank, blockIdx.x, tid, connStepPtr, collId);
+  //   //   }
+  //   // }
+  //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
+  // }
   
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclRedopPtrDeref, NCCL_MAX_WORK_ELEMENTS = %lu", thrdCudaDev, blockIdx.x, tid, NCCL_MAX_WORK_ELEMENTS);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！

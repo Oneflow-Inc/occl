@@ -354,7 +354,7 @@ ncclResult_t ncclLaunchKernel(ncclComm_t comm) {
     NCCLCHECK(ncclCpuBarrierOut(comm));
   } else {
     // OFCCL_LOG1(NCCL, "No ncclComm::GROUP, normal cudaLaunchKernel");  
-    OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->sharedMem);
+    // OFCCL_LOG(NCCL, "cudaLaunchKernel: params->gridDim.x=%d, params->blockDim.x=%d, params->sharedMem=%lu", params->gridDim.x, params->blockDim.x, params->sharedMem);
     CUDACHECK(cudaLaunchKernel(params->func, params->gridDim, params->blockDim, params->args, params->sharedMem, params->stream));
   }
 
@@ -809,7 +809,7 @@ static inline int getNextChannel(ncclComm_t comm, int aggMode) {
 // Setup aggregated kernels
 // Op info has been previously saved in comm->asyncOps
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
-  OFCCL_LOG(NCCL, "comm->asyncOpCount=%d", comm->asyncOpCount);
+  // OFCCL_LOG(NCCL, "comm->asyncOpCount=%d", comm->asyncOpCount);
   if (comm->asyncOpCount == 0) {
     return ncclSuccess;
   } else if (comm->asyncOpCount == 1) {
@@ -1141,7 +1141,7 @@ ncclResult_t ncclEnqueueCollKernel(struct ncclComm* comm, struct ncclQueueElem* 
   }
   comm->collOpCount++;
   // OFCCL_LOG(NCCL, "after comm->collOpCount++, comm->rank=%d, comm->collOpCount=%lu", comm->rank, comm->collOpCount);
-  OFCCL_LOG(NCCL, "elem->nChannels = %u, elem->header.nWarps = %u", elem->nChannels, elem->header.nWarps);
+  // OFCCL_LOG(NCCL, "elem->nChannels = %u, elem->header.nWarps = %u", elem->nChannels, elem->header.nWarps);
   return ncclSuccess;
 }
 
@@ -1378,7 +1378,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   int savedDev = -1;
   // Check arguments
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
-  OFCCL_LOG(NCCL, "info->comm->checkPointers is %s, info->comm->cudaDev is %d, info->comm->nChannels = %d", info->comm->checkPointers ? "ture" : "false", info->comm->cudaDev, info->comm->nChannels);
+  // OFCCL_LOG(NCCL, "info->comm->checkPointers is %s, info->comm->cudaDev is %d, info->comm->nChannels = %d", info->comm->checkPointers ? "ture" : "false", info->comm->cudaDev, info->comm->nChannels);
   if (isAsync && info->comm->checkPointers) {
     CUDACHECKGOTO(cudaGetDevice(&savedDev), ret, end);
     CUDACHECKGOTO(cudaSetDevice(info->comm->cudaDev), ret, end);

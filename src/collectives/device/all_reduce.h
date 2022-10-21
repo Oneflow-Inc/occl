@@ -17,8 +17,8 @@ namespace {
     const int nthreads = args->header.nWarps*WARP_SIZE;
     const int bid = args->bid;
     const int nChannels = args->nChannels;
-    NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
-    NCCL_LOG_RANK_0_THRD_100(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
+    // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
+    // NCCL_LOG_RANK_0_THRD_100(NCCL, "Rank<%d> Blk<%d> Thrd<%d> nChannels=%d, nthreads=%d, blockDim.x = %d", ncclShmem.comm.rank, blockIdx.x, tid, nChannels, nthreads, blockDim.x);
     ncclRing *ring = &ncclShmem.channel.ring;
     int ringIx = ring->index;
     const ssize_t chunkSize = int(Proto::calcBytePerStep()/sizeof(T) * (Proto::Id == NCCL_PROTO_SIMPLE ? ALLREDUCE_CHUNKSTEPS : 1));
@@ -106,7 +106,7 @@ namespace {
       // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
     }
-    NCCL_LOG_RANK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, loopSize = %ld", ncclShmem.comm.rank, blockIdx.x, tid, gridOffset, loopSize);
+    NCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, size = %lu, loopSize = %ld", ncclShmem.comm.rank, blockIdx.x, tid, gridOffset, size, loopSize);
   }
 
   template<typename T, typename RedOp, typename Proto>

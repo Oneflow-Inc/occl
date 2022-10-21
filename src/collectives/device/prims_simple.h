@@ -129,6 +129,13 @@ class Primitives<
       step += StepPerSlice;
       *connStepPtr = step;
     }
+    
+    if ((flags & (Recv*RolePostRecv))) {
+      OFCCL_LOG(NCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
+    }
+    if ((flags & (Send*RolePostSend))) {
+      OFCCL_LOG(NCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
+    }
   }
 
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
