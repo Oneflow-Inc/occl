@@ -183,7 +183,7 @@ namespace {
       }
 
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx7Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.rank, blockIdx.x, tid, gridOffset, currentStep);
-      __syncwarp(); // ！！！！！！为了打印log加的！！！！
+      // __syncwarp(); // ！！！！！！为了打印log加的！！！！
     }
     else {
       OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, size = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.rank, blockIdx.x, tid, gridOffset, size, currentStep, loopSize);
