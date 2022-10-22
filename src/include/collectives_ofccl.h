@@ -118,8 +118,11 @@ typedef struct {
   // struct ncclWork work; // TODO: 可以考虑把这个换成workElem，省点shmem。
 
   /* ****** 手动加载用得到的shmemData ****** */
-  CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
+  // 这两个是启动相应的coll的执行之后，Primitive构造函数里填充的
+  CollCtxGroup groups[NCCL_MAX_GROUPS];
   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+
+  struct ncclWorkElem workElem; // 复杂
 
   // 来自channel.ring
   int ringPrev;
@@ -134,7 +137,6 @@ typedef struct {
   int nRanks;
   volatile uint32_t *abortFlag;
   int buffSizes[NCCL_NUM_PROTOCOLS];
-
 
   /* ****** 上下文 ****** */
 

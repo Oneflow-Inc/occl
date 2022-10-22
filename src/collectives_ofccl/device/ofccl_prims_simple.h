@@ -48,7 +48,7 @@ class Primitives<
   uint64_t volatile *connStepPtr;
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
 
-  uint64_t genericOpExecCnt; // 每个线程的本地变量，标记genericOp跑了几次，和ctx.loadAgain配合判断是否是恢复上下文后的第一次执行，如果是，那么genericOp里的slice和offset要从ctx里读。
+  uint64_t genericOpExecCnt; // 每个线程的本地变量，标记genericOp跑了几次，和ctx.loadAgain配合判断是否是恢复上下文后的第一次执行，如果是，那么genericOp里的slice和offset要从ctx里读。runRing会反复调用genericOp，所以这个变量计数了当前这个primitive实例生命周期内genericOp被调用了几次
   
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -278,6 +278,9 @@ class Primitives<
         postPeer<Recv, Send>();
         offset += sliceSize;
         slice += 1;
+
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", sharedCollCtx.rank, blockIdx.x, tid, offset, sliceSize, nelem, slice, SlicePerChunk);
+
       } while (slice < SlicePerChunk && offset < nelem);
     }
 

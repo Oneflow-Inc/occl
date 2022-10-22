@@ -32,11 +32,11 @@ template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWork {
   // This __forceinline__ is necessary. The compiler was inserting a function call
   // here from the LL ncclKernel.
-  __device__ __forceinline__ void run(ncclWork *w) {
+  __device__ __forceinline__ void run(ncclWorkElem *w) {
     OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before RunWorkElement, w->header.nWarps = %u", sharedCollCtx.rank, blockIdx.x, threadIdx.x, w->header.nWarps);
     int wid = threadIdx.x / WARP_SIZE;
     if (wid < w->header.nWarps) {
-      RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[0]);
+      RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(w);
     }
   }
 };
@@ -45,7 +45,7 @@ struct RunWork {
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
   /*OFCCL_LOG(OFCCL, "in IMPL_COLL_FUNC, %s, %s, %s, %s, %s\n", #func, #algo, #proto, #devredop, #type);*/ /* 这里传模板参数的时候，应该是还是得传ncclFunc前缀的，这时定义在devcomm.h里的，我们应该不需要改 */ \
-  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.work); \
+  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.workElem); \
 }
 
 #define IMPL_COLL4(func, algo, devredop, type, ncclType) \

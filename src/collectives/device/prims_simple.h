@@ -228,6 +228,9 @@ class Primitives<
         postPeer<Recv, Send>();
         offset += sliceSize;
         slice += 1;
+        
+        NCCL_LOG_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", ncclShmem.comm.rank, blockIdx.x, tid, offset, sliceSize, nelem, slice, SlicePerChunk);
+
       } while (slice < SlicePerChunk && offset < nelem);
     }
 

@@ -106,7 +106,7 @@ namespace {
       // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, currentStep = %d, gridOffset = %ld, size = %ld, realChunkSize = %ld, chunk = %d, offset = %ld, nelem = %d", ncclShmem.comm.rank, blockIdx.x, tid, currentStep++, gridOffset, size, realChunkSize, chunk, offset, nelem);
       prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
     }
-    NCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, size = %lu, loopSize = %ld", ncclShmem.comm.rank, blockIdx.x, tid, gridOffset, size, loopSize);
+    NCCL_LOG_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing success, gridOffset = %lu, size = %lu, loopSize = %ld", ncclShmem.comm.rank, blockIdx.x, tid, gridOffset, size, loopSize);
   }
 
   template<typename T, typename RedOp, typename Proto>

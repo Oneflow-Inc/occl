@@ -159,11 +159,29 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
   return 0;
 }
 
+static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const struct ncclWorkElem &srcElem) {
+  dstElem.header.funcIndex = srcElem.header.funcIndex;
+  dstElem.header.type = srcElem.header.type;
+  dstElem.header.nWarps = srcElem.header.nWarps;
+  dstElem.header.isLast = srcElem.header.isLast;
+
+  dstElem.regUsed = srcElem.regUsed;
+  dstElem.direct = srcElem.direct;
+  dstElem.redOpArgIsPtr = srcElem.redOpArgIsPtr;
+  dstElem.sendbuff = srcElem.sendbuff;
+  dstElem.recvbuff = srcElem.recvbuff;
+  dstElem.count = srcElem.count;
+  dstElem.lastChunkSize = srcElem.lastChunkSize;
+  dstElem.root = srcElem.root;
+  dstElem.bid = srcElem.bid;
+  dstElem.nChannels = srcElem.nChannels;
+  dstElem.redOpArg = srcElem.redOpArg;
+}
 
 static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
-  int nthreads = blockDim.x;
+  // int nthreads = blockDim.x;
   // 构建任务列表
   for (int i = 0; i < collCount; i++) {
     int collId = sharedCollIds[i] = globalCollIds[i];
@@ -178,17 +196,17 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
 
       // ***** 移植ncclKernel的逻辑 *****
       if (bid < blkLimit) {
-        ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
-        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->comm), comm, tid, nthreads, turn);
-        // 一个奇技淫巧：get address of channel without incurring indirect load from ncclDevComm::channels
-        // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
-        ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
+        // ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
+        // turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->comm), comm, tid, nthreads, turn);
+        // // 一个奇技淫巧：get address of channel without incurring indirect load from ncclDevComm::channels
+        // // 这里通过bid选择了合适的channel，很多集合通信真正执行时用到的硬件信息就存在channel里边。
+        // ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
+        // turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->channel), channel, tid, nthreads, turn); // 尝试使用oneshot，会报错warp misaligned，所以看来必须用loop。
 
-        // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
-        turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用copyToShmemOneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
-        // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
-        __syncthreads(); // 等待全部线程加载完成
+        // // nccl中限制只在bid=0里进行这样的拷贝，对于ofccl而言，ofcclShmem就是任务列表，所以对于所有的线程，我们都把同样的work存进去；
+        // turn = copyToShmemLoop(&(globalCollCtx4Blk7Coll->work.elems[0]), &(globalDevComm7WorkElems[collId].first), tid, nthreads, turn); // nccl 2.12里边这地方用copyToShmemOneShot进行拷贝，但是oneShot的实现使用了与shared mem相关的内联汇编，所以这里也使用loop进行拷贝。
+        // // nccl中接下来要处理channel.workFifoDev，然而对于目前的ofccl，只处理first就好，channel.workFifoDev不会有其他任务了。
+        // __syncthreads(); // 等待全部线程加载完成
 
         // if (globalCollCtx4Blk7Coll->work.header.type == ncclWorkTypeColl) {
         //   // #define NCCL_MAX_WORK_ELEMENTS (NCCL_WORK_SIZE / sizeof(struct ncclWorkElem))=512/64=8
@@ -198,6 +216,26 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
         // __syncthreads();
         
         if (tid == 0) {
+          /* ****** 手动加载用得到的shmemData ****** */
+          ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
+          ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
+
+          globalCollCtx4Blk7Coll->ringPrev = channel->ring.prev;
+          globalCollCtx4Blk7Coll->ringNext = channel->ring.next;
+          globalCollCtx4Blk7Coll->ringIndex = channel->ring.index;
+          globalCollCtx4Blk7Coll->devPeers = channel->devPeers; // 直接赋值指针
+
+          globalCollCtx4Blk7Coll->rank = comm->rank;
+          globalCollCtx4Blk7Coll->nRanks = comm->nRanks;
+          globalCollCtx4Blk7Coll->abortFlag = comm->abortFlag;
+
+          for (int i = 0; i < NCCL_NUM_PROTOCOLS; i++) {
+            globalCollCtx4Blk7Coll->buffSizes[i] = comm->buffSizes[i];
+          }
+
+          copyNcclWorkElem(globalCollCtx4Blk7Coll->workElem, globalDevComm7WorkElems[collId].first);
+
+          /* ****** 上下文 ****** */
           globalCollCtx4Blk7Coll->executing = 0;
           // globalCollCtx4Blk7Coll->numDoneThrds = 0;
           
@@ -209,7 +247,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
           globalBlk2CollId2CollCtx->currentStep4RingAllReduce = 0;
           globalBlk2CollId2CollCtx->gridOffset4RingAllReduce = 0;
 
-          // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->work.elems[0].nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->work.elems[0].header.nWarps*WARP_SIZE, thrdLimit);
+          // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->workElem.nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->workElem.header.nWarps*WARP_SIZE, thrdLimit);
         }
         __syncthreads(); // 保证全部线程看得到更新的内容
       }
@@ -272,8 +310,8 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
         OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
       }
       globalCollCtx4Blk7Coll->executing = 1;
-      globalCollCtx4Blk7Coll->work.elems[0].sendbuff = target.sendbuff;
-      globalCollCtx4Blk7Coll->work.elems[0].recvbuff = target.recvbuff;
+      globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
+      globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
       
       /* IF_CHECK checkSQ里收到sqe的时候浅打印一下初始sendbuff。作用一般。*/
 
@@ -294,15 +332,32 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
 
 static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn) {
   int tid = threadIdx.x;
-  int nthreads = blockDim.x;
+  // int nthreads = blockDim.x;
 
-  turn = copyToShmemLoop(&sharedCollCtx.comm, &(globalCollCtx4Blk7Coll->comm), tid, nthreads, turn);
-  turn = copyToShmemLoop(&sharedCollCtx.channel, &(globalCollCtx4Blk7Coll->channel), tid, nthreads, turn);
-  // copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads); // TODO: 用了这个会报错misaligned，就先loop吧
-  turn = copyToShmemLoop(&(sharedCollCtx.work.elems[0]), &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads, turn);
-  sharedCollCtx.work.elems[0].header.nWarps = globalCollCtx4Blk7Coll->work.elems[0].header.nWarps; // TODO: 好丑。
-  // turn = copyToShmemLoop(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work), tid, nthreads, turn);
-  __syncthreads(); // 全部线程都执行，可以使用这个同步。
+  // turn = copyToShmemLoop(&sharedCollCtx.comm, &(globalCollCtx4Blk7Coll->comm), tid, nthreads, turn);
+  // turn = copyToShmemLoop(&sharedCollCtx.channel, &(globalCollCtx4Blk7Coll->channel), tid, nthreads, turn);
+  // // copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads); // TODO: 用了这个会报错misaligned，就先loop吧
+  // turn = copyToShmemLoop(&(sharedCollCtx.work.elems[0]), &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads, turn);
+  // sharedCollCtx.work.elems[0].header.nWarps = globalCollCtx4Blk7Coll->work.elems[0].header.nWarps; // TODO: 好丑。
+  // // turn = copyToShmemLoop(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work), tid, nthreads, turn);
+  // __syncthreads(); // 全部线程都执行，可以使用这个同步。
+
+  if (tid == 0) {
+    sharedCollCtx.ringPrev = globalCollCtx4Blk7Coll->ringPrev;
+    sharedCollCtx.ringNext = globalCollCtx4Blk7Coll->ringNext;
+    sharedCollCtx.ringIndex = globalCollCtx4Blk7Coll->ringIndex;
+    sharedCollCtx.devPeers = globalCollCtx4Blk7Coll->devPeers;
+
+    sharedCollCtx.rank = globalCollCtx4Blk7Coll->rank;
+    sharedCollCtx.nRanks = globalCollCtx4Blk7Coll->nRanks;
+    sharedCollCtx.abortFlag = globalCollCtx4Blk7Coll->abortFlag;
+
+    for (int i = 0; i < NCCL_NUM_PROTOCOLS; i++) {
+      sharedCollCtx.buffSizes[i] = globalCollCtx4Blk7Coll->buffSizes[i];
+    }
+
+    copyNcclWorkElem(sharedCollCtx.workElem, globalCollCtx4Blk7Coll->workElem);
+  }
 
   // { // 打印加载到prims里的channel.peer.conn的相关信息
   //   int RoleInput = 0x01,
@@ -536,27 +591,28 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
         numSeenActiveColls++;
         
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->work.elems[0].header.nWarps = %u, globalCollCtx4Blk7Coll->work.elems[0].sendbuff @ %p, globalCollCtx4Blk7Coll->work.elems[0].recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->work.elems[0].header.nWarps, globalCollCtx4Blk7Coll->work.elems[0].sendbuff, globalCollCtx4Blk7Coll->work.elems[0].recvbuff);
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
         __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
 
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after loadCollCtx for coll_id = %d, sharedCollCtx.work.elems[0].header.nWarps = %u, sharedCollCtx.work.elems[0].sendbuff @ %p, sharedCollCtx.work.elems[0].recvbuff @ %p", thrdCudaDev, bid, tid, collId, sharedCollCtx.work.elems[0].header.nWarps, sharedCollCtx.work.elems[0].sendbuff, sharedCollCtx.work.elems[0].recvbuff);
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after loadCollCtx for coll_id = %d, sharedCollCtx.workElem.header.nWarps = %u, sharedCollCtx.workElem.sendbuff @ %p, sharedCollCtx.workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, sharedCollCtx.workElem.header.nWarps, sharedCollCtx.workElem.sendbuff, sharedCollCtx.workElem.recvbuff);
         __syncwarp(); // ！！！！！！为了打印log加的！！！！
         
         // 只有真正的工作线程才执行
         // if (tid < thrdLimit) {
           // ***** 然后调用ofcclFunc *****
 
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.work.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
+          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.workElem.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
           __syncwarp();  // ！！！！！！为了打印log加的！！！
 
-          ofcclFuncs[sharedCollCtx.work.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
+          ofcclFuncs[sharedCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
           // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
-          // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d]() return", thrdCudaDev, blockIdx.x, threadIdx.x, sharedCollCtx.work.header.funcIndex);
+          // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d]() return", thrdCudaDev, blockIdx.x, threadIdx.x, sharedCollCtx.workElem.header.funcIndex);
   
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d] returns, sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.work.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs[%d] returns, sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.workElem.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
+          // __syncwarp();  // ！！！！！！为了打印log加的！！！
   
           // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 

@@ -11,6 +11,6 @@ struct RunWork<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void runRecv(const int tid, const int nthreads, const int group, struct ncclWorkElemP2p* args) {
   }
   
-  __device__ __forceinline__ void run(ncclWork *work) {
+  __device__ __forceinline__ void run(ncclWorkElem *work) {
   }
 };
