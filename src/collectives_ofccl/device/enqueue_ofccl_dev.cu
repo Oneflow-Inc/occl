@@ -93,7 +93,7 @@ static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthread
 // TODO: 可以不同的algo、proto使用不同的数据类型，不过可以看看是不是有意义
 __shared__ CollCtx sharedCollCtx; // 不能static，primitives要用
 
-static __shared__ BlkStatus blkStatus;
+__shared__ BlkStatus blkStatus; // 取消static，放到prim里边打印log。
 // TODO: 下边这几个可以尝试用constant，先不急
 static __shared__ int sharedCollIds[MAX_LENGTH]; // prepareColl会接受用户传进来的collId，而prepareColl工作在每个rank上，我们不能假设各个rank会收到连续的collId，所以用一个数组把收到的collId整理起来，其实相当于是维护了一个map，但是cuda上没有map，只好用这种方式
 static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
@@ -591,21 +591,21 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
         numSeenActiveColls++;
         
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
-        __syncwarp(); // ！！！！！！为了打印log加的！！！！
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
+        // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
 
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after loadCollCtx for coll_id = %d, sharedCollCtx.workElem.header.nWarps = %u, sharedCollCtx.workElem.sendbuff @ %p, sharedCollCtx.workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, sharedCollCtx.workElem.header.nWarps, sharedCollCtx.workElem.sendbuff, sharedCollCtx.workElem.recvbuff);
-        __syncwarp(); // ！！！！！！为了打印log加的！！！！
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after loadCollCtx for coll_id = %d, sharedCollCtx.workElem.header.nWarps = %u, sharedCollCtx.workElem.sendbuff @ %p, sharedCollCtx.workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, sharedCollCtx.workElem.header.nWarps, sharedCollCtx.workElem.sendbuff, sharedCollCtx.workElem.recvbuff);
+        // __syncwarp(); // ！！！！！！为了打印log加的！！！！
         
         // 只有真正的工作线程才执行
         // if (tid < thrdLimit) {
           // ***** 然后调用ofcclFunc *****
 
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.workElem.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
-          __syncwarp();  // ！！！！！！为了打印log加的！！！
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclFuncs[%d], sharedCollCtx.saveCtx7Quit = %d, coll_id = %d", thrdCudaDev, bid, tid, sharedCollCtx.workElem.header.funcIndex, sharedCollCtx.saveCtx7Quit, collId);
+          // __syncwarp();  // ！！！！！！为了打印log加的！！！
 
           ofcclFuncs[sharedCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
           // 根据sharedCollCtx.saveCtx7Quit的情况进行不同处理。
@@ -724,7 +724,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
           myGlobalBlkStatus->tatalVolunteerQuitCnt = blkStatus.tatalVolunteerQuitCnt;
 
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
         }
       }
     }
