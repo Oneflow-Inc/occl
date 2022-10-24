@@ -591,8 +591,14 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
         numSeenActiveColls++;
         
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+
+        // if (tid == 0) {
+        //   OFCCL_LOG1(OFCCL, "hi");
+        // }
+
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, hi", thrdCudaDev, bid, tid);
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn); // 只load一个到shmem
@@ -624,7 +630,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
             
             // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, complete collId = %d", thrdCudaDev, bid, tid, collId);
             // // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, complete collId = %d", thrdCudaDev, bid, tid, collId);
-            // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit); // ！！！！！！为了打印log加的！！！！
+            // // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit); // ！！！！！！为了打印log加的！！！！
 
             // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
             // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。

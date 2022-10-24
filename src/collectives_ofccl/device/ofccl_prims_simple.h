@@ -228,6 +228,9 @@ class Primitives<
       #endif
       do {
         sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
+        
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, offset, sliceSize, nelem, slice, SlicePerChunk);
+
         if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)))
           sharedCollCtx.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
@@ -278,9 +281,6 @@ class Primitives<
         postPeer<Recv, Send>();
         offset += sliceSize;
         slice += 1;
-
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, offset, sliceSize, nelem, slice, SlicePerChunk);
-
       } while (slice < SlicePerChunk && offset < nelem);
     }
 
