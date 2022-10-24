@@ -308,7 +308,7 @@ class Primitives<
     }
     // waitPeer后边加了subBarrier来进行同步，但是postPeer后边没有任何同步方式，我们修改了nccl的行为方式，原来waitPeer那里可以无限等，现在加入了更加积极的主动跳过的方法，不加一个同步的话，postPeer里的工作本身并不轻松，可能导致block内线程的分化。
 
-    __syncthreads(); // 需要保留，不过相对nccl应该就就失掉了多一个warp专门做fence的优化。
+    // __syncthreads(); // 1024解决卡住的bug，删掉这里，就好了。原因应该在于，我们在common_ofccl.h里限制了进入这里的线程范围，所以sync_threads肯定会卡住。但是为什么在一些位置加上log，就跳过了这个bug，不是很理解，可能是printf对那个buffer的操作，同步了线程吧。
   }
 
   // TODO: 省略了 ScatterGatherOp

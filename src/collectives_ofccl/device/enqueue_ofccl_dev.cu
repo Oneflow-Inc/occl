@@ -591,7 +591,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
         numSeenActiveColls++;
         
-        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         // if (tid == 0) {
