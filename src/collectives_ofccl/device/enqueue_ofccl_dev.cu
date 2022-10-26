@@ -535,7 +535,8 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
     // }
 
   }
-  __syncthreads(); // 应该让全部线程同步，来看到最新的修改
+  __syncwarp(); // 原来是这么写的。
+  // __syncthreads(); // 应该让全部线程同步，来看到最新的修改
   // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
@@ -556,7 +557,8 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
     // int bid = blockIdx.x;
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
   }
-  __syncthreads(); // 应该让全部线程同步，来看到最新的修改
+  __syncwarp(); // 原来是这么写的
+  // __syncthreads(); // 应该让全部线程同步，来看到最新的修改
   // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
@@ -641,7 +643,8 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d done", thrdCudaDev, bid, tid, collId);
         }
         
-        // __syncthreads(); // 这个同步感觉没必要了。原来是为了配合thrdLimit使用的
+        // TODO: 试了一下，好像不能只把这个删了，同时在resetDoneColl和saveExcutingCollCtx里边调用__syncthreads，会卡住。
+        __syncthreads(); // 这个同步感觉没必要了。原来是为了配合thrdLimit使用的
       }
     }
   }
