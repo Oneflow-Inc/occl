@@ -500,7 +500,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
         // }
 
       }
-      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for coll_id %d, globalCollCtx4Blk7Coll->cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for coll_id = %d, globalCollCtx4Blk7Coll->cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++);
       
       __threadfence();
     }
@@ -518,6 +518,9 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     globalCollCtx4Blk7Coll->offset4SimpleGenericOp = 0;
     globalCollCtx4Blk7Coll->currentStep4RingAllReduce = 0;
     globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
+
+    
+    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> update CQE for coll_id = %d, blkStatus.numActiveColls = %d globalCollCtx4Blk7Coll->cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, blkStatus.numActiveColls, globalCollCtx4Blk7Coll->cqeWriteCnt++);
 
     /* IF_CHECK 如果要检查对错，把下边露出来 */
 
@@ -713,7 +716,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       
       // 只有0号线程才会执行checkSQ，自然只有0号线程才会更改checkSQFailCnt，并且进行相应调整。
 
-      checkSQFailCnt = 0; // TODO: 禁止主动退出；本来想用ParseBooleanFromEnv这样的方法用env控制，不过是device函数，还是算了。
+      // checkSQFailCnt = 0; // TODO: 禁止主动退出；本来想用ParseBooleanFromEnv这样的方法用env控制，不过是device函数，还是算了。
 
       if (checkSQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
         // 主动退出。
