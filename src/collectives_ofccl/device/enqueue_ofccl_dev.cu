@@ -311,6 +311,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
         OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
       }
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
+      // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
@@ -327,7 +328,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
       blkStatus.numActiveColls += 1;
       __threadfence_block();
 
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get coll_id = %d, blkStatus.sqReadFrontier updates to %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, threadIdx.x, target.collId, GetLogicFrontier(sq, blkStatus.sqReadFrontier), blkStatus.numActiveColls);
+      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get coll_id = %d, blkStatus.sqReadFrontier updates to %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, threadIdx.x, target.collId, GetLogicFrontier(sq, blkStatus.sqReadFrontier), blkStatus.numActiveColls);
     }
   }
 }
@@ -478,7 +479,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   return turn;
 }
 
-static __device__ void manipulateCQ(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes) {
+static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll) {
   int tid = threadIdx.x;
   
   if (tid == 0) {
@@ -499,15 +500,8 @@ static __device__ void manipulateCQ(int thrdCudaDev, int doneCollId, CQ *cq, CQE
       
       __threadfence();
     }
-  }
-  __syncwarp();
-  // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
-}
 
-static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *globalCollCtx4Blk7Coll) {
-  int tid = threadIdx.x;
-
-  if (tid == 0) {
+    
     blkStatus.numActiveColls -= 1;
     blkStatus.currActiveCollId = -1;
 
@@ -535,8 +529,7 @@ static __device__ void resetDoneColl(int thrdCudaDev, int doneCollId, CollCtx *g
     // }
 
   }
-  __syncwarp(); // 原来是这么写的。
-  // __syncthreads(); // 应该让全部线程同步，来看到最新的修改
+  __syncwarp();
   // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
@@ -558,7 +551,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
   }
   __syncwarp(); // 原来是这么写的
-  // __syncthreads(); // 应该让全部线程同步，来看到最新的修改
+  // __syncthreads(); // TODO: 应该让全部线程同步，来看到最新的修改
   // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
@@ -595,8 +588,8 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
         numSeenActiveColls++;
         
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d, thrdLimit = %d, blockDim.x = %d, globalCollCtx4Blk7Coll->workElem.header.nWarps = %u, globalCollCtx4Blk7Coll->workElem.sendbuff @ %p, globalCollCtx4Blk7Coll->workElem.recvbuff @ %p", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls, thrdLimit, blockDim.x, globalCollCtx4Blk7Coll->workElem.header.nWarps, globalCollCtx4Blk7Coll->workElem.sendbuff, globalCollCtx4Blk7Coll->workElem.recvbuff);
-        // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+        OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before loadCollCtx for coll_id = %d blkStatus.numActiveColls = %d, numSeenActiveColls = %d", thrdCudaDev, bid, tid, collId, blkStatus.numActiveColls, numSeenActiveColls);
+        __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         // if (tid == 0) {
         //   OFCCL_LOG1(OFCCL, "hi");
@@ -637,8 +630,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           // atomicAdd(&sharedCollCtx.numDoneThrds, 1); // 有了线程同步，感觉这个变量在跑到底的时候没啥用。
           // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
           // 完成的时候才进行下边的调用，只是保存上下文退出不应该调用。
-          manipulateCQ(thrdCudaDev, collId, cq, globalCqes);
-          resetDoneColl(thrdCudaDev, collId, globalCollCtx4Blk7Coll);
+          manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalCollCtx4Blk7Coll);
           // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
           // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d done", thrdCudaDev, bid, tid, collId);
         }
