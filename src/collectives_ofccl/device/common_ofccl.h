@@ -35,10 +35,7 @@ struct RunWork {
   // here from the LL ncclKernel.
   __device__ __forceinline__ void run(ncclWorkElem *w) {
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before RunWorkElement, w->header.nWarps = %u, coll_id = %d", sharedCollCtx.rank, blockIdx.x, threadIdx.x, w->header.nWarps, blkStatus.currActiveCollId);
-    int wid = threadIdx.x / WARP_SIZE;
-    if (wid < w->header.nWarps) {
-      RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(w);
-    }
+    RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(w);
   }
 };
 
