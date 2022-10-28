@@ -99,13 +99,13 @@ class Primitives<
           sharedCollCtx.saveCtx7Quit = 1;
           sharedCollCtx.loadAgain = 1;
 
-          if ((flags & (Recv*RoleWaitRecv))) {
-            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! connStepCache(tail from Rank[%d], connStepPtr = %p) = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepPtr, connStepCache, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          }
-          // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          // if ((flags & (Recv*RoleWaitRecv))) {
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step + StepPerSlice);
           // }
-          __syncwarp(); // ！！！！！！为了打印log加的！
+          // // if ((flags & (Send*RoleWaitSend))) {
+          // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          // // }
+          // __syncwarp(); // ！！！！！！为了打印log加的！
           
           return; // 使用return，而不是break。
         }
@@ -144,13 +144,13 @@ class Primitives<
       step += StepPerSlice;
     }
     
-    if ((flags & (Recv*RoleWaitRecv))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success connStepCache(tail from Rank[%d]) = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step, isSendNotRecv);
-    }
-    // if ((flags & (Send*RoleWaitSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    // if ((flags & (Recv*RoleWaitRecv))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step);
     // }
-    __syncwarp(); // ！！！！！！为了打印log加的！
+    // // if ((flags & (Send*RoleWaitSend))) {
+    // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    // // }
+    // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
   template<int Recv, int Send>
@@ -160,13 +160,13 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
+    // // if ((flags & (Recv*RolePostRecv))) {
+    // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
+    // // }
+    // if ((flags & (Send*RolePostSend))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
     // }
-    if ((flags & (Send*RolePostSend))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currActiveCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
-    }
-    __syncwarp(); // ！！！！！！为了打印log加的！
+    // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
