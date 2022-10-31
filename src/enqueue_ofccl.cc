@@ -22,6 +22,8 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring> // std::memcpy
+#include <fstream>
+#include <ios>
 #include <pthread.h> // pthread_self()
 #include <math.h> // floor()
 #include <sched.h>
@@ -788,6 +790,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuit;
   rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
   rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
+  rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -882,6 +885,51 @@ void *startKernel7SqObserver(void *args) {
     }
     startKernel(rankCtx);
   }
+  return nullptr;
+}
+
+void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      file << "Block " << bid << std::endl;
+      for (int tid = 0; tid < rankCtx->daemonKernelBlockDim.x; ++tid) {
+        file << "tid=" << tid << "[" << *(rankCtx->barrierCnt + 0 + barrierId * 2 + tid * NUM_BARRIERS * 2 + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2) << "->" << *(rankCtx->barrierCnt + 1 + barrierId * 2 + tid * NUM_BARRIERS * 2 + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2) << "] ";
+      }
+      file << std::endl;
+    }
+}
+
+void *startBarrierCntPrinter(void *args) {
+  ofcclRankCtx *rankCtx = ((ObserverThrdArgs *)args)->rankCtx;
+  std::string fileName = "/home/panlichen/work2/ofccl/log/barrierCnt-";
+  fileName.append(std::to_string(rankCtx->rank)).append(".log");
+
+  std::ofstream clean(fileName, std::ios_base::out);
+  clean << "";
+  clean.close();
+
+  std::ofstream file(fileName, std::ios_base::app);
+  while (!(rankCtx->noMoreSqes)) {
+  
+    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail:\n";
+    printBarrierCnt(rankCtx, file, 0);
+
+    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done:\n";
+    printBarrierCnt(rankCtx, file, 1);
+    
+    file << "Rank " << rankCtx->rank << " barrier @ controller:\n";
+    printBarrierCnt(rankCtx, file, 2);
+
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin:\n";
+    printBarrierCnt(rankCtx, file, 3);
+
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end:\n";
+    printBarrierCnt(rankCtx, file, 4);
+
+    file << "\n\n\n";
+
+    sleep(1);
+  }
+  file.close();
   return nullptr;
 }
 
@@ -1036,6 +1084,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
 
+  checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2));
+
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
 
@@ -1049,6 +1099,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   rankCtx->observerThrdArgs = { rankCtx };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
+
+  rankCtx->barrierCntPrinterArgs = { rankCtx };
+  pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
 
 end:
   // CUDACHECK(cudaSetDevice(rankCtx->rank)); // do other clean-ups first before calling
@@ -1089,6 +1142,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
+  pthread_join(rankCtx->barrierCntPrinter, nullptr);
 
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));

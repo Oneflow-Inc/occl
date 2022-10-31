@@ -38,6 +38,9 @@ typedef struct {
 typedef struct {
   ofcclRankCtx *rankCtx;
 } ObserverThrdArgs;
+typedef struct {
+  ofcclRankCtx *rankCtx;
+} BarrierCntPrinterArgs;
 
 // TODO: 不是线程安全的。
 struct ofcclRankCtx {
@@ -66,7 +69,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[13];
+  void *argsptrs[14];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -93,6 +96,10 @@ struct ofcclRankCtx {
   
   void *callbackArgList[MAX_LENGTH];
   CallbackFunc callbacks[MAX_LENGTH];
+
+  unsigned long long int *barrierCnt;
+  pthread_t barrierCntPrinter;
+  BarrierCntPrinterArgs barrierCntPrinterArgs;
 };
 
 

@@ -365,16 +365,16 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 
     copyNcclWorkElem(sharedCollCtx.workElem, globalCollCtx4Blk7Coll->workElem);
 
-    // for debug
-    // {
-    //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-    //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-    //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-    //   uint64_t head = recvConn->step;
-    //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-    //   uint64_t tail = sendConn->step;
-    //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d load head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, collId, head, tail);
-    // }
+    // // for debug
+    {
+      struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
+      struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
+      struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
+      uint64_t head = recvConn->step;
+      struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
+      uint64_t tail = sendConn->step;
+      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d load head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, collId, head, tail);
+    }
 
     // TODO: 目前只有simple ring allreduce，之后考虑通用性和扩展性。
     // 加载algo、proto、func相关的运行上下文。
@@ -590,11 +590,12 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   if (tid == 0) {
     blkStatus.quit = 0;
+    blkStatus.barrierCnt = barrierCnt;
     BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
     if (myGlobalBlkStatus->hasVolunteerQuitted == 0) {
       blkStatus.numActiveColls = 0;

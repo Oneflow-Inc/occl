@@ -33,6 +33,8 @@
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
+#define NUM_BARRIERS 5
+
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
 // static thread_local int CpuSleepUs = 1e6;
@@ -94,6 +96,8 @@ typedef struct {
 
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
   unsigned long long int tatalVolunteerQuitCnt; // 同上
+
+  unsigned long long int *barrierCnt;
 } BlkStatus;
 
 typedef struct {
@@ -160,7 +164,7 @@ typedef struct {
   ssize_t gridOffset4RingAllReduce;
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****
