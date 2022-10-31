@@ -392,11 +392,11 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.nRanks - 1;
     sharedCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->currentStep4RingAllReduce;
     sharedCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->gridOffset4RingAllReduce;
-    __threadfence_block();
+    // __threadfence_block();
   }
   *(blkStatus.barrierCnt + 0 + 6 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
-  // __syncthreads();
-  __syncwarp();
+  __syncthreads(); // 这个同步看来不能换成syncwarp，会报错cudaErrorIllegalInstruction。猜测需要全部都阻塞，来保证shmem的内容的可见性。
+  // __syncwarp();
 
   *(blkStatus.barrierCnt + 1 + 6 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
  
@@ -619,10 +619,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     }
     __threadfence_block();
   }
-  // *(blkStatus.barrierCnt + 0 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1; // 这个会有内存问题，因为其他线程还没看到0号线程的更新。
+  // // *(blkStatus.barrierCnt + 0 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1; // 这个会有内存问题，因为其他线程还没看到0号线程的更新。
   // __syncthreads();
   __syncwarp();
-  *(blkStatus.barrierCnt + 1 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
+  // *(blkStatus.barrierCnt + 1 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
   
   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.hasVolunteerQuitted = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.hasVolunteerQuitted);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
