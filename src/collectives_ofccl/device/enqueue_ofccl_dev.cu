@@ -366,15 +366,15 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     copyNcclWorkElem(sharedCollCtx.workElem, globalCollCtx4Blk7Coll->workElem);
 
     // for debug
-    {
-      struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-      struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-      struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-      uint64_t head = recvConn->step;
-      struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-      uint64_t tail = sendConn->step;
-      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, head, tail);
-    }
+    // {
+    //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
+    //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
+    //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
+    //   uint64_t head = recvConn->step;
+    //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
+    //   uint64_t tail = sendConn->step;
+    //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d load head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, collId, head, tail);
+    // }
 
     // TODO: 目前只有simple ring allreduce，之后考虑通用性和扩展性。
     // 加载algo、proto、func相关的运行上下文。
@@ -411,7 +411,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
         // }
 
       }
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> insert CQE for coll_id = %d, globalCollCtx4Blk7Coll->cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> cqe coll_id = %d, cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++);
       
       __threadfence();
     }
@@ -429,6 +429,17 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     globalCollCtx4Blk7Coll->offset4SimpleGenericOp = 0;
     globalCollCtx4Blk7Coll->currentStep4RingAllReduce = 0;
     globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
+
+    // for debug
+    // {
+    //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
+    //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
+    //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
+    //   uint64_t head = recvConn->step;
+    //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
+    //   uint64_t tail = sendConn->step;
+    //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d done head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, doneCollId, head, tail);
+    // }
 
     
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> update CQE for coll_id = %d, blkStatus.numActiveColls = %d globalCollCtx4Blk7Coll->cqeWriteCnt = %llu", thrdCudaDev, blockIdx.x, tid, doneCollId, blkStatus.numActiveColls, globalCollCtx4Blk7Coll->cqeWriteCnt++);
@@ -453,7 +464,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   // ofcclBarrier(OFCCL_SYNC_COLL_WORKER_BAR_ID, thrdLimit);
 }
 
-static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int thrdLimit) {
+static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int thrdLimit, int collId) {
   int tid = threadIdx.x;
   if (tid == 0) {
     // globalCollCtx4Blk7Coll->saveCtx7Quit = sharedCollCtx.saveCtx7Quit;
@@ -470,15 +481,15 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
     
     // for debug
-    {
-      struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-      struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-      struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-      uint64_t head = recvConn->step;
-      struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-      uint64_t tail = sendConn->step;
-      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, head, tail);
-    }
+    // {
+    //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
+    //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
+    //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
+    //   uint64_t head = recvConn->step;
+    //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
+    //   uint64_t tail = sendConn->step;
+    //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d save head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, collId, head, tail);
+    // }
   }
   // 这里取消同步，反正出去后会有个同步。
   // __syncwarp(); // 原来是这么写的
@@ -554,7 +565,7 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
           
           // 以下的if-else事实上是和当前的工作的warp相关的，不过里边只有tid==0干活，应该也没啥影响。
           if (sharedCollCtx.saveCtx7Quit == 1) {
-            saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, thrdLimit);
+            saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, thrdLimit, collId);
           } else {
             
             // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, complete collId = %d", thrdCudaDev, bid, tid, collId);

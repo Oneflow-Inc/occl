@@ -208,6 +208,8 @@ class Primitives<
       // numslices>2 the new code is superior. And note that in the case
       // numslices=1, the loop is trivially unrollable (single iteration) so we
       // don't incur that that tail branch and we still have perf_new=2.
+        // The RTL representation of the code for a function is a doubly-linked chain of objects called insns. Insns are expressions with special codes that are used for no other purpose. Some insns are actual instructions; others represent dispatch tables for switch statements; others represent labels to jump to or various sorts of declarative information. https://gcc.gnu.org/onlinedocs/gccint/Insns.html
+      // 这段代码的意思是，这个优化减少了if分支的数量。cuda没有分支预测，所以碰到if，就会暂停流水线。
       //
       // ORIGINAL CODE:
       //   unrolled for(slices) {
@@ -276,9 +278,9 @@ class Primitives<
              sliceSize);
         }
         barrier(); // This barrier has a counterpart in following loop
-        if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
-        __syncwarp();
-        postPeer<Recv, Send>();
+        // if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
+        // __syncwarp();
+        // postPeer<Recv, Send>();
         offset += sliceSize;
         slice += 1;
       } while (slice < SlicePerChunk && offset < nelem);
@@ -289,12 +291,12 @@ class Primitives<
     // worker perf is the limiter, perf-wise this loop is effectively unentered,
     // hence just a single branch insn.
     #pragma unroll 1
-    while (slice < SlicePerChunk && offset < nelem) { // 过滤不了。~~挺巧妙的，用这个条件把nworkers里的线程过滤掉了~~。// 1023bug: 应该是从这里又让0号等线程钻进了waitPeer，然后设置了SaveCtx7Quit。
+    while (slice < SlicePerChunk && offset < nelem) { // 过滤不了。~~挺巧妙的，用这个条件把nworkers里的线程过滤掉了~~。// +  1023bug: 应该是从这里又让0号等线程钻进了waitPeer，然后设置了SaveCtx7Quit。
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
-      { // Only workers could have Wait roles so we know the slice must be empty
-        // since we've exited the loop above.
-        waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
-      }
+      // { // Only workers could have Wait roles so we know the slice must be empty
+      //   // since we've exited the loop above.
+      //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
+      // }
       barrier(); // Has couterpart in preceding worker-only loop.
       if (sharedCollCtx.saveCtx7Quit == 1) { // 需要在barrier之后才访问shmem。
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
