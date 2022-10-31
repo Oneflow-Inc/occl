@@ -33,7 +33,7 @@
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
-#define NUM_BARRIERS 5
+#define NUM_BARRIERS 10
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;

@@ -910,20 +910,42 @@ void *startBarrierCntPrinter(void *args) {
   std::ofstream file(fileName, std::ios_base::app);
   while (!(rankCtx->noMoreSqes)) {
   
-    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail:\n";
+    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:\n";
     printBarrierCnt(rankCtx, file, 0);
 
-    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done:\n";
+    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:\n";
     printBarrierCnt(rankCtx, file, 1);
     
-    file << "Rank " << rankCtx->rank << " barrier @ controller:\n";
+    file << "Rank " << rankCtx->rank << " barrier @ controller 2:\n";
     printBarrierCnt(rankCtx, file, 2);
 
-    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin:\n";
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:\n";
     printBarrierCnt(rankCtx, file, 3);
 
-    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end:\n";
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:\n";
     printBarrierCnt(rankCtx, file, 4);
+
+    file << "Rank " << rankCtx->rank << " __syncthreads @ initContexts end 5:\n";
+    printBarrierCnt(rankCtx, file, 5);
+
+    file << "Rank " << rankCtx->rank << " __syncthreads @ loadCollCtx end 6:\n";
+    printBarrierCnt(rankCtx, file, 6);
+
+    file << "Rank " << rankCtx->rank << " __syncthreads @ traverseGlobalCollCtx end 7:\n";
+    printBarrierCnt(rankCtx, file, 7);
+
+    file << "Rank " << rankCtx->rank << " __syncthreads @ daemonKernel begin 8:\n";
+    printBarrierCnt(rankCtx, file, 8);
+
+    file << "Rank " << rankCtx->rank << " __syncthreads @ checkSQ end 9:\n";
+    printBarrierCnt(rankCtx, file, 9);
+
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * 2 + 30 * NUM_BARRIERS * 2 + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2) << " tatalVolunteerQuitCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * 2 + 31 * NUM_BARRIERS * 2 + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2) << " numActiveColls=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * 2 + 32 * NUM_BARRIERS * 2 + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * 2) << std::endl;
+    }
 
     file << "\n\n\n";
 
