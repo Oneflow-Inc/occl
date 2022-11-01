@@ -253,11 +253,11 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
           globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
 
           // OFCCL_LOG(OFCCL, "nthreads: globalCollCtx4Blk7Coll->workElem.nWarps*WARP_SIZE=%d, thrdLimit=%d", globalCollCtx4Blk7Coll->workElem.header.nWarps*WARP_SIZE, thrdLimit);
-          __threadfence_block();
+          // __threadfence_block();
         }
         *(blkStatus.barrierCnt + 0 + 5 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
         // __syncthreads(); // 保证全部线程看得到更新的内容
-        __syncwarp();
+        ofcclBarrier(1);
         *(blkStatus.barrierCnt + 1 + 5 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
       }
     }
@@ -271,8 +271,8 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
   // int tempThrdCudaDev = thrdCudaDev;
   
   SQE target;
-  // TODO: really need system?? 之后可以看看__threadfence()会不会提高性能。
-  __threadfence_system(); // make sure read new head and tail.
+  // TODO: 感觉没必要，这里是要读，而fence应该是写者那边加的。
+  // __threadfence_system(); // make sure read new head and tail.
 
   // OFCCL_LOG_BLK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq @ %p", thrdCudaDev, bid, threadIdx.x, sq);
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, sq->head = %llu, sq->tail = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, bid, threadIdx.x, sq->head, sq->tail, blkStatus.numActiveColls);
@@ -334,7 +334,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
 
       // block的0号线程操作shmem，不用原子操作
       blkStatus.numActiveColls += 1;
-      __threadfence_block();
+      // __threadfence_block(); // 应该不需要，返回后外边有个barrier
 
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get coll_id = %d, blkStatus.sqReadFrontier updates to %llu, blkStatus.numActiveColls = %d, globalCollCtx4Blk7Coll->sqeReadCnt = %llu", thrdCudaDev, bid, threadIdx.x, target.collId, GetLogicFrontier(sq, blkStatus.sqReadFrontier), blkStatus.numActiveColls, globalCollCtx4Blk7Coll->sqeReadCnt++);
     }
@@ -349,7 +349,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   // turn = copyToShmemLoop(&sharedCollCtx.channel, &(globalCollCtx4Blk7Coll->channel), tid, nthreads, turn);
   // // copyToShmemOneShot(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads); // TODO: 用了这个会报错misaligned，就先loop吧
   // turn = copyToShmemLoop(&(sharedCollCtx.work.elems[0]), &(globalCollCtx4Blk7Coll->work.elems[0]), tid, nthreads, turn);
-  // sharedCollCtx.work.elems[0].header.nWarps = globalCollCtx4Blk7Coll->work.elems[0].header.nWarps; // TODO: 好丑。
+  // sharedCollCtx.work.elems[0].header.nWarps = globalCollCtx4Blk7Coll->work.elems[0].header.nWarps;
   // // turn = copyToShmemLoop(&sharedCollCtx.work, &(globalCollCtx4Blk7Coll->work), tid, nthreads, turn);
   // __syncthreads(); // 全部线程都执行，可以使用这个同步。
 
@@ -395,8 +395,9 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     // __threadfence_block();
   }
   *(blkStatus.barrierCnt + 0 + 6 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
-  __syncthreads(); // 这个同步看来不能换成syncwarp，会报错cudaErrorIllegalInstruction。猜测需要全部都阻塞，来保证shmem的内容的可见性。
+  // __syncthreads(); // TODO: 这个同步看来不能换成syncwarp，会报错cudaErrorIllegalInstruction。
   // __syncwarp();
+  ofcclBarrier(1);
 
   *(blkStatus.barrierCnt + 1 + 6 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
  
@@ -406,7 +407,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll) {
   // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
   int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
-  __threadfence(); // cqes在global memory里边，全部thread关心。
+  __threadfence(); // cqes在global memory里边，全部block关心。
 
   if (old_counter + 1 == sharedBlkCount4Coll[doneCollId]) {
     atomicExch(&globalCqes[doneCollId].counter, 0);
@@ -573,14 +574,14 @@ static __device__ int traverseGlobalCollCtx(int thrdCudaDev, CollCtx *globalBlk2
             // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
             // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d done", thrdCudaDev, bid, tid, collId);
           }
-          __threadfence_block();
+          // __threadfence_block();
         }
         *(blkStatus.barrierCnt + 0 + 7 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
         // __syncthreads(); // 这个同步感觉没必要了。原来是为了配合thrdLimit使用的
-        __syncwarp();
-      
+        // __syncwarp();
+        ofcclBarrier(1);
         *(blkStatus.barrierCnt + 1 + 7 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
-       }
+      }
     }
   }
 
@@ -617,14 +618,15 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (bid == 0) {
       atomicExch(globalVolunteerQuit, 0);
     }
-    __threadfence_block();
+    // __threadfence_block();
   }
   // // *(blkStatus.barrierCnt + 0 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1; // 这个会有内存问题，因为其他线程还没看到0号线程的更新。
   // __syncthreads();
-  __syncwarp();
-  // *(blkStatus.barrierCnt + 1 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
+  // __syncwarp();
+  ofcclBarrier(1);
+  *(blkStatus.barrierCnt + 1 + 8 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;
   
-  OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.hasVolunteerQuitted = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.hasVolunteerQuitted);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.hasVolunteerQuitted = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.hasVolunteerQuitted);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
   
   // int tempRound = 0;
@@ -659,7 +661,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         if (bid == 0) {
           atomicExch(globalVolunteerQuit, 1);
         }
-        __threadfence(); // device. // TODO: 是否真的必要？
+        __threadfence(); // device. // TODO: 是否真的必要？应该是有必要的。
         if (*globalVolunteerQuit == 1) { // 0和其他blk都进入这里。编号较大的blk在0号block没退出的情况下，可以继续循环执行checkSQ，可以发现blkStatus.sqReadFrontier < sq->head，从而将checkSQFailCnt置零。
           BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
@@ -674,14 +676,15 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
           myGlobalBlkStatus->tatalVolunteerQuitCnt = blkStatus.tatalVolunteerQuitCnt;
 
-          OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
         }
       }
-      __threadfence_block();
+      // __threadfence_block();
     }
     *(blkStatus.barrierCnt + 0 + 9 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;  
     // __syncthreads(); // 主要是等0号线程操作checkSQ
-    __syncwarp();
+    // __syncwarp();
+    ofcclBarrier(2);
     *(blkStatus.barrierCnt + 1 + 9 * 2 + tid * NUM_BARRIERS * 2 + blockIdx.x * blockDim.x * NUM_BARRIERS * 2) += 1;  
     
     // daemonKernel一开始这个数组用不上，可以用来记点其他信息

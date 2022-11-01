@@ -925,19 +925,19 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:\n";
     printBarrierCnt(rankCtx, file, 4);
 
-    file << "Rank " << rankCtx->rank << " __syncwarp @ initContexts end 5:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ initContexts end 5:\n";
     printBarrierCnt(rankCtx, file, 5);
 
-    file << "Rank " << rankCtx->rank << " __syncthreads @ loadCollCtx end 6:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:\n";
     printBarrierCnt(rankCtx, file, 6);
 
-    file << "Rank " << rankCtx->rank << " __syncwarp @ traverseGlobalCollCtx end 7:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ traverseGlobalCollCtx loop-end 7:\n";
     printBarrierCnt(rankCtx, file, 7);
 
-    // file << "Rank " << rankCtx->rank << " __syncthreads @ daemonKernel begin 8:\n";
-    // printBarrierCnt(rankCtx, file, 8);
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
+    printBarrierCnt(rankCtx, file, 8);
 
-    file << "Rank " << rankCtx->rank << " __syncwarp @ checkSQ return 9:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ checkSQ return 9:\n";
     printBarrierCnt(rankCtx, file, 9);
 
     for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
