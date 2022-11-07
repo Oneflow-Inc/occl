@@ -335,6 +335,8 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
       // __threadfence_block(); // 应该不需要，返回后外边有个barrier
 
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> get coll_id = %d, blkStatus.sqReadFrontier updates to %llu, blkStatus.numActiveColls = %d, globalCollCtx4Blk7Coll->sqeReadCnt = %llu", thrdCudaDev, bid, threadIdx.x, target.collId, GetLogicFrontier(sq, blkStatus.sqReadFrontier), blkStatus.numActiveColls, globalCollCtx4Blk7Coll->sqeReadCnt++);
+
+      // TODO: maintain the taskQ here.
     }
   }
 }
