@@ -104,7 +104,7 @@ __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
 
 // Point-to-point primitives only have one function/kernel.
 #define IMPL_COLL_P(func) \
-  IMPL_COLL_FUNC(func, RING, SIMPLE, Sum, int8_t); 
+  IMPL_COLL_FUNC(func, RING, SIMPLE, Sum, int8_t);
 #else
 #define IMPL_COLL_C(func)
 #define IMPL_COLL_P(func)

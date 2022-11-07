@@ -33,8 +33,8 @@
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
-#define NUM_BARRIERS 11
-#define BARCNT_INNER_SIZE 2
+#define NUM_BARRIERS 17
+#define BARCNT_INNER_SIZE 4
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
@@ -96,7 +96,7 @@ typedef struct {
   int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
-  unsigned long long int tatalVolunteerQuitCnt; // 同上
+  unsigned long long int totalVolunteerQuitCnt; // 同上
 
   unsigned long long int *barrierCnt;
 } BlkStatus;
