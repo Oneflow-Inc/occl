@@ -898,9 +898,9 @@ void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) 
         if (barrierId == 11) {
           printCnt = 3;
         } 
-        // else if (barrierId == 7 || barrierId == 11 || barrierId == 13 || barrierId == 15 || barrierId == 16) {
-        //   printCnt = 4;
-        // }
+        else if (barrierId == 10) {
+          printCnt = 4;
+        }
         for (int i = 0; i < printCnt; ++i) {
           file << *(rankCtx->barrierCnt + i + barrierId * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE);
           if (i < printCnt - 1) {
@@ -943,37 +943,37 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " runRing begin & return 14:\n";
     // printBarrierCnt(rankCtx, file, 14);
     
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
-    // printBarrierCnt(rankCtx, file, 8);
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
+    printBarrierCnt(rankCtx, file, 8);
 
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ initContexts end 5:\n";
-    // printBarrierCnt(rankCtx, file, 5);
-
-    // file << "Rank " << rankCtx->rank << " numSeenActiveColls & blkStatus.numActiveColls & currNumActiveColls @ for begin in traverseGlobalCollCtx 10:\n";
-    // printBarrierCnt(rankCtx, file, 10);
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ initContexts end 5:\n";
+    printBarrierCnt(rankCtx, file, 5);
 
     // file << "Rank " << rankCtx->rank << " i @ break & numSeenActiveColls & blkStatus.numActiveColls & currNumActiveColls 15:\n";
     // printBarrierCnt(rankCtx, file, 15);
 
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:\n";
-    // printBarrierCnt(rankCtx, file, 6);
-    
-    // file << "Rank " << rankCtx->rank << " ofcclFuncs returns & wid & header.nWarps & currNumActiveColls 13:\n";
-    // printBarrierCnt(rankCtx, file, 13);
-
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ end when executing == 1 & blkStatus.numActiveColls & currNumActiveColls 7:\n";
-    // printBarrierCnt(rankCtx, file, 7);
-
-    // file << "Rank " << rankCtx->rank << " in traverseGlobalCollCtx, i & collCount & blkStatus.numActiveColls & currNumActiveColls 16:\n";
-    // printBarrierCnt(rankCtx, file, 16);
-
-    file << "Rank " << rankCtx->rank << " in traverseGlobalCollCtx, traverse done & traverseGlobalCollCtx returns & blkStatus.numActiveColls & currNumActiveColls 11:\n";
+    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return 11 & # return:\n";
     printBarrierCnt(rankCtx, file, 11);
+
+    file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:\n";
+    printBarrierCnt(rankCtx, file, 10);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:\n";
+    printBarrierCnt(rankCtx, file, 6);
     
-    file << "Rank " << rankCtx->rank << " in daemonKernel, traverseGlobalCollCtx end & out traverseGlobalCollCtx and before checkSQ & TRAVERSE_TIMES 12:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:\n";
+    printBarrierCnt(rankCtx, file, 13);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:\n";
+    printBarrierCnt(rankCtx, file, 7);
+
+    // file << "Rank " << rankCtx->rank << " in traverseTaskQ, i & collCount & blkStatus.numActiveColls & currNumActiveColls 16:\n";
+    // printBarrierCnt(rankCtx, file, 16);
+    
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ 12:\n";
     printBarrierCnt(rankCtx, file, 12);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ checkSQ return & blkStatus.numActiveColls 9:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ 9:\n";
     printBarrierCnt(rankCtx, file, 9);
 
 
