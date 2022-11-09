@@ -120,19 +120,19 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
   if (bid >= sharedBlkCount4Coll[sqeCollId]) {
     return -1;
   } else {
-    // 自己读到之后，更新相应的counter；至于读到的sqe对应的collId是不是该自己处理，是caller的事。
-    // 如果发现自己读完之后，所有block都读了，那么commit read
-    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> PREPARE to increase counter(curr=%d) for sqe of coll_id = %d", thrdCudaDev, bid, tid, RingBuffer_get(sq, sqReadFrontier)->counter, sqeCollId);
-    int old_counter = atomicAdd(&(RingBuffer_get(sq, sqReadFrontier)->counter), 1);
+    atomicAdd(&(RingBuffer_get(sq, sqReadFrontier)->counter), 1); // 将自己读了的sqe的counter加1，代表有人读过了，后来再有人读这个的时候加完了去判断。
     __threadfence_system();
-    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> increase counter to %d for sqe of coll_id = %d", thrdCudaDev, bid, tid, old_counter + 1, sqeCollId);
-    
-    if (old_counter + 1 == sharedBlkCount4Coll[sqeCollId]) {
+
+    // 接下来维护sq->head。如果发现sq->head位置的sqe的counter满足了sq->head位置的sqe的collId对应的blk需求，那么sq->head可以前进了。
+    // 这里的代码if条件满足的时候，应该只有sqReadFrontier==sq->head的时候，有两种情况：
+      // 一个block，或者所有block齐头并进，就是最后一个读到的block来更新
+      // coll需要的block数目不同，小号block已经走远了，大号的block后面才看到，来更新。
+    int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
+    if (RingBuffer_get(sq, sq->head)->counter == sharedBlkCount4Coll[collIdofSqHead]) {
       
-      unsigned long long int old_head = atomicAdd(&sq->head, 1);
+      atomicAdd(&sq->head, 1);
 
       __threadfence_system();
-      // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> sqe of coll_id = %d commit read, new sqHead is %llu", thrdCudaDev, bid, tid, sqeCollId, old_head + 1);
     }
   }
   
@@ -256,9 +256,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
       }
     }
   }
-  *(blkStatus.barrierCnt + 0 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   ofcclBarrier(1);
-  *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   return turn;
 }
 
@@ -317,7 +315,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
       // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId, globalCollCtx4Blk7Coll->sqeReadCnt++, globalCollCtx4Blk7Coll->executing);
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for collId = %d %lluth time, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId, globalCollCtx4Blk7Coll->sqeReadCnt++, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
 
@@ -423,7 +421,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
   globalCollCtx4Blk7Coll->executing = 0;
   
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
+  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
 
   globalCollCtx4Blk7Coll->loadAgain = 0;
   globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
@@ -499,7 +497,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
       *(blkStatus.barrierCnt + 0 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      ofcclBarrier(9); // 尝试对抗时序问题，在读executing之前，加一个同步
+      ofcclBarrier(9); // TODO: 这个应该是没必要的。尝试对抗时序问题，在读executing之前，加一个同步
       *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = globalCollCtx4Blk7Coll->executing;
       *(blkStatus.barrierCnt + 1 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
@@ -583,7 +581,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     *globalVolunteerQuit = 0; // 在tid == 0里做了，出去还有同步，就不限制
   }
   ofcclBarrier(5);
-  *(blkStatus.barrierCnt + 1 + 8 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  *(blkStatus.barrierCnt + 0 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   
   // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
@@ -655,9 +653,12 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalVolunteerQuitCnt;
     *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
 
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after checkSQ7TidyTaskQ, blkStatus.sqReadFrontier = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.sqReadFrontier, blkStatus.numActiveColls);
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> checkSQ7TidyTaskQ returns, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
-    // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+    // 记录数组的前10项，未必都是有效的。所有线程都做，看到的应该是一样的。
+    for (int i = 0; i < PrintTestQNum; i++) {
+      *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.activeCollIds[i];
+    }
+
+
     
     if (blkStatus.quit == 1) {
       if (*finallyQuit == 1) {
@@ -665,8 +666,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         // OFCCL_LOG_BLK_0_THRD_0(OFCCL_FINAL_OR_VOLUNTEER_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt);
       }
       
-      // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.numActiveColls);
-
+      
+      *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       return;
     }
   }

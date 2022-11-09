@@ -925,26 +925,23 @@ void *startBarrierCntPrinter(void *args) {
   std::ofstream file(fileName, std::ios_base::app);
   while (!(rankCtx->noMoreSqes)) {
   
-    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:\n";
-    printBarrierCnt(rankCtx, file, 0);
+    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:\n";
+    // printBarrierCnt(rankCtx, file, 0);
 
-    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:\n";
-    printBarrierCnt(rankCtx, file, 1);
+    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:\n";
+    // printBarrierCnt(rankCtx, file, 1);
     
-    file << "Rank " << rankCtx->rank << " barrier @ controller 2:\n";
-    printBarrierCnt(rankCtx, file, 2);
+    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:\n";
+    // printBarrierCnt(rankCtx, file, 2);
 
-    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:\n";
-    printBarrierCnt(rankCtx, file, 3);
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:\n";
+    // printBarrierCnt(rankCtx, file, 3);
 
-    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:\n";
-    printBarrierCnt(rankCtx, file, 4);
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:\n";
+    // printBarrierCnt(rankCtx, file, 4);
     
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
-    printBarrierCnt(rankCtx, file, 8);
-
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ initContexts end 5:\n";
-    printBarrierCnt(rankCtx, file, 5);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
+    // printBarrierCnt(rankCtx, file, 8);
 
     file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return 11 & # return:\n";
     printBarrierCnt(rankCtx, file, 11);
@@ -961,11 +958,11 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " # invoke ofcclFunc & # ofcclFunc return 15:\n";
     printBarrierCnt(rankCtx, file, 15);
 
-    file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:\n";
-    printBarrierCnt(rankCtx, file, 16);
+    // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:\n";
+    // printBarrierCnt(rankCtx, file, 16);
 
-    file << "Rank " << rankCtx->rank << " runRing begin & return 14:\n";
-    printBarrierCnt(rankCtx, file, 14);
+    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:\n";
+    // printBarrierCnt(rankCtx, file, 14);
     
     file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:\n";
     printBarrierCnt(rankCtx, file, 13);
@@ -979,6 +976,8 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ7TidyTaskQ 9:\n";
     printBarrierCnt(rankCtx, file, 9);
 
+    file << "Rank " << rankCtx->rank << " daemonKernel # start & # quit 5:\n";
+    printBarrierCnt(rankCtx, file, 5);
 
     for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
       file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
@@ -987,7 +986,16 @@ void *startBarrierCntPrinter(void *args) {
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
     }
 
-    file << "\n\n\n";
+
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      file << "Rank " << rankCtx->rank << " Block " << bid << " TaskQ: [ ";
+      for (int i = 0; i < PrintTestQNum; i++) {
+        file << *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " ";
+      }
+      file << "]" << std::endl;
+    }
+
+    file << std::endl << std::endl << std::endl;
 
     sleep(1);
   }

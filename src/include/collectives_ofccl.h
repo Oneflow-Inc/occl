@@ -35,6 +35,7 @@
 
 #define NUM_BARRIERS 18
 #define BARCNT_INNER_SIZE 4
+#define PrintTestQNum 10
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
