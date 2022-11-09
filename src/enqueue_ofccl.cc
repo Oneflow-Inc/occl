@@ -973,10 +973,10 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:\n";
     printBarrierCnt(rankCtx, file, 7);
     
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ 12:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:\n";
     printBarrierCnt(rankCtx, file, 12);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ 9:\n";
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ7TidyTaskQ 9:\n";
     printBarrierCnt(rankCtx, file, 9);
 
 

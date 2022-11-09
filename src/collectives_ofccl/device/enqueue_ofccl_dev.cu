@@ -237,7 +237,8 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
           copyNcclWorkElem(globalCollCtx4Blk7Coll->workElem, globalDevComm7WorkElems[collId].first);
 
           /* ****** 上下文 ****** */
-          globalCollCtx4Blk7Coll->executing = 0;
+          globalCollCtx4Blk7Coll->executing = 0; 
+          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, collId=%d, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, globalCollCtx4Blk7Coll->executing);
           // globalCollCtx4Blk7Coll->numDoneThrds = 0;
 
           globalCollCtx4Blk7Coll->sqeReadCnt = 0;
@@ -262,7 +263,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
 }
 
 // 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
-static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit) {
+static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit) {
   int bid = blockIdx.x;
   
   SQE target;
@@ -280,6 +281,17 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
     *failCnt += 1;
     if (blkStatus.numActiveColls > 0) {
       *failCnt = 0; // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
+
+      // bugfix：这次没读到新的，但是taskQ不为空，这时候要把里边的空项删除。
+      int new_numActiveColls = 0;
+      for (int i = 0; i < blkStatus.numActiveColls; ++i) {
+        CollCtx *globalCollCtx4Blk7OldActiveColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.activeCollIds[i];
+        if (globalCollCtx4Blk7OldActiveColl->executing == 1) {
+          // 在同一个数组上就地操作。new_numActiveColls一定是<=i的，所以不会有问题。
+          blkStatus.activeCollIds[new_numActiveColls++] = blkStatus.activeCollIds[i];
+        }
+      }
+      blkStatus.numActiveColls = new_numActiveColls;
     }
     return;
   } else {
@@ -305,6 +317,7 @@ static __device__ void checkSQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollI
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
       // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId, globalCollCtx4Blk7Coll->sqeReadCnt++, globalCollCtx4Blk7Coll->executing);
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
 
@@ -405,12 +418,13 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
   // __nanosleep(100000); // TODO
 
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
-
   // 这里不再给blkStatus.numActiveColls减1，只给executing置0。
   blkStatus.currActiveCollId = -1;
 
   globalCollCtx4Blk7Coll->executing = 0;
+  
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
+
   globalCollCtx4Blk7Coll->loadAgain = 0;
   globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
 
@@ -486,7 +500,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
       *(blkStatus.barrierCnt + 0 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       ofcclBarrier(9); // 尝试对抗时序问题，在读executing之前，加一个同步
-      *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (globalBlk2CollId2CollCtx + collId)->executing;
+      *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = globalCollCtx4Blk7Coll->executing;
       *(blkStatus.barrierCnt + 1 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
       if (globalCollCtx4Blk7Coll->executing == 1) {
@@ -565,12 +579,13 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       blkStatus.totalVolunteerQuitCnt = myGlobalBlkStatus->totalVolunteerQuitCnt;
     }
 
-    globalVolunteerQuit = 0; // 在tid == 0里做了，出去还有同步，就不限制
+    // bugfix: 原来这里写的是globalVolunteerQuit = 0。。。。。。
+    *globalVolunteerQuit = 0; // 在tid == 0里做了，出去还有同步，就不限制
   }
   ofcclBarrier(5);
   *(blkStatus.barrierCnt + 1 + 8 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   
-  OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
+  // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
   
   // int tempRound = 0;
@@ -578,7 +593,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
   
-  int checkSQFailCnt = 0;
+  int checkSQ7TidyTaskQFailCnt = 0;
   while (true) {
     for (int i = 0; i < TRAVERSE_TIMES; i++) {
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseTaskQ, (%d / %d), blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
@@ -590,7 +605,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       // __syncwarp(); // ！！！！！！为了打印log加的！！！！  
     }
     
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before checkSQ, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
+    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before checkSQ7TidyTaskQ, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
 
     *(blkStatus.barrierCnt + 0 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     ofcclBarrier(6);
@@ -598,18 +613,18 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
     if (tid == 0) {
 
-      checkSQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQFailCnt, finallyQuit);
+      checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit);
       
-      // 只有0号线程才会执行checkSQ，自然只有0号线程才会更改checkSQFailCnt，并且进行相应调整。
+      // 只有0号线程才会执行checkSQ7TidyTaskQ，自然只有0号线程才会更改checkSQ7TidyTaskQFailCnt，并且进行相应调整。
 
-      // checkSQFailCnt = 0; // TODO: 禁止主动退出；本来想用ParseBooleanFromEnv这样的方法用env控制，不过是device函数，还是算了。
+      // checkSQ7TidyTaskQFailCnt = 0; // TODO: 禁止主动退出；本来想用ParseBooleanFromEnv这样的方法用env控制，不过是device函数，还是算了。
 
-      if (checkSQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
+      if (checkSQ7TidyTaskQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
         // 主动退出。
         if (bid == 0) { // 区别对待0号blk和其他。0号决定退出，其他才可以退。
           atomicExch(globalVolunteerQuit, 1); // 这个原子操作还是有必要的，要给其他block看。
         }
-        if (*globalVolunteerQuit == 1) { // 0和其他blk都进入这里。编号较大的blk在0号block没退出的情况下，可以继续循环执行checkSQ，可以发现blkStatus.sqReadFrontier < sq->head，从而将checkSQFailCnt置零。
+        if (*globalVolunteerQuit == 1) { // 0和其他blk都进入这里。编号较大的blk在0号block没退出的情况下，可以继续循环执行checkSQ7TidyTaskQ，可以发现blkStatus.sqReadFrontier < sq->head，从而将checkSQ7TidyTaskQFailCnt置零。
           BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
           myGlobalBlkStatus->hasVolunteerQuitted = 1;
@@ -626,7 +641,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
           myGlobalBlkStatus->totalVolunteerQuitCnt = blkStatus.totalVolunteerQuitCnt;
 
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQFailCnt, blkStatus.numActiveColls);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQ7TidyTaskQFailCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQ7TidyTaskQFailCnt, blkStatus.numActiveColls);
         }
       }
     }
@@ -640,8 +655,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalVolunteerQuitCnt;
     *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
 
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after checkSQ, blkStatus.sqReadFrontier = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.sqReadFrontier, blkStatus.numActiveColls);
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> checkSQ returns, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after checkSQ7TidyTaskQ, blkStatus.sqReadFrontier = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.sqReadFrontier, blkStatus.numActiveColls);
+    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> checkSQ7TidyTaskQ returns, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
     // __syncwarp(); // ！！！！！！为了打印log加的！！！！
     
     if (blkStatus.quit == 1) {
