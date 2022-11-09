@@ -952,6 +952,9 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:\n";
     printBarrierCnt(rankCtx, file, 10);
 
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before reading executing 17:\n";
+    printBarrierCnt(rankCtx, file, 17);
+
     file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:\n";
     printBarrierCnt(rankCtx, file, 6);
 

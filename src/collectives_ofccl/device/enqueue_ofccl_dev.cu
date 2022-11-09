@@ -403,7 +403,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     __threadfence();
   }
 
-  __nanosleep(100000); // TODO
+  // __nanosleep(100000); // TODO
 
   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
 
@@ -479,11 +479,16 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
     *(blkStatus.barrierCnt + 0 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     *(blkStatus.barrierCnt + 2 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = collId;
-    *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (globalBlk2CollId2CollCtx + collId)->executing;
 
     if (bid < blkLimit) { // blk天然分化，保留这个条件 // TODO: 如果节省if判断对性能有提升，可以改变处理方法，让所有block处理所有的集合通信。不过好像也省不了。。。总得判断。
       // block内全部线程都执行：
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
+
+      *(blkStatus.barrierCnt + 0 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      ofcclBarrier(9); // 尝试对抗时序问题，在读executing之前，加一个同步
+      *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (globalBlk2CollId2CollCtx + collId)->executing;
+      *(blkStatus.barrierCnt + 1 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+
       if (globalCollCtx4Blk7Coll->executing == 1) {
         // if (tid == 0) { // TODO: 主要是打log用的，不打log可以删掉，省一个if。
           blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
