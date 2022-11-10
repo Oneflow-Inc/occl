@@ -791,6 +791,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
   rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
   rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
+  rankCtx->argsptrs[14] = &rankCtx->collCounters;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -856,7 +857,7 @@ void *startKernel7SqObserver(void *args) {
     if (!noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
       sem_wait(&rankCtx->getNewSqeSema);
       // 这个函数返回，说明等来了一个新的sqe写入。
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
+      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
     }
 
     // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
@@ -879,7 +880,7 @@ void *startKernel7SqObserver(void *args) {
     // }
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
       break;
     }
@@ -1155,6 +1156,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
 
   checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
+  checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());

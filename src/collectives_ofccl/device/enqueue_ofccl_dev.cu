@@ -324,7 +324,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
       // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for collId = %d %lluth time, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId, globalCollCtx4Blk7Coll->sqeReadCnt++, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for collId = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, globalCollCtx4Blk7Coll->sqeReadCnt++, newActiveCollId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
 
@@ -423,14 +423,12 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     __threadfence();
   }
 
-  // __nanosleep(100000); // TODO
-
   // 这里不再给blkStatus.numActiveColls减1，只给executing置0。
   blkStatus.currActiveCollId = -1;
 
   globalCollCtx4Blk7Coll->executing = 0;
   
-  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, send CQE for collId = %d %lluth time, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, doneCollId, globalCollCtx4Blk7Coll->cqeWriteCnt++, globalCollCtx4Blk7Coll->executing);
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for collId = %d, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, globalCollCtx4Blk7Coll->cqeWriteCnt++, doneCollId, globalCollCtx4Blk7Coll->executing);
 
   globalCollCtx4Blk7Coll->loadAgain = 0;
   globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
@@ -558,12 +556,13 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   if (tid == 0) {
     blkStatus.quit = 0;
     blkStatus.barrierCnt = barrierCnt;
+    blkStatus.collCounters = collCounters;
     BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
     if (myGlobalBlkStatus->hasVolunteerQuitted == 0) {
       blkStatus.numActiveColls = 0;
