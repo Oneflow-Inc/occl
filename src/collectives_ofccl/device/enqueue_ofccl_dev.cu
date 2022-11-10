@@ -127,12 +127,21 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
     // 这里的代码if条件满足的时候，应该只有sqReadFrontier==sq->head的时候，有两种情况：
       // 一个block，或者所有block齐头并进，就是最后一个读到的block来更新
       // coll需要的block数目不同，小号block已经走远了，大号的block后面才看到，来更新。
-    int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
-    if (RingBuffer_get(sq, sq->head)->counter == sharedBlkCount4Coll[collIdofSqHead]) {
-      
-      atomicAdd(&sq->head, 1);
 
-      __threadfence_system();
+    // 只让0号block处理，避免多个block同时更新sq->head，产生错误；同时不引入block之间的协同。
+    // 并且，blk 0一次尽可能多地更新sq->head，针对形如2 1 1 1 2这样的coll序列，1号blk读完第一个2，0号blk在下次sqRead把后边的1都commit了。
+    if (bid == 0) { // TODO: 这样的潜在工作量是，假如之后要支持“blk的平移”，即把两个需要blk0的coll，调整成为分别由blk 0 和blk 1单独处理，这里也需要调整。
+      while (sq->head < sqReadFrontier) {
+        int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
+        if (RingBuffer_get(sq, sq->head)->counter == sharedBlkCount4Coll[collIdofSqHead]) { // 可以commit
+          
+          atomicAdd(&sq->head, 1);
+    
+          __threadfence_system();
+        } else {
+          break;
+        }
+      }
     }
   }
   

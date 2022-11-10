@@ -1087,7 +1087,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, comm of coll_id = %d (comm->nChannels=%d), params->gridDim.x=%d, params->blockDim.x=%d, comm->asyncOps->count = %lu", pthread_self(), rankCtx->rank, collId, comm->nChannels, params->gridDim.x, params->blockDim.x, comm->asyncOps->count);
+    OFCCL_LOG(OFCCL, "Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, count = %lu", rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->count);
 
     rankCtx->hostCqes[collId].collId = collId;
     rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
