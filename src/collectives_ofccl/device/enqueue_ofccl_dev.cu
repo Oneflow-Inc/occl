@@ -154,15 +154,18 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
     return -1;
   }
 
-  *RingBuffer_get_tail(cq) = *cqe;
+  // *RingBuffer_get_tail(cq) = *cqe; // bugfix：原来可能因为这里的写不够原子性，CPU看到错误的collId。
+  // atomicExch(&(RingBuffer_get_tail(cq)->collId), cqe->collId); // 最关键的就是把counter写进cq里，然后commit这个写，让CPU的poller线程看到这个collId。
+  RingBuffer_get_tail(cq)->collId = cqe->collId;
 
   __threadfence_system();
 
-  atomicAdd(&cq->tail, 1); // uint64, 一往无前++
-  // RingBuffer_commit_write(cq, 1);
+  *(blkStatus.collCounters + 3 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+  *(blkStatus.collCounters + 4 + RingBuffer_get_tail(cq)->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
 
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> cqWrite done, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
-  // OFCCL_LOG_BLK_0_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> cqWrite done, RingBuffer_full(cq)=%d, cqHead=%llu, cqTail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, RingBuffer_full(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  atomicAdd(&cq->tail, 1); // uint64, 一往无前++
+  
+  // TODO: 整体梳理一下0号thread的fence。
 
   return 0;
 }
@@ -416,10 +419,13 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
   __threadfence(); // cqes在global memory里边，全部block关心。
 
+  *(blkStatus.collCounters + 0 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
   if (old_counter + 1 == sharedBlkCount4Coll[doneCollId]) {
     atomicExch(&globalCqes[doneCollId].counter, 0);
     while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev) == -1) {
     }
+    *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
     __threadfence();
   }
 

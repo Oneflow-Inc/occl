@@ -76,6 +76,7 @@ typedef struct {
   int length;
   unsigned long long int head;
   unsigned long long int tail;
+  unsigned long long int frontier;
   pthread_mutex_t mutex;
 } CQ;
 

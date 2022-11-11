@@ -655,6 +655,7 @@ static CQ *cqCreate(int length) {
   cq->length = length + 1;
   cq->head = 0;
   cq->tail = 0;
+  cq->frontier = 0;
   checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(CQE)));
   // pthread_mutex_init(&cq->mutex, nullptr);
 
@@ -681,10 +682,10 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   }
   
   *target = *RingBuffer_get_head(cq);
+  
+  __sync_synchronize();
 
   cq->head += 1;
-
-  __sync_synchronize();
 
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
 
@@ -839,6 +840,7 @@ void *startPoller(void *args) {
     } else {
       int collId = target.collId;
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
   }
@@ -857,7 +859,7 @@ void *startKernel7SqObserver(void *args) {
     if (!noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
       sem_wait(&rankCtx->getNewSqeSema);
       // 这个函数返回，说明等来了一个新的sqe写入。
-      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
     }
 
     // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
@@ -880,7 +882,7 @@ void *startKernel7SqObserver(void *args) {
     // }
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
-    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
       break;
     }
@@ -891,27 +893,49 @@ void *startKernel7SqObserver(void *args) {
 }
 
 void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
-    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-      file << " (" << bid << ")";
-      for (int tid = 0; tid < rankCtx->daemonKernelBlockDim.x; tid += WARP_SIZE) { //WARP_SIZE
-        file << " <" << tid << ">[";
-        int printCnt = 2;
-        if (barrierId == 11) {
-          printCnt = 3;
-        } 
-        else if (barrierId == 10) {
-          printCnt = 4;
-        }
-        for (int i = 0; i < printCnt; ++i) {
-          file << *(rankCtx->barrierCnt + i + barrierId * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE);
-          if (i < printCnt - 1) {
-            file << "-";
-          }
-        }
-        file << "] ";
+  for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+    file << " (" << bid << ")";
+    for (int tid = 0; tid < rankCtx->daemonKernelBlockDim.x; tid += WARP_SIZE) { //WARP_SIZE
+      file << " <" << tid << ">[";
+      int printCnt = 2;
+      if (barrierId == 11) {
+        printCnt = 3;
+      } 
+      else if (barrierId == 10) {
+        printCnt = 4;
       }
-      file << std::endl;
+      for (int i = 0; i < printCnt; ++i) {
+        file << *(rankCtx->barrierCnt + i + barrierId * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE);
+        if (i < printCnt - 1) {
+          file << "-";
+        }
+      }
+      file << "] ";
     }
+    file << std::endl;
+  }
+}
+
+void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId) {
+  int printBlkNum = rankCtx->daemonKernelGridDim.x;
+  if (counterId == 2) {
+    printBlkNum = 1;
+  }
+
+  for (int bid = 0; bid < printBlkNum; ++bid) {
+    file << " (" << bid << ")";
+    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+      file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
+    }
+    file << std::endl;
+  }
+  if (printBlkNum > 1) {
+    file << " (BLK SUM)";
+    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+      file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) + *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + 1 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
+    }
+    file << std::endl;
+  }
 }
 
 void *startBarrierCntPrinter(void *args) {
@@ -995,6 +1019,21 @@ void *startBarrierCntPrinter(void *args) {
       }
       file << "]" << std::endl;
     }
+
+    file << "Rank " << rankCtx->rank << " # block update cqe for coll CC-0:\n";
+    printCollCounter(rankCtx, file, 0);
+
+    file << "Rank " << rankCtx->rank << " # block send cqe for coll CC-1:\n";
+    printCollCounter(rankCtx, file, 1);
+    
+    file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:\n";
+    printCollCounter(rankCtx, file, 3);
+    
+    file << "Rank " << rankCtx->rank << " # block put into cq RingBuffer_get_tail(cq)->collId CC-4:\n";
+    printCollCounter(rankCtx, file, 4);
+    
+    file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:\n";
+    printCollCounter(rankCtx, file, 2);
 
     file << std::endl << std::endl << std::endl;
 
@@ -1224,6 +1263,8 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   free(rankCtx->hostVolunteerQuit);
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuit));
+  checkRuntime(cudaFree(rankCtx->barrierCnt));
+  checkRuntime(cudaFree(rankCtx->collCounters));
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
 
