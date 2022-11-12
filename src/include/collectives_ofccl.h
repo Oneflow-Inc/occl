@@ -160,6 +160,7 @@ typedef struct {
   // TODO: for debug
   unsigned long long sqeReadCnt;
   unsigned long long cqeWriteCnt;
+  unsigned long long cqePrepareCnt;
 
   // ****** Prims Simple ******
   int saveCtx7Quit; // 这个看起来也可以充当标记是否是跑了一半的标记位，而不需要给runRing，RunWork.run等增加返回值？

@@ -102,8 +102,6 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
   int bid = blockIdx.x;
   int sqeCollId;
   
-  // int tid = threadIdx.x;
-  // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> enter sqRead, sqHead=%llu, sqTail=%llu, empty=%d, RingBuffer_get(sq, sqReadFrontier)->counter=%d, RingBuffer_get(sq, sqReadFrontier)->collId=%d, RingBuffer_get(sq, sqReadFrontier)->quit=%d, RingBuffer_get(sq, sqReadFrontier)->logicHead=%d, GetLogicFrontier(sq, sqReadFrontier)=%llu", thrdCudaDev, bid, tid, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), RingBuffer_empty(sq), RingBuffer_get(sq, sqReadFrontier)->counter, RingBuffer_get(sq, sqReadFrontier)->collId, RingBuffer_get(sq, sqReadFrontier)->quit, RingBuffer_get(sq, sqReadFrontier)->logicHead, GetLogicFrontier(sq, sqReadFrontier));
   if (RingBuffer_empty(sq)) {
     return -1;
   }
@@ -116,7 +114,6 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
 
   // 先判断一下相应的collId是不是该自己的bid处理，不该自己处理直接返回-1
   sqeCollId = target->collId;
-  // OFCCL_LOG(OFCCL, "Blk<%d>, Thrd<%d> sharedBlkCount4Coll[%d]=%d", thrdCudaDev, bid, tid, sqeCollId, sharedBlkCount4Coll[sqeCollId]);
   if (bid >= sharedBlkCount4Coll[sqeCollId]) {
     return -1;
   } else {
@@ -148,24 +145,45 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
   return 0;
 }
 
-static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev) {
+static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long long int *cqeWriteCnt) {
   if (RingBuffer_full(cq)) {
     // not an error; caller keeps trying.
     return -1;
   }
 
-  // *RingBuffer_get_tail(cq) = *cqe; // bugfix：原来可能因为这里的写不够原子性，CPU看到错误的collId。
-  // atomicExch(&(RingBuffer_get_tail(cq)->collId), cqe->collId); // 最关键的就是把counter写进cq里，然后commit这个写，让CPU的poller线程看到这个collId。
-  RingBuffer_get_tail(cq)->collId = cqe->collId;
+  // {
+  // RingBuffer_get_tail(cq)->collId = cqe->collId;
+
+  // __threadfence_system();
+
+  // // *(blkStatus.collCounters + 3 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+  // // *(blkStatus.collCounters + 4 + RingBuffer_get_tail(cq)->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
+  // atomicAdd(&cq->tail, 1); // uint64, 一往无前++
+  // }
+
+  {
+  unsigned long long int myCqFrontier = atomicAdd(&cq->frontier, 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
+  // 两个线程同时调用atomicAdd，是严格保证各自返回的。
+  
+  // *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
+  *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = GetLogicFrontier(cq, myCqFrontier);
+  // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
+  
+  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, GetLogicFrontier(cq, myCqFrontier));
+
+  __threadfence();
+
+  RingBuffer_get(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
 
   __threadfence_system();
 
-  *(blkStatus.collCounters + 3 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-  *(blkStatus.collCounters + 4 + RingBuffer_get_tail(cq)->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-
-  atomicAdd(&cq->tail, 1); // uint64, 一往无前++
-  
-  // TODO: 整体梳理一下0号thread的fence。
+  // atomicCAS返回地址上的old值，是否修改体现不在返回值上。
+  do {
+    atomicCAS(&cq->tail, myCqFrontier, myCqFrontier + 1);
+  } while(cq->tail != myCqFrontier + 1);
+  }
 
   return 0;
 }
@@ -414,18 +432,22 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   return turn;
 }
 
-static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll) {
+static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
   // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
   int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
   __threadfence(); // cqes在global memory里边，全部block关心。
 
   *(blkStatus.collCounters + 0 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
 
+  // TODO: debug
+  CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
+  unsigned long long int *cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
+
   if (old_counter + 1 == sharedBlkCount4Coll[doneCollId]) {
     atomicExch(&globalCqes[doneCollId].counter, 0);
-    while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev) == -1) {
+    while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
     }
-    *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+    // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
     __threadfence();
   }
 
@@ -433,9 +455,6 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   blkStatus.currActiveCollId = -1;
 
   globalCollCtx4Blk7Coll->executing = 0;
-  
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for collId = %d, excuting = %d", thrdCudaDev, blockIdx.x, threadIdx.x, globalCollCtx4Blk7Coll->cqeWriteCnt++, doneCollId, globalCollCtx4Blk7Coll->executing);
-
   globalCollCtx4Blk7Coll->loadAgain = 0;
   globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
 
@@ -544,7 +563,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
           } else {
             // 把对CQ的操作当做循环任务列表的附加动作吧，完成一个集合通信，就操作相应的CQE。
             // 完成的时候才进行下边的调用，只是保存上下文退出不应该调用。
-            manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalCollCtx4Blk7Coll);
+            manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalCollCtx4Blk7Coll, globalBlk2CollId2CollCtx);
             // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
           }
         }

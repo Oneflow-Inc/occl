@@ -918,8 +918,12 @@ void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) 
 
 void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId) {
   int printBlkNum = rankCtx->daemonKernelGridDim.x;
+  bool needSum = true;
   if (counterId == 2) {
     printBlkNum = 1;
+  }
+  if (counterId == 5 || counterId == 6 || counterId == 0) {
+    needSum = false;
   }
 
   for (int bid = 0; bid < printBlkNum; ++bid) {
@@ -929,13 +933,33 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
     }
     file << std::endl;
   }
-  if (printBlkNum > 1) {
+  if (printBlkNum > 1 && needSum) {
     file << " (BLK SUM)";
     for (int collId = 0; collId < rankCtx->collCount; ++collId) {
-      file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) + *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + 1 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
+      unsigned long long sumCounter = 0;
+      for (int bid = 0; bid < printBlkNum; ++bid) {
+        sumCounter += *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
+      }
+      file << " {" << collId << "}" << sumCounter;
     }
     file << std::endl;
   }
+}
+
+void printCollCounterCompareBlock(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId) {
+  int printBlkNum = rankCtx->daemonKernelGridDim.x;
+
+  for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+    file << " {" << collId << "}<";  
+    for (int bid = 0; bid < printBlkNum; ++bid) {
+      file << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
+      if (bid < printBlkNum - 1) {
+        file << "-";
+      }
+    }
+    file << ">";
+  }
+  file << std::endl;
 }
 
 void *startBarrierCntPrinter(void *args) {
@@ -950,89 +974,95 @@ void *startBarrierCntPrinter(void *args) {
   std::ofstream file(fileName, std::ios_base::app);
   while (!(rankCtx->noMoreSqes)) {
   
-    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:\n";
+    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
     // printBarrierCnt(rankCtx, file, 0);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:\n";
+    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
     // printBarrierCnt(rankCtx, file, 1);
     
-    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:\n";
+    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
     // printBarrierCnt(rankCtx, file, 2);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:\n";
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:" << std::endl;
     // printBarrierCnt(rankCtx, file, 3);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:\n";
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
     // printBarrierCnt(rankCtx, file, 4);
     
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:\n";
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
 
-    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return 11 & # return:\n";
-    printBarrierCnt(rankCtx, file, 11);
+    // file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return 11 & # return:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 11);
 
-    file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:\n";
-    printBarrierCnt(rankCtx, file, 10);
+    // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 10);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before reading executing 17:\n";
-    printBarrierCnt(rankCtx, file, 17);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before reading executing 17:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 17);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:\n";
-    printBarrierCnt(rankCtx, file, 6);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ loadCollCtx end 6:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 6);
 
-    file << "Rank " << rankCtx->rank << " # invoke ofcclFunc & # ofcclFunc return 15:\n";
-    printBarrierCnt(rankCtx, file, 15);
+    // file << "Rank " << rankCtx->rank << " # invoke ofcclFunc & # ofcclFunc return 15:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 15);
 
-    // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:\n";
+    // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:" << std::endl;
     // printBarrierCnt(rankCtx, file, 16);
 
-    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:\n";
+    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
     // printBarrierCnt(rankCtx, file, 14);
     
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:\n";
-    printBarrierCnt(rankCtx, file, 13);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 13);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:\n";
-    printBarrierCnt(rankCtx, file, 7);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 7);
     
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:\n";
-    printBarrierCnt(rankCtx, file, 12);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 12);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ7TidyTaskQ 9:\n";
-    printBarrierCnt(rankCtx, file, 9);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ7TidyTaskQ 9:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 9);
 
-    file << "Rank " << rankCtx->rank << " daemonKernel # start & # quit 5:\n";
-    printBarrierCnt(rankCtx, file, 5);
+    // file << "Rank " << rankCtx->rank << " daemonKernel # start & # quit 5:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 5);
 
-    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-      file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalVolunteerQuitCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
-    }
+    // for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+    //   file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
+    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalVolunteerQuitCnt=" << 
+    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
+    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
+    // }
 
 
-    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-      file << "Rank " << rankCtx->rank << " Block " << bid << " TaskQ: [ ";
-      for (int i = 0; i < PrintTestQNum; i++) {
-        file << *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " ";
-      }
-      file << "]" << std::endl;
-    }
+    // for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+    //   file << "Rank " << rankCtx->rank << " Block " << bid << " TaskQ: [ ";
+    //   for (int i = 0; i < PrintTestQNum; i++) {
+    //     file << *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " ";
+    //   }
+    //   file << "]" << std::endl;
+    // }
 
-    file << "Rank " << rankCtx->rank << " # block update cqe for coll CC-0:\n";
+    file << "Rank " << rankCtx->rank << " # block prepare cqe for coll CC-0:" << std::endl;
     printCollCounter(rankCtx, file, 0);
 
-    file << "Rank " << rankCtx->rank << " # block send cqe for coll CC-1:\n";
-    printCollCounter(rankCtx, file, 1);
+    // file << "Rank " << rankCtx->rank << " # block send cqe for coll CC-1:" << std::endl;
+    // printCollCounter(rankCtx, file, 1);
     
-    file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:\n";
-    printCollCounter(rankCtx, file, 3);
+    // file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:" << std::endl;
+    // printCollCounter(rankCtx, file, 3);
     
-    file << "Rank " << rankCtx->rank << " # block put into cq RingBuffer_get_tail(cq)->collId CC-4:\n";
-    printCollCounter(rankCtx, file, 4);
+    // file << "Rank " << rankCtx->rank << " # block put into cq RingBuffer_get_tail(cq)->collId CC-4:" << std::endl;
+    // printCollCounter(rankCtx, file, 4);
     
-    file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:\n";
+    file << "Rank " << rankCtx->rank << " block expect to write coll at CC-5:" << std::endl;
+    printCollCounterCompareBlock(rankCtx, file, 5);
+    
+    // file << "Rank " << rankCtx->rank << " block actually write coll at CC-6:" << std::endl;
+    // printCollCounter(rankCtx, file, 6);
+    
+    file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:" << std::endl;
     printCollCounter(rankCtx, file, 2);
 
     file << std::endl << std::endl << std::endl;
