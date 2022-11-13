@@ -166,8 +166,6 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   unsigned long long int myCqFrontier = atomicAdd(&cq->frontier, 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
   // 两个线程同时调用atomicAdd，是严格保证各自返回的。
   
-  // *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-
   *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = GetLogicFrontier(cq, myCqFrontier);
   // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
   
@@ -182,7 +180,10 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   // atomicCAS返回地址上的old值，是否修改体现不在返回值上。
   do {
     atomicCAS(&cq->tail, myCqFrontier, myCqFrontier + 1);
-  } while(cq->tail != myCqFrontier + 1);
+  } while(cq->tail < myCqFrontier + 1); // 单纯判断while(cq->tail != myCqFrontier + 1)是可能卡住的，自己写完，对面立马写了。
+
+  *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
   }
 
   return 0;

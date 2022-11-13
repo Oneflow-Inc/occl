@@ -972,7 +972,15 @@ void *startBarrierCntPrinter(void *args) {
   clean.close();
 
   std::ofstream file(fileName, std::ios_base::app);
-  while (!(rankCtx->noMoreSqes)) {
+
+  int stick_to_counter = 20;
+
+  while (true) {
+    if (rankCtx->noMoreSqes) {
+      if (stick_to_counter-- < 0) {
+        break;
+      }
+    }
   
     // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
     // printBarrierCnt(rankCtx, file, 0);
@@ -1046,9 +1054,6 @@ void *startBarrierCntPrinter(void *args) {
 
     file << "Rank " << rankCtx->rank << " # block prepare cqe for coll CC-0:" << std::endl;
     printCollCounter(rankCtx, file, 0);
-
-    // file << "Rank " << rankCtx->rank << " # block send cqe for coll CC-1:" << std::endl;
-    // printCollCounter(rankCtx, file, 1);
     
     // file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:" << std::endl;
     // printCollCounter(rankCtx, file, 3);
@@ -1061,6 +1066,9 @@ void *startBarrierCntPrinter(void *args) {
     
     // file << "Rank " << rankCtx->rank << " block actually write coll at CC-6:" << std::endl;
     // printCollCounter(rankCtx, file, 6);
+
+    file << "Rank " << rankCtx->rank << " # block update cq->tail for coll CC-1:" << std::endl;
+    printCollCounter(rankCtx, file, 1);
     
     file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:" << std::endl;
     printCollCounter(rankCtx, file, 2);
