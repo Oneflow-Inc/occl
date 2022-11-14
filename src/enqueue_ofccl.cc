@@ -1301,8 +1301,8 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   free(rankCtx->hostVolunteerQuit);
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuit));
-  checkRuntime(cudaFree(rankCtx->barrierCnt));
-  checkRuntime(cudaFree(rankCtx->collCounters));
+  checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
+  checkRuntime(cudaFreeHost(rankCtx->collCounters));
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
 

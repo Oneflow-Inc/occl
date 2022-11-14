@@ -108,7 +108,7 @@ static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE 
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
   *target = *RingBuffer_get(sq, sqReadFrontier);
   if (target->quit) {
-    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, tid);
+    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, threadIdx.x);
     return 0;
   }
 
@@ -165,11 +165,11 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   {
   unsigned long long int myCqFrontier = atomicAdd(&cq->frontier, 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
   // 两个线程同时调用atomicAdd，是严格保证各自返回的。
-  
+
   *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = GetLogicFrontier(cq, myCqFrontier);
   // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
   
-  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, GetLogicFrontier(cq, myCqFrontier));
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, GetLogicFrontier(cq, myCqFrontier));
 
   __threadfence();
 
@@ -306,6 +306,8 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
   // 能读到，假如是正常SQE，把信息在任务列表里记录一下；假如是quit，那也记录一下
   // 读不到新东西那就算了
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before sqRead, blkStatus.sqReadFrontier=%llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, bid, threadIdx.x, GetLogicFrontier(sq, blkStatus.sqReadFrontier), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  
   if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, blkStatus.sqReadFrontier) || sqRead(sq, blkStatus.sqReadFrontier, &target, thrdCudaDev) == -1) {
     *failCnt += 1;
     if (blkStatus.numActiveColls > 0) {
@@ -328,6 +330,20 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     *failCnt = 0;
     blkStatus.sqReadFrontier++;
     if (target.quit) {
+      if (bid == 0) { // 0号block不能太急退出，要完成更新sq->head 的任务。
+        while (sq->head < blkStatus.sqReadFrontier - 1) { // 最终的blkStatus.sqReadFrontier对应的sqe是那个quit的sqe，其没有collId。
+          int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
+          if (RingBuffer_get(sq, sq->head)->counter == sharedBlkCount4Coll[collIdofSqHead]) { // 可以commit
+            
+            atomicAdd(&sq->head, 1);
+      
+            __threadfence_system();
+          } else {
+            continue;
+          }
+        }
+      }
+
       blkStatus.quit = 1;
       // if (bid == 0) {
         *finallyQuit = 1; // TODO: 为了最后每个block都保证打印统计信息，挺不优雅的
