@@ -840,7 +840,7 @@ void *startPoller(void *args) {
     } else {
       int collId = target.collId;
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
-      *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+      // *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
   }
@@ -1000,8 +1000,8 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
 
-    // file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return 11 & # return:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 11);
+    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
+    printBarrierCnt(rankCtx, file, 11);
 
     // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
     // printBarrierCnt(rankCtx, file, 10);
@@ -1052,8 +1052,8 @@ void *startBarrierCntPrinter(void *args) {
     //   file << "]" << std::endl;
     // }
 
-    file << "Rank " << rankCtx->rank << " # block prepare cqe for coll CC-0:" << std::endl;
-    printCollCounter(rankCtx, file, 0);
+    // file << "Rank " << rankCtx->rank << " # block prepare cqe for coll CC-0:" << std::endl;
+    // printCollCounter(rankCtx, file, 0);
     
     // file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:" << std::endl;
     // printCollCounter(rankCtx, file, 3);
@@ -1061,17 +1061,17 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # block put into cq RingBuffer_get_tail(cq)->collId CC-4:" << std::endl;
     // printCollCounter(rankCtx, file, 4);
     
-    file << "Rank " << rankCtx->rank << " block expect to write coll at CC-5:" << std::endl;
-    printCollCounterCompareBlock(rankCtx, file, 5);
+    // file << "Rank " << rankCtx->rank << " block expect to write coll at CC-5:" << std::endl;
+    // printCollCounterCompareBlock(rankCtx, file, 5);
     
     // file << "Rank " << rankCtx->rank << " block actually write coll at CC-6:" << std::endl;
     // printCollCounter(rankCtx, file, 6);
 
-    file << "Rank " << rankCtx->rank << " # block update cq->tail for coll CC-1:" << std::endl;
-    printCollCounter(rankCtx, file, 1);
+    // file << "Rank " << rankCtx->rank << " # block update cq->tail for coll CC-1:" << std::endl;
+    // printCollCounter(rankCtx, file, 1);
     
-    file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:" << std::endl;
-    printCollCounter(rankCtx, file, 2);
+    // file << "Rank " << rankCtx->rank << " # callback for coll invoked in CPU poller CC-2:" << std::endl;
+    // printCollCounter(rankCtx, file, 2);
 
     file << std::endl << std::endl << std::endl;
 
@@ -1232,8 +1232,10 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
 
+#ifdef ARRAY_DEBUG_ON
   checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
   checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
+#endif
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
@@ -1249,11 +1251,12 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->observerThrdArgs = { rankCtx };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
+#ifdef ARRAY_DEBUG_ON
   rankCtx->barrierCntPrinterArgs = { rankCtx };
   pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
+#endif
 
 end:
-  // CUDACHECK(cudaSetDevice(rankCtx->rank)); // do other clean-ups first before calling
   return ret;
 }
 
@@ -1291,7 +1294,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
+
+#ifdef ARRAY_DEBUG_ON
   pthread_join(rankCtx->barrierCntPrinter, nullptr);
+#endif
 
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
@@ -1301,8 +1307,12 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   free(rankCtx->hostVolunteerQuit);
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuit));
+
+#ifdef ARRAY_DEBUG_ON
   checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
   checkRuntime(cudaFreeHost(rankCtx->collCounters));
+#endif
+
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
 

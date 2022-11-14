@@ -9,6 +9,7 @@ PREFIX ?= /usr/local
 VERBOSE ?= 0
 KEEP ?= 0
 DEBUG ?= 0
+DEBUG_CC ?= 1
 TRACE ?= 0
 PROFAPI ?= 0
 NVTX ?= 1
@@ -91,13 +92,17 @@ NVLDFLAGS   += ${GCOV_FLAGS:%=-Xcompiler %}
 # $(warning GCOV_FLAGS=${GCOV_FLAGS})
 ########## GCOV ##########
 
+
+ifeq ($(DEBUG_CC), 0)
+CXXFLAGS  += -O3 -g
+else
+CXXFLAGS  += -O0 -g -ggdb3
+endif
+
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3
-# TODO: CXXFLAGS  += -O3 -g
-CXXFLAGS  += -O0 -g -ggdb3
 else
-NVCUFLAGS += -O0 -G -g
-CXXFLAGS  += -O0 -g -ggdb3
+NVCUFLAGS += -O0 -G -G
 endif
 
 ifneq ($(VERBOSE), 0)

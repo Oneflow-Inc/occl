@@ -33,6 +33,8 @@
 
 #define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
+#define ARRAY_DEBUG_ON 1
+
 #define NUM_BARRIERS 18
 #define BARCNT_INNER_SIZE 4
 #define PrintTestQNum 10

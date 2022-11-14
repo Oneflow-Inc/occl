@@ -117,6 +117,8 @@ $(PKGDIR)/%.pc : %.pc
 
 $(OBJDIR)/%.o : %.cc $(INCTARGETS)
 	@printf "Compiling  %-35s > %s\n" $< $@
+	@printf "DEBUG_CC is %s\\n" $(DEBUG_CC)
+	@printf "CXXFLAGS is %s\\n" $(CXXFLAGS)
 	mkdir -p `dirname $@`
 	$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -c $< -o $@
 	@$(CXX) -I. -I$(INCDIR) $(CXXFLAGS) -Iinclude -M $< > $(@:%.o=%.d.tmp)
