@@ -151,18 +151,6 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
     return -1;
   }
 
-  // {
-  // RingBuffer_get_tail(cq)->collId = cqe->collId;
-
-  // __threadfence_system();
-
-  // // *(blkStatus.collCounters + 3 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-  // // *(blkStatus.collCounters + 4 + RingBuffer_get_tail(cq)->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-
-  // atomicAdd(&cq->tail, 1); // uint64, 一往无前++
-  // }
-
-  {
   unsigned long long int myCqFrontier = atomicAdd(&cq->frontier, 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
   // 两个线程同时调用atomicAdd，是严格保证各自返回的。
 
@@ -183,8 +171,6 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   } while(cq->tail < myCqFrontier + 1); // 单纯判断while(cq->tail != myCqFrontier + 1)是可能卡住的，自己写完，对面立马写了。
 
   // *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-
-  }
 
   return 0;
 }
@@ -362,7 +348,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
       // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for collId = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, globalCollCtx4Blk7Coll->sqeReadCnt++, newActiveCollId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for collId = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, globalCollCtx4Blk7Coll->sqeReadCnt++, newActiveCollId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
 
@@ -443,7 +429,6 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   }
   // *(blkStatus.barrierCnt + 0 + 6 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   ofcclBarrier(2);
-
   // *(blkStatus.barrierCnt + 1 + 6 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
  
   return turn;
@@ -523,9 +508,9 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
-  *(blkStatus.barrierCnt + 0 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  // *(blkStatus.barrierCnt + 0 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   if (blkStatus.numActiveColls == 0) {
-    *(blkStatus.barrierCnt + 1 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    // *(blkStatus.barrierCnt + 1 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     return turn;
   }
 
@@ -590,9 +575,9 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
       }
     }
 
-    *(blkStatus.barrierCnt + 1 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    // *(blkStatus.barrierCnt + 1 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   }
-  *(blkStatus.barrierCnt + 2 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  // *(blkStatus.barrierCnt + 2 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
   return turn;
 }

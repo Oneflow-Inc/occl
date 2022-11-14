@@ -973,7 +973,7 @@ void *startBarrierCntPrinter(void *args) {
 
   std::ofstream file(fileName, std::ios_base::app);
 
-  int stick_to_counter = 20;
+  int stick_to_counter = 2;
 
   while (true) {
     if (rankCtx->noMoreSqes) {
@@ -1000,8 +1000,8 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
 
-    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
-    printBarrierCnt(rankCtx, file, 11);
+    // file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 11);
 
     // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
     // printBarrierCnt(rankCtx, file, 10);
@@ -1027,8 +1027,8 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:" << std::endl;
     // printBarrierCnt(rankCtx, file, 7);
     
-    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 12);
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
+    printBarrierCnt(rankCtx, file, 12);
 
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after checkSQ7TidyTaskQ 9:" << std::endl;
     // printBarrierCnt(rankCtx, file, 9);
