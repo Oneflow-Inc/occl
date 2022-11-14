@@ -69,7 +69,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[14];
+  void *argsptrs[15];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -98,6 +98,7 @@ struct ofcclRankCtx {
   CallbackFunc callbacks[MAX_LENGTH];
 
   unsigned long long int *barrierCnt;
+  unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
   pthread_t barrierCntPrinter;
   BarrierCntPrinterArgs barrierCntPrinterArgs;
 };

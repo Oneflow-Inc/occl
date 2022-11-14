@@ -7,7 +7,7 @@
 // 4096 : 32K的一半
 // 134217728 : 1G的一半
 
-// 跑几次 traverseGlobalCollCtx 后才去 checkSQ
+// 跑几次 traverseTaskQ 后才去 checkSQ7TidyTaskQ
 #define TRAVERSE_TIMES 10
 #define TOLERANT_FAIL_CHECK_SQ_CNT 5
 
