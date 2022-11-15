@@ -14,7 +14,7 @@
 inline __device__ bool CqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);
   volatile unsigned long long int *tailPtr = &(cq->tail);
-  return *headPtr == *tailPtr;
+  return *headPtr == *tailPtr + 1;
 }
 
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
