@@ -591,7 +591,7 @@ static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NU
 
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
-static SQ *sqCreate(int length) {
+static SQ *sqCreate(unsigned long long int length) {
   SQ *sq = nullptr;
   checkRuntime(cudaMallocHost(&sq, sizeof(SQ)));
   sq->length = length + 1;
@@ -611,20 +611,21 @@ static void sqDestroy(SQ *sq) {
 }
 
 int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
-  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d>, Enter sqWrite, sq @ %p", pthread_self(), rank, sq);
   pthread_mutex_lock(&sq->mutex);
 
-  if (RingBuffer_full(sq)) {
+  if (RingBufferFull(sq)) {
     // not an error; caller keeps trying.
     pthread_mutex_unlock(&sq->mutex);
     return -1;
   }
-  sqe->logicHead = (int)RingBuffer_logic_tail(sq);
-  *RingBuffer_get_tail(sq) = *sqe;
-  // OFCCL_LOG_RANK_0(OFCCL, "<%lu> write in sqe of coll_id = %d counter=%d, quit=%d", pthread_self(), sqe->collId, sqe->counter, sqe->quit);
+  sqe->logicHead = (int)RingBufferLogicTail(sq);
+  *RingBufferGetTail(sq) = *sqe;
+  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> write in sqe of coll_id = %d counter=%d @ %llu", pthread_self(), rank, sqe->collId, sqe->counter, RingBufferLogicTail(sq));
+
+  __sync_synchronize();
 
   sq->tail += 1;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
+  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, RingBufferLogicHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -634,7 +635,6 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
   }
 
-  __sync_synchronize();
 
   // 每次收到sqe，都唤醒一下。
   sem_post(&rankCtx->getNewSqeSema);
@@ -649,7 +649,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   return 0;
 }
 
-static CQ *cqCreate(int length) {
+static CQ *cqCreate(unsigned long long int length) {
   CQ *cq = nullptr;
   checkRuntime(cudaMallocHost(&cq, sizeof(CQ)));
   cq->length = length + 1;
@@ -673,21 +673,21 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   // pthread_mutex_lock(&cq->mutex);
   // tempRound++;
   // if(tempRound % tempPrintRound == 0) {
-  //   OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  //   OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead, RingBufferEmpty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBufferEmpty(cq), RingBufferLogicHead(cq), RingBufferLogicTail(cq));
   // }
 
-  if (RingBuffer_empty(cq)) {
+  if (RingBufferEmpty(cq)) {
     // pthread_mutex_unlock(&cq->mutex);
     return -1;
   }
   
-  *target = *RingBuffer_get_head(cq);
+  *target = *RingBufferGetHead(cq);
   
   __sync_synchronize();
 
   cq->head += 1;
 
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBuffer_empty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBuffer_empty(cq), RingBuffer_logic_head(cq), RingBuffer_logic_tail(cq));
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBufferEmpty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBufferEmpty(cq), RingBufferLogicHead(cq), RingBufferLogicTail(cq));
 
   // pthread_mutex_unlock(&cq->mutex);
 
@@ -859,7 +859,7 @@ void *startKernel7SqObserver(void *args) {
     if (!noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
       sem_wait(&rankCtx->getNewSqeSema);
       // 这个函数返回，说明等来了一个新的sqe写入。
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBuffer_logic_head(rankCtx->sq), RingBuffer_logic_tail(rankCtx->sq));
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, RingBufferLogicHead(rankCtx->sq), RingBufferLogicTail(rankCtx->sq));
     }
 
     // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
@@ -1058,7 +1058,7 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # block put into cq cqe->collId CC-3:" << std::endl;
     // printCollCounter(rankCtx, file, 3);
     
-    // file << "Rank " << rankCtx->rank << " # block put into cq RingBuffer_get_tail(cq)->collId CC-4:" << std::endl;
+    // file << "Rank " << rankCtx->rank << " # block put into cq RingBufferGetTail(cq)->collId CC-4:" << std::endl;
     // printCollCounter(rankCtx, file, 4);
     
     // file << "Rank " << rankCtx->rank << " block expect to write coll at CC-5:" << std::endl;
@@ -1284,7 +1284,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   pthread_mutex_unlock(&rankCtx->observer_mutex);
 
   // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
-  SQE sqe = { -1, 0, (int)RingBuffer_logic_tail(rankCtx->sq), nullptr, nullptr, true };
+  SQE sqe = { -1, 0, (int)RingBufferLogicTail(rankCtx->sq), nullptr, nullptr, true };
   sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
 
   pthread_mutex_lock(&rankCtx->poller_mutex);

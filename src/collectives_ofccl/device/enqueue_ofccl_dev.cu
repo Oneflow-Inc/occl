@@ -98,69 +98,57 @@ __shared__ BlkStatus blkStatus; // 取消static，放到prim里边打印log。
 static __shared__ int sharedBlkCount4Coll[MAX_LENGTH];
 static __shared__ int sharedThrdCount4Coll[MAX_LENGTH];
 
-static __device__ int sqRead(SQ *sq, unsigned long long int sqReadFrontier, SQE *target, int thrdCudaDev) {
-  int bid = blockIdx.x;
-  int sqeCollId;
+static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
+
+  unsigned long long int currSqFrontier = blkStatus.sqReadFrontier;
   
-  if (RingBuffer_empty(sq)) {
+  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, enter, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, currSqFrontier), DevLogicSqHeadInline(sq), DevLogicSqTailInline(sq));
+
+  if (DevLogicSqTailInline(sq) == DevRingBufferLogicFrontier(sq, currSqFrontier)) {
     return -1;
   }
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
-  *target = *RingBuffer_get(sq, sqReadFrontier);
+  *target = *DevRingBufferGetFrontier(sq, currSqFrontier);
   if (target->quit) {
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, threadIdx.x);
     return 0;
   }
 
-  // 先判断一下相应的collId是不是该自己的bid处理，不该自己处理直接返回-1
-  sqeCollId = target->collId;
-  if (bid >= sharedBlkCount4Coll[sqeCollId]) {
-    return -1;
-  } else {
-    atomicAdd(&(RingBuffer_get(sq, sqReadFrontier)->counter), 1); // 将自己读了的sqe的counter加1，代表有人读过了，后来再有人读这个的时候加完了去判断。
-    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, update counter = %d for collId = %d, @ %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, RingBuffer_get(sq, sqReadFrontier)->counter, sqeCollId, GetLogicFrontier(sq, sqReadFrontier));
-    __threadfence_system();
+  int oldCounter = atomicAdd(&(DevRingBufferGetFrontier(sq, currSqFrontier)->counter), 1); // 将自己读了的sqe的counter加1，代表有人读过了，有一个block不需要再读这个sqe了，后来再有人读这个的时候加完了去判断。
 
-    // 接下来维护sq->head。如果发现sq->head位置的sqe的counter满足了sq->head位置的sqe的collId对应的blk需求，那么sq->head可以前进了。
-    // 这里的代码if条件满足的时候，应该只有sqReadFrontier==sq->head的时候，有两种情况：
-      // 一个block，或者所有block齐头并进，就是最后一个读到的block来更新
-      // coll需要的block数目不同，小号block已经走远了，大号的block后面才看到，来更新。
+  blkStatus.sqReadFrontier++; // 这次读到了，那对于当前这个block来说，下一个可读的位置前进一个。
 
-    // 只让0号block处理，避免多个block同时更新sq->head，产生错误；同时不引入block之间的协同。
-    // 并且，blk 0一次尽可能多地更新sq->head，针对形如2 1 1 1 2这样的coll序列，1号blk读完第一个2，0号blk在下次sqRead把后边的1都commit了。
-    if (bid == 0) { // TODO: 这样的潜在工作量是，假如之后要支持“blk的平移”，即把两个需要blk0的coll，调整成为分别由blk 0 和blk 1单独处理，这里也需要调整。
-      while (sq->head < sqReadFrontier) {
-        int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
-        if (RingBuffer_get(sq, sq->head)->counter == sharedBlkCount4Coll[collIdofSqHead]) { // 可以commit
-          
-          atomicAdd(&sq->head, 1);
-    
-          __threadfence_system();
-        } else {
-          break;
-        }
-      }
-    }
+  OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, update counter = %d for collId = %d, @ %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, oldCounter + 1, DevRingBufferGetFrontier(sq, currSqFrontier)->collId, DevRingBufferLogicFrontier(sq, currSqFrontier));
+
+  __threadfence(); // 保证device上的各个block不要乱序看到。
+
+  unsigned long long int sqHead;
+  if (oldCounter + 1 == gridDim.x) {
+    do {
+      sqHead = atomicCAS(&sq->head, currSqFrontier, currSqFrontier + 1);
+    } while (sqHead != currSqFrontier);
+
+    OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, update sq->head, blkStatus.sqReadFrontier = %llu, sq->head = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier), DevLogicSqHeadInline(sq));
   }
   
   return 0;
 }
 
 static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long long int *cqeWriteCnt) {
-  if (RingBuffer_full(cq)) {
+  if (CqFull(cq)) {
     // not an error; caller keeps trying.
     return -1;
   }
 
-  unsigned long long int myCqFrontier = atomicAdd(&cq->frontier, 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
+  unsigned long long int myCqFrontier = atomicAdd(&(cq->frontier), 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
   // 两个线程同时调用atomicAdd，是严格保证各自返回的。
 
-  // *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = GetLogicFrontier(cq, myCqFrontier);
+  // *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = DevRingBufferLogicFrontier(cq, myCqFrontier);
   // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
 
   __threadfence();
 
-  RingBuffer_get(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
 
   __threadfence_system();
 
@@ -168,10 +156,10 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   unsigned long long int cqTail;
   do {
     cqTail = atomicCAS(&cq->tail, myCqFrontier, myCqFrontier + 1);
-  } while(cqTail != myCqFrontier + 1); // while这里是观察CAS里的条件是否被满足，如果观察到这个条件满足了，那也就可以确定Swap的操作也就完成了。
+  } while(cqTail != myCqFrontier); // while这里是观察CAS里的条件是否被满足，如果观察到这个条件满足了，那也就可以确定Swap的操作也就完成了。
 
   // *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, GetLogicFrontier(cq, myCqFrontier));
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, DevRingBufferLogicFrontier(cq, myCqFrontier));
 
   return 0;
 }
@@ -278,65 +266,16 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
   return turn;
 }
 
-static __device__ bool ensureSqHeadUpToDate(SQ *sq, unsigned long long int targetFrontier) {
-  bool updated = false;
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, @begin sq->head = %llu, targetFrontier = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, RingBuffer_logic_head(sq), GetLogicFrontier(sq, targetFrontier));
-
-  // unsigned long long tempThreshold = 200000;
-  // unsigned long long tempCounter = 0;
-
-  while (sq->head < targetFrontier) {
-    int collIdofSqHead = RingBuffer_get(sq, sq->head)->collId;
-    // __nanosleep(2000000);
-    
-    // if ((tempCounter++) % tempThreshold == 0) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, counter = %d for collId = %d, @ sq->head %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, RingBuffer_get(sq, sq->head)->counter, RingBuffer_get(sq, sq->head)->collId, RingBuffer_logic_head(sq));
-    // }
-
-    if (atomicAdd(&(RingBuffer_get(sq, sq->head)->counter), 0) == sharedBlkCount4Coll[collIdofSqHead]) { // 可以commit
-      
-      atomicAdd(&sq->head, 1);
-
-      __threadfence_system();
-      updated = true;
-
-      // tempCounter = 0;
-
-    } else {
-      continue;
-    }
-  }
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, @end sq->head = %llu, targetFrontier = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, RingBuffer_logic_head(sq), GetLogicFrontier(sq, targetFrontier));
-  return updated;
-}
-
 // 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
 static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit) {
   int bid = blockIdx.x;
   
   SQE target;
 
-  unsigned long long int sqHead = atomicAdd(&(sq->head), 0);
-  if (blkStatus.sqReadFrontier < sqHead) {
-    // 如果当前bid比较大，一些SQE不需要这个block处理，就会跳过。导致当前block的frontier小于head。
-    // 不给sqRead增加返回值种类；否则会增加无谓的sqRead调用、增加访存次数。
-    blkStatus.sqReadFrontier = sqHead;
-    *failCnt = 0;
-  }
-  
-  // 对于block 0，不对齐，不读新的。
-  if (bid == 0) { // 所有sqe 0号block一定可以读到，0号读失败的时候，说明当前用户提交的sqe，至少都被0号block看到了，需要及时更新sq->head，让block 1的工作通过block 0确认，并且最终被block 1看到。
-    if (ensureSqHeadUpToDate(sq, blkStatus.sqReadFrontier)) {
-      // 如果成功更新了sq->head，那么应该重置failCnt，延缓0号block的主动退出。
-      *failCnt = 0;
-    }
-  }
-
   // 能读到，假如是正常SQE，把信息在任务列表里记录一下；假如是quit，那也记录一下
   // 读不到新东西那就算了
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before sqRead, blkStatus.sqReadFrontier=%llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, bid, threadIdx.x, GetLogicFrontier(sq, blkStatus.sqReadFrontier), RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq));
   
-  if (RingBuffer_logic_tail(sq) == GetLogicFrontier(sq, blkStatus.sqReadFrontier) || sqRead(sq, blkStatus.sqReadFrontier, &target, thrdCudaDev) == -1) {
+  if (sqRead(sq, &target, thrdCudaDev) == -1) {
     *failCnt += 1;
     if (blkStatus.numActiveColls > 0) {
       *failCnt = 0; // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
@@ -362,12 +301,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
   } else {
     // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
     *failCnt = 0;
-    blkStatus.sqReadFrontier++;
     if (target.quit) {
-      if (bid == 0) { // 0号block不能太急退出，要完成更新sq->head 的任务。
-        ensureSqHeadUpToDate(sq, blkStatus.sqReadFrontier - 1); // 最终的blkStatus.sqReadFrontier对应的sqe是那个quit的sqe，其没有collId。
-      }
-
       blkStatus.quit = 1;
       // if (bid == 0) {
         *finallyQuit = 1; // TODO: 为了最后每个block都保证打印统计信息，挺不优雅的
@@ -377,16 +311,16 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
     // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
     int newActiveCollId = target.collId;
-    int blkLimit = sharedBlkCount4Coll[newActiveCollId];
+    int blkLimit = sharedBlkCount4Coll[newActiveCollId]; // 需要参与新读到的coll的block才会进行后续操作。
     if (bid < blkLimit) {
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
       if (globalCollCtx4Blk7Coll->executing == 1) {
-        OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+        OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, DevLogicSqHeadInline(sq), DevLogicSqTailInline(sq), DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier));
       }
       // TODO: 可以考虑一下这个地方加入原子操作，保证没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
       // 虽然这里是操作globalMemory，但是我们设计的是各个block自己的数据结构自己操作。具体操作的都是每个block的0号线程，所以应该不会有啥问题。
       globalCollCtx4Blk7Coll->executing = 1;
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for collId = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, RingBuffer_logic_head(sq), RingBuffer_logic_tail(sq), GetLogicFrontier(sq, blkStatus.sqReadFrontier));
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for collId = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicSqHeadInline(sq), DevLogicSqTailInline(sq), DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier));
       globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
 
@@ -486,8 +420,8 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
     unsigned long long int *cqeWriteCnt = nullptr;
     // TODO: debug
-    CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
-    cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
+    // CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
+    // cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
 
     while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
     }
@@ -663,7 +597,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   ofcclBarrier(5);
   // *(blkStatus.barrierCnt + 0 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   
-  // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
   
   // int tempRound = 0;

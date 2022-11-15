@@ -6,25 +6,23 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define MAX_LENGTH 581 // 581恰好不超0xc000 shmem的限制，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如581不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。也可以考虑用constant
+#define MAX_LENGTH 581LL // 581恰好不超0xc000 shmem的限制，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如581不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。也可以考虑用constant
 // #define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define tempPrintRound 100000
 
-#define RingBuffer_full(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
+#define RingBufferFull(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
 
-#define RingBuffer_empty(B) (((B)->tail % (B)->length) == ((B)->head % (B)->length))
+#define RingBufferEmpty(B) (((B)->tail % (B)->length) == ((B)->head % (B)->length))
 
-#define RingBuffer_get_head(B) ((B)->buffer + ((B)->head % (B)->length))
-#define RingBuffer_get(B, frontier) ((B)->buffer + (frontier% (B)->length))
+#define RingBufferGetHead(B) ((B)->buffer + ((B)->head % (B)->length))
 
-#define RingBuffer_get_tail(B) ((B)->buffer + ((B)->tail % (B)->length))
+#define RingBufferGetTail(B) ((B)->buffer + ((B)->tail % (B)->length))
 
-#define RingBuffer_logic_head(B) ((B)->head % (B)->length)
-#define GetLogicFrontier(B, frontier) (frontier % (B)->length)
+#define RingBufferLogicHead(B) ((B)->head % (B)->length)
 
-#define RingBuffer_logic_tail(B) ((B)->tail % (B)->length)
+#define RingBufferLogicTail(B) ((B)->tail % (B)->length)
 
 // 对于device和CPU上的commit分别进行不同的多线程保护。
 #define RingBuffer_commit_read(B, A) ((B)->head = ((B)->head + (A)) % (B)->length)
@@ -62,7 +60,7 @@ typedef struct {
 
 typedef struct {
   SQE *buffer;
-  int length;
+  unsigned long long int length;
   unsigned long long int head;
   unsigned long long int tail;
   pthread_mutex_t mutex;
@@ -75,7 +73,7 @@ typedef struct {
 
 typedef struct {
   CQE *buffer;
-  int length;
+  unsigned long long int length;
   unsigned long long int head;
   unsigned long long int tail;
   unsigned long long int frontier;
