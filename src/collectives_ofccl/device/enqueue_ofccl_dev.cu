@@ -266,6 +266,7 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
   return turn;
 }
 
+// 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
 static __device__ void cancelQuit(int *globalVolunteerQuitCounter) {
   if (blkStatus.iWantToQuit) { // 如果我之前投票要退出，现在立刻撤回。
     blkStatus.iWantToQuit = false;
@@ -632,7 +633,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
     if (tid == 0) {
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ7TidyTaskQ, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier), DevLogicSqHeadInline(sq), DevLogicSqTailInline(sq));
-      checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit, globalVolunteerQuitCounter);
+      // TODO: 这样是否可以保证不会有遗留？
+      if (blkStatus.seenAllBlockWantToQuitCounter < 1) {// 看到过一次大家都要退出，就不再去检查sq了。尽量不产生遗留的block
+        checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit, globalVolunteerQuitCounter);
+      }
       
       // 只有0号线程才会执行checkSQ7TidyTaskQ，自然只有0号线程才会更改checkSQ7TidyTaskQFailCnt，并且进行相应调整。
 
@@ -651,7 +655,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           blkStatus.seenAllBlockWantToQuitCounter = 0;
         }
 
-        // TODO: 这样其实还是无法完全保证大家都可以安全退出。好的方法是，让遗留的block也可以退出。
+        // 这样其实还是无法完全保证大家都可以安全退出。好的方法是，让遗留的block也可以退出，或者不产生遗留的block，现在采取的方法是后者。
+        // TODO: 让numActiveColl>0的block退出，防止有同步带来的死锁，现在不急。
         if (blkStatus.seenAllBlockWantToQuitCounter == CNT_BEFORE_QUIT && *observeGlobalVolunteerQuitCounter == gridDim.x) { // 多次看到大家都要退出这一决议，并且又确认到确实是都要退出了。才会真正执行Volunteer Quit的动作。
           BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
