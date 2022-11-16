@@ -788,7 +788,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[7] = &rankCtx->globalCollIds;
   rankCtx->argsptrs[8] = &rankCtx->globalDevComm7WorkElems;
   rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
-  rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuit;
+  rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuitCounter;
   rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
   rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
   rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
@@ -1223,9 +1223,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
 
-  rankCtx->hostVolunteerQuit = (int *)calloc(rankCtx->daemonKernelGridDim.x, sizeof(int));
-  checkRuntime(cudaMalloc(&rankCtx->globalVolunteerQuit, rankCtx->daemonKernelGridDim.x * sizeof(int)));
-  checkRuntime(cudaMemcpy(rankCtx->globalVolunteerQuit, rankCtx->hostVolunteerQuit, rankCtx->daemonKernelGridDim.x * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalVolunteerQuitCounter, sizeof(int)));
 
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
@@ -1305,8 +1303,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalCollIds));
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
-  free(rankCtx->hostVolunteerQuit);
-  checkRuntime(cudaFree(rankCtx->globalVolunteerQuit));
+  checkRuntime(cudaFree(rankCtx->globalVolunteerQuitCounter));
 
 #ifdef ARRAY_DEBUG_ON
   checkRuntime(cudaFreeHost(rankCtx->barrierCnt));

@@ -11,6 +11,8 @@
 #define TRAVERSE_TIMES 10
 #define TOLERANT_FAIL_CHECK_SQ_CNT 5
 
+#define CNT_BEFORE_QUIT 5
+
 inline __device__ bool CqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);
   volatile unsigned long long int *tailPtr = &(cq->tail);

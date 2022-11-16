@@ -93,13 +93,17 @@ typedef struct {
 } CollExecContext;
 
 typedef struct {
-  int quit; // TODO: 考虑守护者kernel按需启停的时候这里的调整
   int numActiveColls;
   int currActiveCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
   int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   int activeCollIds[MAX_LENGTH];
+
+  // 考虑守护者kernel按需启停的时候这里的调整
+  int quit;
+  bool iWantToQuit;
+  int seenAllBlockWantToQuitCounter;
 
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
   unsigned long long int totalVolunteerQuitCnt; // 同上
@@ -173,7 +177,7 @@ typedef struct {
   ssize_t gridOffset4RingAllReduce;
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

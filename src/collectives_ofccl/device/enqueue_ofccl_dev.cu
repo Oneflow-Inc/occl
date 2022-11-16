@@ -266,8 +266,16 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
   return turn;
 }
 
+static __device__ void cancelQuit(int *globalVolunteerQuitCounter) {
+  if (blkStatus.iWantToQuit) { // 如果我之前投票要退出，现在立刻撤回。
+    blkStatus.iWantToQuit = false;
+    blkStatus.seenAllBlockWantToQuitCounter = 0; // 保证我自己肯定不退了
+    atomicAdd(globalVolunteerQuitCounter, -1);
+  }
+}
+
 // 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
-static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit) {
+static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit, int *globalVolunteerQuitCounter) {
   int bid = blockIdx.x;
   
   SQE target;
@@ -279,6 +287,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     *failCnt += 1;
     if (blkStatus.numActiveColls > 0) {
       *failCnt = 0; // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
+      cancelQuit(globalVolunteerQuitCounter);
 
       // bugfix：这次没读到新的，但是taskQ不为空，这时候要把里边的空项删除。
       int new_numActiveColls = 0;
@@ -291,16 +300,11 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       }
       blkStatus.numActiveColls = new_numActiveColls;
     }
-    // if (bid == 0) { // 所有sqe 0号block一定可以读到，0号读失败的时候，说明当前用户提交的sqe，至少都被0号block看到了，需要及时更新sq->head，让block 1的工作通过block 0确认，并且最终被block 1看到。
-    //   if (ensureSqHeadUpToDate(sq, blkStatus.sqReadFrontier)) {
-    //     // 如果成功更新了sq->head，那么应该重置failCnt，延缓0号block的主动退出。
-    //     *failCnt = 0;
-    //   }
-    // }
     return;
   } else {
     // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
     *failCnt = 0;
+    cancelQuit(globalVolunteerQuitCounter);
     if (target.quit) {
       blkStatus.quit = 1;
       // if (bid == 0) {
@@ -559,11 +563,13 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuit, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   if (tid == 0) {
     blkStatus.quit = 0;
+    blkStatus.iWantToQuit = false;
+    blkStatus.seenAllBlockWantToQuitCounter = 0;
     
 #ifdef ARRAY_DEBUG_ON
     blkStatus.barrierCnt = barrierCnt;
@@ -591,8 +597,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       blkStatus.totalVolunteerQuitCnt = myGlobalBlkStatus->totalVolunteerQuitCnt;
     }
 
-    // bugfix: 原来这里写的是globalVolunteerQuit = 0。。。。。。
-    *globalVolunteerQuit = 0; // 在tid == 0里做了，出去还有同步，就不限制
+    if (bid == 0) {
+      atomicExch(globalVolunteerQuitCounter, 0); // 稳妥一些，启动的时候，0号block来置零。
+    }
   }
   ofcclBarrier(5);
   *(blkStatus.barrierCnt + 0 + 5 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -625,18 +632,27 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
     if (tid == 0) {
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ7TidyTaskQ, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier), DevLogicSqHeadInline(sq), DevLogicSqTailInline(sq));
-      checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit);
+      checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit, globalVolunteerQuitCounter);
       
       // 只有0号线程才会执行checkSQ7TidyTaskQ，自然只有0号线程才会更改checkSQ7TidyTaskQFailCnt，并且进行相应调整。
 
       // checkSQ7TidyTaskQFailCnt = 0; // 想要结合进oneflow训练，不能禁止主动退出。
 
       if (checkSQ7TidyTaskQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
-        // 主动退出。
-        if (bid == 0) { // 区别对待0号blk和其他。0号决定退出，其他才可以退。
-          atomicExch(globalVolunteerQuit, 1); // 这个原子操作还是有必要的，要给其他block看。
+        if (!blkStatus.iWantToQuit) {
+          blkStatus.iWantToQuit = true;
+          atomicAdd(globalVolunteerQuitCounter, 1); // 我自己第一次想quit的时候，投一票
         }
-        if (*globalVolunteerQuit == 1) { // 0和其他blk都进入这里。编号较大的blk在0号block没退出的情况下，可以继续循环执行checkSQ7TidyTaskQ，可以发现blkStatus.sqReadFrontier < sq->head，从而将checkSQ7TidyTaskQFailCnt置零。
+
+        volatile int *observeGlobalVolunteerQuitCounter = globalVolunteerQuitCounter;
+        if (*observeGlobalVolunteerQuitCounter == gridDim.x) {
+          blkStatus.seenAllBlockWantToQuitCounter++; // 看看大家的投票结果
+        } else {
+          blkStatus.seenAllBlockWantToQuitCounter = 0;
+        }
+
+        // TODO: 这样其实还是无法完全保证大家都可以安全退出。好的方法是，让遗留的block也可以退出。
+        if (blkStatus.seenAllBlockWantToQuitCounter == CNT_BEFORE_QUIT && *observeGlobalVolunteerQuitCounter == gridDim.x) { // 多次看到大家都要退出这一决议，并且又确认到确实是都要退出了。才会真正执行Volunteer Quit的动作。
           BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
           myGlobalBlkStatus->hasVolunteerQuitted = 1;
