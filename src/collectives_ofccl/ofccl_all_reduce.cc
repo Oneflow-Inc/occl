@@ -23,7 +23,7 @@ ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRe
 NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
 
-  SQE sqe = { collId, 0, -1, sendbuff, recvbuff, false };
+  SQE sqe = { collId, 0, sendbuff, recvbuff, false };
   int thrdCudaDev;
   checkRuntime(cudaGetDevice(&thrdCudaDev));
   

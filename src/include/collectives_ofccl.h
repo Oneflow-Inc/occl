@@ -50,7 +50,6 @@
 typedef struct {
   int collId;
   int counter;
-  int logicHead;
 
   const void *sendbuff;
   void *recvbuff;

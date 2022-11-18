@@ -618,7 +618,6 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     pthread_mutex_unlock(&sq->mutex);
     return -1;
   }
-  sqe->logicHead = (int)RingBufferLogicTail(sq);
   *RingBufferGetTail(sq) = *sqe;
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> write in sqe of coll_id = %d counter=%d @ %llu", pthread_self(), rank, sqe->collId, sqe->counter, RingBufferLogicTail(sq));
 
@@ -1279,7 +1278,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   pthread_mutex_unlock(&rankCtx->observer_mutex);
 
   // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
-  SQE sqe = { -1, 0, (int)RingBufferLogicTail(rankCtx->sq), nullptr, nullptr, true };
+  SQE sqe = { -1, 0, nullptr, nullptr, true };
   sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
 
   pthread_mutex_lock(&rankCtx->poller_mutex);
