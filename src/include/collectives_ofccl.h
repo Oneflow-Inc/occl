@@ -65,6 +65,11 @@ typedef struct {
   pthread_mutex_t mutex;
 } SQ;
 
+inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
+  volatile unsigned long long int *headPtr = &(sq->head);
+  return (sq->tail + 1) % sq->length == *headPtr % sq->length;
+}
+
 typedef struct {
   int collId;
   int counter;
@@ -78,6 +83,12 @@ typedef struct {
   unsigned long long int frontier;
   pthread_mutex_t mutex;
 } CQ;
+
+
+inline bool CpuCqEmpty(CQ *cq) { // cq->tail由GPU更新
+  volatile unsigned long long int *tailPtr = &(cq->tail);
+  return *tailPtr % cq->length == cq->head % cq->length;
+}
 
 struct DevComm7WorkElem {
   struct ncclDevComm* comm;

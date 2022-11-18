@@ -613,7 +613,7 @@ static void sqDestroy(SQ *sq) {
 int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
   pthread_mutex_lock(&sq->mutex);
 
-  if (RingBufferFull(sq)) {
+  if (CpuSqFull(sq)) {
     // not an error; caller keeps trying.
     pthread_mutex_unlock(&sq->mutex);
     return -1;
@@ -670,12 +670,8 @@ static void cqDestroy(CQ *cq) {
 // thread_local static int tempRound = 0;
 static int cqRead(CQ *cq, CQE *target, int rank) {
   // pthread_mutex_lock(&cq->mutex);
-  // tempRound++;
-  // if(tempRound % tempPrintRound == 0) {
-  //   OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead, RingBufferEmpty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBufferEmpty(cq), RingBufferLogicHead(cq), RingBufferLogicTail(cq));
-  // }
 
-  if (RingBufferEmpty(cq)) {
+  if (CpuCqEmpty(cq)) {
     // pthread_mutex_unlock(&cq->mutex);
     return -1;
   }
@@ -685,8 +681,6 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   __sync_synchronize();
 
   cq->head += 1;
-
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> cqRead done, RingBufferEmpty(cq)=%d, cqHead=%llu, cqTail=%llu", pthread_self(), rank, RingBufferEmpty(cq), RingBufferLogicHead(cq), RingBufferLogicTail(cq));
 
   // pthread_mutex_unlock(&cq->mutex);
 

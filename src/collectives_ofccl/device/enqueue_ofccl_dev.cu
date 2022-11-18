@@ -159,7 +159,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   } while(cqTail != myCqFrontier); // while这里是观察CAS里的条件是否被满足，如果观察到这个条件满足了，那也就可以确定Swap的操作也就完成了。
 
   // *(blkStatus.collCounters + 1 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-  // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, DevRingBufferLogicFrontier(cq, myCqFrontier));
+  OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for collId = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), cqe->collId, DevRingBufferLogicFrontier(cq, myCqFrontier));
 
   return 0;
 }
@@ -418,15 +418,15 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
   // *(blkStatus.collCounters + 0 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
 
-  // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for collId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->cqePrepareCnt), doneCollId);
+  OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for collId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->cqePrepareCnt), doneCollId);
 
   if (old_counter + 1 == sharedBlkCount4Coll[doneCollId]) {
     atomicExch(&globalCqes[doneCollId].counter, 0);
 
     unsigned long long int *cqeWriteCnt = nullptr;
     // TODO: debug
-    // CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
-    // cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
+    CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
+    cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
 
     while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
     }
@@ -679,7 +679,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     ofcclBarrier(7); // prims_simple里用的是8和15。
     // *(blkStatus.barrierCnt + 1 + 9 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     
-    // daemonKernel一开始这个数组用不上，可以用来记点其他信息
+    // // daemonKernel一开始这个数组用不上，可以用来记点其他信息
+
     // *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxSwitchCnt;
     // *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalVolunteerQuitCnt;
     // *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
