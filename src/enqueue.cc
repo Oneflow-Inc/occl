@@ -861,7 +861,7 @@ ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
     int perChannelOps = DIVUP(channelUsed, total.nChannels);
     if (homogeneous) NCCLCHECK(getAlgoInfo(&total, allCollNetSupport, perChannelOps)); // 确定info->algo, proto, nChannels, nThreads
     // Set for each op
-    OFCCL_LOG(NCCL, "homogeneous = %d, total.nBytes= %lu, total.nChannels = %d", homogeneous, total.nBytes, total.nChannels);
+    // OFCCL_LOG(NCCL, "homogeneous = %d, total.nBytes= %lu, total.nChannels = %d", homogeneous, total.nBytes, total.nChannels);
     for (int c = 0; c < comm->asyncOpCount; c++) {
       struct ncclInfo* info = comm->asyncOps+c;
       if (homogeneous) {
@@ -871,7 +871,7 @@ ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
         info->nThreads = total.nThreads;
       }
       NCCLCHECK(ncclSetupCollKernel(info));
-      OFCCL_LOG(NCCL, "%dth ncclInfo, info->nThreads = %d, info->nChannels = %d", c, info->nThreads, info->nChannels);
+      // OFCCL_LOG(NCCL, "%dth ncclInfo, info->nThreads = %d, info->nChannels = %d", c, info->nThreads, info->nChannels);
     }
     comm->args.header.type = ncclWorkTypeUnused;  // disable inline argument
   }

@@ -425,8 +425,8 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
     unsigned long long int *cqeWriteCnt = nullptr;
     // TODO: debug
-    CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
-    cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
+    // CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
+    // cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
 
     while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
     }
@@ -435,7 +435,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   }
 
   // 这里不再给blkStatus.numActiveColls减1，只给executing置0。
-  blkStatus.currActiveCollId = -1;
+  // blkStatus.currActiveCollId = -1; // TODO: debug
 
   globalCollCtx4Blk7Coll->executing = 0;
   globalCollCtx4Blk7Coll->loadAgain = 0;
@@ -469,7 +469,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
 
   blkStatus.totalCtxSwitchCnt++;
-  blkStatus.currActiveCollId = -1;
+  // blkStatus.currActiveCollId = -1;// TODO: debug
   
   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
   
@@ -511,14 +511,10 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
       // block内全部线程都执行：
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
-      // *(blkStatus.barrierCnt + 0 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      ofcclBarrier(9); // TODO: 这个应该是没必要的。尝试对抗时序问题，在读executing之前，加一个同步
       // *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = globalCollCtx4Blk7Coll->executing;
-      // *(blkStatus.barrierCnt + 1 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-
       if (globalCollCtx4Blk7Coll->executing == 1) {
-        // if (tid == 0) { // TODO: 主要是打log用的，不打log可以删掉，省一个if。
-          blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
+        // if (tid == 0) { // TODO: debug
+          // blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
         // }
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
@@ -579,7 +575,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
     if (myGlobalBlkStatus->hasVolunteerQuitted == 0) {
       blkStatus.numActiveColls = 0;
-      blkStatus.currActiveCollId = -1;
+      // blkStatus.currActiveCollId = -1;// TODO: debug
       blkStatus.sqReadFrontier = 0;
       blkStatus.hasVolunteerQuitted = 0;
 
@@ -590,7 +586,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       for (int i = 0; i < blkStatus.numActiveColls; ++i) {
         blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
       }
-      blkStatus.currActiveCollId = myGlobalBlkStatus->currActiveCollId;
+      // blkStatus.currActiveCollId = myGlobalBlkStatus->currActiveCollId; // TODO: debug
       blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
       blkStatus.hasVolunteerQuitted = 1;
 
@@ -669,7 +665,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           for (int i = 0; i < blkStatus.numActiveColls; ++i) {
             myGlobalBlkStatus->activeCollIds[i] = blkStatus.activeCollIds[i];
           }
-          myGlobalBlkStatus->currActiveCollId = blkStatus.currActiveCollId;
+          // myGlobalBlkStatus->currActiveCollId = blkStatus.currActiveCollId; // TODO: debug
           myGlobalBlkStatus->sqReadFrontier = blkStatus.sqReadFrontier;
           myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
           myGlobalBlkStatus->totalVolunteerQuitCnt = blkStatus.totalVolunteerQuitCnt;
