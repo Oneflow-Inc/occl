@@ -28,7 +28,7 @@ ENQ_DEVDEP 			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.dep)
 # ENQ_DEV_LINKOBJ := $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%_link.o)
 # ENQ_DEVSTATIC			:= $(ENQ_DEVSRC:%.cu=$(OBJDIR)/%.a)
 
-DEBUG_ENQ ?= 1
+DEBUG_ENQ ?= 0
 ENQ_NVCUFLAGS := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11 --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
 ENQ_NVCUFLAGS += ${GCOV_FLAGS:%=-Xcompiler %}
 ifeq ($(DEBUG_ENQ), 0)
