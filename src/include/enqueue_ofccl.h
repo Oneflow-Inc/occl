@@ -22,6 +22,38 @@
 // #define MAX_ASYNC_PANELS 32
 // #define MAX_ASYNC_OPS 128
 
+// #define RingBufferFull(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
+
+// #define RingBufferEmpty(B) ((B)->tail == (B)->head)
+
+#define RingBufferGetHead(B) ((B)->buffer + ((B)->head % (B)->length))
+
+#define RingBufferGetTail(B) ((B)->buffer + ((B)->tail % (B)->length))
+
+// #define RingBufferLogicHead(B) ((B)->head % (B)->length)
+
+#define RingBufferLogicTail(B) ((B)->tail % (B)->length)
+
+inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
+  volatile unsigned long long int *headPtr = &(sq->head);
+  return sq->tail + 1 - *headPtr == sq->length;
+}
+
+inline bool CpuCqEmpty(CQ *cq) { // cq->tail由GPU更新
+  volatile unsigned long long int *tailPtr = &(cq->tail);
+  return *tailPtr == cq->head;
+}
+
+inline unsigned long long int CpuLogicSqHead(SQ *sq) {
+  volatile unsigned long long int *headPtr = &(sq->head);
+  return *headPtr % sq->length;
+}
+
+inline unsigned long long int CpuLogicCqTail(CQ *cq) {
+  volatile unsigned long long int *tailPtr = &(cq->tail);
+  return *tailPtr % cq->length;
+}
+
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);

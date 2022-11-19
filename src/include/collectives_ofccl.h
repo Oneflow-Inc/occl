@@ -10,26 +10,6 @@
 // #define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
-#define tempPrintRound 100000
-
-#define RingBufferFull(B) ((((B)->tail + 1) % (B)->length) == ((B)->head % (B)->length))
-
-#define RingBufferEmpty(B) (((B)->tail % (B)->length) == ((B)->head % (B)->length))
-
-#define RingBufferGetHead(B) ((B)->buffer + ((B)->head % (B)->length))
-
-#define RingBufferGetTail(B) ((B)->buffer + ((B)->tail % (B)->length))
-
-#define RingBufferLogicHead(B) ((B)->head % (B)->length)
-
-#define RingBufferLogicTail(B) ((B)->tail % (B)->length)
-
-// 对于device和CPU上的commit分别进行不同的多线程保护。
-#define RingBuffer_commit_read(B, A) ((B)->head = ((B)->head + (A)) % (B)->length)
-
-#define RingBuffer_commit_write(B, A) ((B)->tail = ((B)->tail + (A)) % (B)->length)
-
-#define testBlkCnt4Coll(i) i % 2 == 0 ? daemonKernelGridDim.x : daemonKernelGridDim.x - 1
 
 // #define ARRAY_DEBUG_ON 1
 
@@ -65,11 +45,6 @@ typedef struct {
   pthread_mutex_t mutex;
 } SQ;
 
-inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
-  volatile unsigned long long int *headPtr = &(sq->head);
-  return (sq->tail + 1) % sq->length == *headPtr % sq->length;
-}
-
 typedef struct {
   int collId;
   int counter;
@@ -83,12 +58,6 @@ typedef struct {
   unsigned long long int frontier;
   pthread_mutex_t mutex;
 } CQ;
-
-
-inline bool CpuCqEmpty(CQ *cq) { // cq->tail由GPU更新
-  volatile unsigned long long int *tailPtr = &(cq->tail);
-  return *tailPtr % cq->length == cq->head % cq->length;
-}
 
 struct DevComm7WorkElem {
   struct ncclDevComm* comm;
