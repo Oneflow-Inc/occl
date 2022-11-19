@@ -819,10 +819,10 @@ void *startPoller(void *args) {
   }
 
   while (true) {
-    // 原来的while (rankCtx->poll_stop == 0)扩展成下边这样
     pthread_mutex_lock(&rankCtx->poller_mutex);
     if (rankCtx->poll_stop == 1) {
       pthread_mutex_unlock(&rankCtx->poller_mutex);
+      // TODO: 保证poller退出之前，cq已经空了。（应该没必要）
       break;
     }
     pthread_mutex_unlock(&rankCtx->poller_mutex);

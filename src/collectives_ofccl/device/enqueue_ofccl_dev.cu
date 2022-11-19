@@ -307,7 +307,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     *failCnt = 0;
     cancelQuit(globalVolunteerQuitCounter);
     if (target.quit) {
-      blkStatus.quit = 1;
+      blkStatus.quit = 1; // TODO: 从鲁棒性的角度来说，这里应该有机制保证看到这个quit sqe的时候，taskQ里的所有sqe也应该都处理完，才能退出。（不过目前可以先不管，可以由用户程序间接保证）；一个简单的保证方法是，加一个check。
       // if (bid == 0) {
         *finallyQuit = 1; // TODO: 为了最后每个block都保证打印统计信息，挺不优雅的
       // }
@@ -645,8 +645,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     // *(blkStatus.barrierCnt + 1 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
     if (tid == 0) {
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ7TidyTaskQ, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier), DevLogicSqHead(sq), DevLogicSqTail(sq));
-      // TODO: 这样是否可以保证不会有遗留？
+      // TODO: 可以在这里加一次对globalVolunteerQuitCounter的访问，保证这个小于gridDim.x才进入，但是这样会多一次访存，可能影响性能。同时这也不能100%保证没问题，而且现在的实测还没有出过问题
+      //（这只是更稳妥的做法，没啥实际意义，目前没发现这么做能抵御更多的边界情况）
+      // volatile int *observeGlobalVolunteerQuitCounterBeforeCheck = globalVolunteerQuitCounter;
+      // if (blkStatus.seenAllBlockWantToQuitCounter < 1 && *observeGlobalVolunteerQuitCounterBeforeCheck < gridDim.x) {
       if (blkStatus.seenAllBlockWantToQuitCounter < 1) {// 看到过一次大家都要退出，就不再去检查sq了。尽量不产生遗留的block
         checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit, globalVolunteerQuitCounter);
       }
@@ -661,7 +663,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           atomicAdd(globalVolunteerQuitCounter, 1); // 我自己第一次想quit的时候，投一票
         }
 
-        volatile int *observeGlobalVolunteerQuitCounter = globalVolunteerQuitCounter;
+        volatile int *observeGlobalVolunteerQuitCounter = globalVolunteerQuitCounter; // 为了及时看到大家的投票情况。
         if (*observeGlobalVolunteerQuitCounter == gridDim.x) {
           blkStatus.seenAllBlockWantToQuitCounter++; // 看看大家的投票结果
         } else {
