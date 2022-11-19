@@ -299,7 +299,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
           blkStatus.activeCollIds[new_numActiveColls++] = blkStatus.activeCollIds[i];
         }
       }
-      blkStatus.numActiveColls = new_numActiveColls;
+      blkStatus.numUndoneCollOfTaskQ = blkStatus.numActiveColls = new_numActiveColls;
     }
     return;
   } else {
@@ -348,7 +348,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
         blkStatus.activeCollIds[new_numActiveColls++] = newActiveCollId;
       }
       
-      blkStatus.numActiveColls = new_numActiveColls;
+      blkStatus.numUndoneCollOfTaskQ = blkStatus.numActiveColls = new_numActiveColls;
     }
   }
 }
@@ -437,6 +437,8 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   // 这里不再给blkStatus.numActiveColls减1，只给executing置0。
   // blkStatus.currActiveCollId = -1; // TODO: debug
 
+  --blkStatus.numUndoneCollOfTaskQ; // 一个优化，为了减少循环次数
+
   globalCollCtx4Blk7Coll->executing = 0;
   globalCollCtx4Blk7Coll->loadAgain = 0;
   globalCollCtx4Blk7Coll->saveCtx7Quit = 0;
@@ -495,9 +497,17 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
     return turn;
   }
 
+  int numSeenUndoneColls = 0;
+  int currNumUndoneCollOfTaskQ = blkStatus.numUndoneCollOfTaskQ; // 需要把这个值固定下来。blkStatus.numUndoneCollOfTaskQ会在下边的遍历中变化。
+
   // TODO: 循环展开的优化？
   int i = 0;
   for (; i < blkStatus.numActiveColls; i++) {
+
+    if (numSeenUndoneColls == currNumUndoneCollOfTaskQ) {
+      // *(blkStatus.barrierCnt + 2 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      break;
+    }
 
     // 下边这三个量是不变的。
     int collId = blkStatus.activeCollIds[i];
@@ -513,6 +523,9 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
       // *(blkStatus.barrierCnt + 3 + 10 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = globalCollCtx4Blk7Coll->executing;
       if (globalCollCtx4Blk7Coll->executing == 1) {
+
+        ++numSeenUndoneColls;
+
         // if (tid == 0) { // TODO: debug
           // blkStatus.currActiveCollId = collId; // 0号线程修改shmem，应该不用原子操作。
         // }
@@ -575,6 +588,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
     if (myGlobalBlkStatus->hasVolunteerQuitted == 0) {
       blkStatus.numActiveColls = 0;
+      blkStatus.numUndoneCollOfTaskQ = 0;
       // blkStatus.currActiveCollId = -1;// TODO: debug
       blkStatus.sqReadFrontier = 0;
       blkStatus.hasVolunteerQuitted = 0;
@@ -583,6 +597,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       blkStatus.totalVolunteerQuitCnt = 0;
     } else { // 从volunteer quit恢复回来
       blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
+      blkStatus.numUndoneCollOfTaskQ = myGlobalBlkStatus->numUndoneCollOfTaskQ;
       for (int i = 0; i < blkStatus.numActiveColls; ++i) {
         blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
       }
@@ -614,7 +629,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     for (int i = 0; i < TRAVERSE_TIMES; i++) {
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseTaskQ, (%d / %d), blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
       // __syncwarp(); // ！！！！！！为了打印log加的！！！！
-
+      if (blkStatus.numUndoneCollOfTaskQ == 0) {
+        break;
+      }
       turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
       
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, traverseTaskQ return, (%d / %d)", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES);
@@ -662,6 +679,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
           // 保存blkstatus
           myGlobalBlkStatus->numActiveColls = blkStatus.numActiveColls;
+          myGlobalBlkStatus->numUndoneCollOfTaskQ = blkStatus.numUndoneCollOfTaskQ;
           for (int i = 0; i < blkStatus.numActiveColls; ++i) {
             myGlobalBlkStatus->activeCollIds[i] = blkStatus.activeCollIds[i];
           }

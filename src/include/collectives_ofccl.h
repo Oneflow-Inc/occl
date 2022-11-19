@@ -6,8 +6,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define MAX_LENGTH 581LL // 581恰好不超0xc000 shmem的限制，这时在启用enqueue_ofccl_dev.cu里边全部3个shared数组的情况下，假如581不够用，可以考虑根据使用频率删除其中的几个；编译器会优化掉没使用的static shared声明，测量时候要注意。也可以考虑用constant
-// #define MAX_LENGTH 128 // TODO: 先搞小一点，开发之后再优化
+#define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
@@ -73,11 +72,12 @@ typedef struct {
 
 typedef struct {
   int numActiveColls;
-  int currActiveCollId;
+  // int currActiveCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
   int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   int activeCollIds[MAX_LENGTH];
+  int numUndoneCollOfTaskQ;
 
   // 考虑守护者kernel按需启停的时候这里的调整
   int quit;
