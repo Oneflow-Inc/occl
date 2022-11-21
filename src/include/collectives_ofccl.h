@@ -10,6 +10,7 @@
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
+// #define FUNC_FOR_DEBUG 1 // 这个宏是下边两个宏的基础
 // #define ARRAY_DEBUG_ON 1
 // #define SHOW_SWITCH_QUIT_CNT 1
 
@@ -161,7 +162,11 @@ typedef struct {
   ssize_t gridOffset4RingAllReduce;
 } CollCtx;
 
+#ifdef FUNC_FOR_DEBUG
 extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters);
+#else
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus);
+#endif
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

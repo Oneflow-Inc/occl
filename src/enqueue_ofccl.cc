@@ -667,8 +667,12 @@ static void cqDestroy(CQ *cq) {
     checkRuntime(cudaFreeHost(cq));
   }
 }
-// thread_local static int tempRound = 0;
+
+#ifdef FUNC_FOR_DEBUG
 static int cqRead(CQ *cq, CQE *target, int rank) {
+#else
+static int cqRead(CQ *cq, CQE *target) {
+#endif
   // pthread_mutex_lock(&cq->mutex);
 
   if (CpuCqEmpty(cq)) {
@@ -784,8 +788,10 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuitCounter;
   rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
   rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
+#ifdef FUNC_FOR_DEBUG
   rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
   rankCtx->argsptrs[14] = &rankCtx->collCounters;
+#endif
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -828,7 +834,11 @@ void *startPoller(void *args) {
     pthread_mutex_unlock(&rankCtx->poller_mutex);
 
     CQE target;
+#ifdef FUNC_FOR_DEBUG
     if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
+#else
+    if (cqRead(rankCtx->cq, &target) == -1) {
+#endif
       sched_yield();
     } else {
       int collId = target.collId;

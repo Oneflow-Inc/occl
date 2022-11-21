@@ -100,7 +100,11 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
+#ifdef FUNC_FOR_DEBUG
   void *argsptrs[15];
+#else
+  void *argsptrs[13];
+#endif
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -128,8 +132,11 @@ struct ofcclRankCtx {
   void *callbackArgList[MAX_LENGTH];
   CallbackFunc callbacks[MAX_LENGTH];
 
+#ifdef FUNC_FOR_DEBUG
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
+#endif
+
 #ifdef ARRAY_DEBUG_ON
   pthread_t barrierCntPrinter;
   BarrierCntPrinterArgs barrierCntPrinterArgs;
