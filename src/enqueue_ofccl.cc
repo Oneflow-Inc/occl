@@ -885,6 +885,7 @@ void *startKernel7SqObserver(void *args) {
   return nullptr;
 }
 
+#ifdef ARRAY_DEBUG_ON
 void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
   for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
     file << " (" << bid << ")";
@@ -1070,6 +1071,7 @@ void *startBarrierCntPrinter(void *args) {
   file.close();
   return nullptr;
 }
+#endif
 
 // 为了volunteer Quit进行的调整
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
@@ -1155,7 +1157,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
 
     rankCtx->hostCqes[collId].collId = collId;
     rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
