@@ -32,6 +32,28 @@
 
 namespace {
 
+bool StringToInteger(const std::string& str, int64_t* value) {
+  char* end;
+  int64_t v = std::strtoll(str.data(), &end, 10);
+  if (end == str.data()) {
+    return false;
+  } else {
+    *value = v;
+    return true;
+  }
+}
+
+static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_value) {
+  const char* env_p = std::getenv(env_var.c_str());
+  if (env_p == nullptr) { return default_value; }
+  int64_t value;
+  if (StringToInteger(env_p, &value)) {
+    return value;
+  } else {
+    return default_value;
+  }
+}
+
 static inline ncclResult_t ofcclGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
   if (info->comm->collNetSupport > 0) {
     // Translate ncclAvg and PreMulSum
@@ -1077,6 +1099,7 @@ void *startBarrierCntPrinter(void *args) {
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
+  int64_t SHOW_ALL_PREPARED_COLL = ParseIntegerFromEnv("SHOW_ALL_PREPARED_COLL", 0);
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1157,7 +1180,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+    if (SHOW_ALL_PREPARED_COLL) {
+      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+    }
 
     rankCtx->hostCqes[collId].collId = collId;
     rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
