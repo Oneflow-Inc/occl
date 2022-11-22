@@ -14,6 +14,7 @@
 #include "nccl.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cuda_runtime.h>
 #include <semaphore.h>
 #include <unordered_map>
@@ -69,6 +70,9 @@ typedef struct {
 
 typedef struct {
   ofcclRankCtx *rankCtx;
+  int64_t ARRAY_DEBUG;
+  int64_t SHOW_SWITCH_QUIT_CNT;
+  int64_t CQE_DEBUG;
 } ObserverThrdArgs;
 typedef struct {
   ofcclRankCtx *rankCtx;
@@ -130,10 +134,8 @@ struct ofcclRankCtx {
 
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
-#ifdef ARRAY_DEBUG_ON
   pthread_t barrierCntPrinter;
   BarrierCntPrinterArgs barrierCntPrinterArgs;
-#endif
 };
 
 

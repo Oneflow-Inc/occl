@@ -150,15 +150,7 @@ struct RunWork {
         RunWorkElement<Fn, T, RedOp, Algo, Proto>().run(&w->elems[e]);
         // if (threadIdx.x == 0) {
         //   // OFCCL_LOG(NCCL, "bid(%d), blockDim.x(%d), ncclWorkElem(%d)(with %d channels, %lu bytes each, lastChunkSize=%lu) done", blockIdx.x, blockDim.x, e, w->elems[e].nChannels, w->elems[e].count, w->elems[e].lastChunkSize);
-          
-        //   float *sendptr = (float *)w->elems[e].sendbuff;
-        //   float *ptr = (float *)w->elems[e].recvbuff;
-        //   int buffPrintNum = 5;
-        //   for (int i = 0; i < buffPrintNum; i++) {
-        //     OFCCL_LOG(OFCCL, "Blk<%d> Thrd<%d> sendbuff @ %p sendbuff[%d]=%lf", blockIdx.x, threadIdx.x, w->elems[e].sendbuff, i, *(sendptr + i));
-        //     OFCCL_LOG(OFCCL, "Blk<%d> Thrd<%d> recvbuff @ %p recvbuff[%d]=%lf", blockIdx.x, threadIdx.x, w->elems[e].recvbuff, i, *(ptr + i));
-        //   }
-        // }
+
       }
     }
   }

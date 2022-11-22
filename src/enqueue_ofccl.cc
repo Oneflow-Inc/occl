@@ -20,6 +20,7 @@
 #include "transport.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring> // std::memcpy
 #include <fstream>
@@ -31,6 +32,27 @@
 #include <semaphore.h>
 
 namespace {
+bool StringToInteger(const std::string& str, int64_t* value) {
+  char* end;
+  int64_t v = std::strtoll(str.data(), &end, 10);
+  if (end == str.data()) {
+    return false;
+  } else {
+    *value = v;
+    return true;
+  }
+}
+
+static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_value) {
+  const char* env_p = std::getenv(env_var.c_str());
+  if (env_p == nullptr) { return default_value; }
+  int64_t value;
+  if (StringToInteger(env_p, &value)) {
+    return value;
+  } else {
+    return default_value;
+  }
+}
 
 static inline ncclResult_t ofcclGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
   if (info->comm->collNetSupport > 0) {
@@ -766,7 +788,7 @@ end:
 }
 
 // volunteer quit 调整：这个函数调整成一个专门的cudaLaunchKernel的包装函数
-void startKernel(ofcclRankCtx *rankCtx) {
+void startKernel(ofcclRankCtx *rankCtx, long long int ARRAY_DEBUG, long long int SHOW_SWITCH_QUIT_CNT, long long int CQE_DEBUG) {
   checkRuntime(cudaSetDevice(rankCtx->rank));
   
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
@@ -844,6 +866,9 @@ void *startPoller(void *args) {
 
 void *startKernel7SqObserver(void *args) {
   ofcclRankCtx *rankCtx = ((ObserverThrdArgs *)args)->rankCtx;
+  int64_t ARRAY_DEBUG = ((ObserverThrdArgs *)args)->ARRAY_DEBUG;
+  int64_t SHOW_SWITCH_QUIT_CNT = ((ObserverThrdArgs *)args)->SHOW_SWITCH_QUIT_CNT;
+  int64_t CQE_DEBUG = ((ObserverThrdArgs *)args)->CQE_DEBUG;
 
   while (true) {
     pthread_mutex_lock(&rankCtx->observer_mutex);
@@ -879,13 +904,12 @@ void *startKernel7SqObserver(void *args) {
     if (*rankCtx->finallyQuit) {
       break;
     }
-    startKernel(rankCtx);
+    startKernel(rankCtx, ARRAY_DEBUG, SHOW_SWITCH_QUIT_CNT, CQE_DEBUG);
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, start Kernel", pthread_self(), rankCtx->rank);
   }
   return nullptr;
 }
 
-#ifdef ARRAY_DEBUG_ON
 void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
   for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
     file << " (" << bid << ")";
@@ -1071,12 +1095,14 @@ void *startBarrierCntPrinter(void *args) {
   file.close();
   return nullptr;
 }
-#endif
 
 // 为了volunteer Quit进行的调整
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
+  int64_t ARRAY_DEBUG = ParseIntegerFromEnv("ARRAY_DEBUG", 0);
+  int64_t CQE_DEBUG = ParseIntegerFromEnv("CQE_DEBUG", 0);
+  int64_t SHOW_SWITCH_QUIT_CNT = ParseIntegerFromEnv("SHOW_SWITCH_QUIT_CNT", 0);
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1222,10 +1248,10 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
 
-#ifdef ARRAY_DEBUG_ON
-  checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
-  checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
-#endif
+  if (ARRAY_DEBUG == 1) {
+    checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
+    checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
+  }
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
@@ -1238,14 +1264,13 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx };
+  rankCtx->observerThrdArgs = { rankCtx, ARRAY_DEBUG, SHOW_SWITCH_QUIT_CNT, CQE_DEBUG };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
-#ifdef ARRAY_DEBUG_ON
-  rankCtx->barrierCntPrinterArgs = { rankCtx };
-  pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
-#endif
-
+  if (ARRAY_DEBUG == 1) {
+    rankCtx->barrierCntPrinterArgs = { rankCtx };
+    pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
+  }
 end:
   return ret;
 }
@@ -1268,6 +1293,7 @@ NCCL_API(ncclResult_t, ofcclDestroy, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
+  int64_t ARRAY_DEBUG = ParseIntegerFromEnv("ARRAY_DEBUG", 0);
 
   pthread_mutex_lock(&rankCtx->observer_mutex);
   rankCtx->noMoreSqes = 1;
@@ -1285,9 +1311,9 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
 
-#ifdef ARRAY_DEBUG_ON
-  pthread_join(rankCtx->barrierCntPrinter, nullptr);
-#endif
+  if (ARRAY_DEBUG == 1) {
+    pthread_join(rankCtx->barrierCntPrinter, nullptr);
+  }
 
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
@@ -1297,10 +1323,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuitCounter));
 
-#ifdef ARRAY_DEBUG_ON
-  checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
-  checkRuntime(cudaFreeHost(rankCtx->collCounters));
-#endif
+  if (ARRAY_DEBUG == 1) {
+    checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
+    checkRuntime(cudaFreeHost(rankCtx->collCounters));
+  }
 
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
