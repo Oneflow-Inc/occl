@@ -640,24 +640,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   int checkSQ7TidyTaskQFailCnt = 0;
   while (true) {
-    for (int i = 0; i < TRAVERSE_TIMES; i++) {
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseTaskQ, (%d / %d), blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
-      // __syncwarp(); // ！！！！！！为了打印log加的！！！！
-      if (blkStatus.numUndoneCollOfTaskQ == 0) {
-        break;
-      }
-      turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
-
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, traverseTaskQ return, (%d / %d)", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES);
-      // __syncwarp(); // ！！！！！！为了打印log加的！！！！
-    }
-
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before checkSQ7TidyTaskQ, blkStatus.numActiveColls = %d, totalVolunteerQuitCnt = %llu", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls, blkStatus.totalVolunteerQuitCnt);
-
-    // *(blkStatus.barrierCnt + 0 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-    ofcclBarrier(6);
-    // *(blkStatus.barrierCnt + 1 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-
     if (tid == 0) {
       // TODO: 可以在这里加一次对globalVolunteerQuitCounter的访问，保证这个小于gridDim.x才进入，但是这样会多一次访存，可能影响性能。同时这也不能100%保证没问题，而且现在的实测还没有出过问题
       //（这只是更稳妥的做法，没啥实际意义，目前没发现这么做能抵御更多的边界情况）
@@ -728,8 +710,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     //   *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.activeCollIds[i];
     // }
 
-
-
     if (blkStatus.quit == 1) {
 #ifdef SHOW_SWITCH_QUIT_CNT
       if (*finallyQuit == 1) {
@@ -743,5 +723,19 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 #endif
       return;
     }
+
+    for (int i = 0; i < TRAVERSE_TIMES; i++) {
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before traverseTaskQ, (%d / %d), blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, i, TRAVERSE_TIMES, blkStatus.numActiveColls);
+      // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+      if (blkStatus.numUndoneCollOfTaskQ == 0) {
+        break;
+      }
+      turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn);
+    }
+
+    // *(blkStatus.barrierCnt + 0 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    ofcclBarrier(6);
+    // *(blkStatus.barrierCnt + 1 + 12 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+
   }
 }
