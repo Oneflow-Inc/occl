@@ -13,8 +13,6 @@
 
 #define CNT_BEFORE_QUIT 5
 
-// #define CQE_DEBUG 1
-
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
 
 #define DevRingBufferLogicFrontier(B, frontier) (frontier % (B)->length)

@@ -11,6 +11,7 @@
 #define QLen MAX_LENGTH
 
 // #define ARRAY_DEBUG_ON 1
+// #define CQE_DEBUG 1
 // #define SHOW_SWITCH_QUIT_CNT 1
 
 #define NUM_BARRIERS 18
@@ -78,7 +79,7 @@ typedef struct {
   int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   int activeCollIds[MAX_LENGTH];
-  int numUndoneCollOfTaskQ;
+  bool collExecuting[MAX_LENGTH];
 
   // 考虑守护者kernel按需启停的时候这里的调整
   int quit;
@@ -140,15 +141,11 @@ typedef struct {
 
   /* ****** 上下文 ****** */
 
-  // 代表当前的表项对应的集合通信被调用，还没有执行完成。初始化置0；发现了相应的sqe之后置1；执行完成后置0。
-  // 后边应该是需要16byte对齐，来使用oneShot的copyToShmem。
-  int executing;
-  // int numDoneThrds;
-
-  // TODO: for debug
-  unsigned long long sqeReadCnt;
-  unsigned long long cqeWriteCnt;
-  unsigned long long cqePrepareCnt;
+  #ifdef CQE_DEBUG
+    unsigned long long sqeReadCnt;
+    unsigned long long cqeWriteCnt;
+    unsigned long long cqePrepareCnt;
+  #endif
 
   // ****** Prims Simple ******
   int saveCtx7Quit;
