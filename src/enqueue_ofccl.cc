@@ -32,6 +32,28 @@
 
 namespace {
 
+bool StringToInteger(const std::string& str, int64_t* value) {
+  char* end;
+  int64_t v = std::strtoll(str.data(), &end, 10);
+  if (end == str.data()) {
+    return false;
+  } else {
+    *value = v;
+    return true;
+  }
+}
+
+static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_value) {
+  const char* env_p = std::getenv(env_var.c_str());
+  if (env_p == nullptr) { return default_value; }
+  int64_t value;
+  if (StringToInteger(env_p, &value)) {
+    return value;
+  } else {
+    return default_value;
+  }
+}
+
 static inline ncclResult_t ofcclGetCollNetSupport(struct ncclInfo* info, int* collNetTypeSupport) {
   if (info->comm->collNetSupport > 0) {
     // Translate ncclAvg and PreMulSum
@@ -889,7 +911,11 @@ void *startKernel7SqObserver(void *args) {
 void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
   for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
     file << " (" << bid << ")";
-    for (int tid = 0; tid < rankCtx->daemonKernelBlockDim.x; tid += WARP_SIZE) { //WARP_SIZE
+    int NumPrintThrds = rankCtx->daemonKernelBlockDim.x;
+    if (barrierId == 5) {
+      NumPrintThrds = 1;
+    }
+    for (int tid = 0; tid < NumPrintThrds; tid += WARP_SIZE) { //WARP_SIZE
       file << " <" << tid << ">[";
       int printCnt = 2;
       if (barrierId == 11) {
@@ -994,8 +1020,8 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
 
-    // file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 11);
+    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
+    printBarrierCnt(rankCtx, file, 11);
 
     // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
     // printBarrierCnt(rankCtx, file, 10);
@@ -1027,12 +1053,13 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " daemonKernel # start & # quit 5:" << std::endl;
     printBarrierCnt(rankCtx, file, 5);
 
-    // for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-    //   file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
-    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalVolunteerQuitCnt=" << 
-    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
-    //     *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
-    // }
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSwitchCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalVolunteerQuitCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalUnprogressedQuitCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
+    }
 
 
     // for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
@@ -1077,6 +1104,7 @@ void *startBarrierCntPrinter(void *args) {
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
+  int64_t SHOW_ALL_PREPARED_COLL = ParseIntegerFromEnv("SHOW_ALL_PREPARED_COLL", 0);
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1157,9 +1185,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->gridDim4Coll[collId] = params->gridDim;
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
-    #ifdef ARRAY_DEBUG
+    if (SHOW_ALL_PREPARED_COLL) {
       OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
-    #endif
+    }
 
     rankCtx->hostCqes[collId].collId = collId;
     rankCtx->hostBlkCount4Coll[collId] = rankCtx->gridDim4Coll[collId].x;
@@ -1299,10 +1327,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuitCounter));
 
-    #ifdef ARRAY_DEBUG
-      checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
-      checkRuntime(cudaFreeHost(rankCtx->collCounters));
-    #endif
+  #ifdef ARRAY_DEBUG
+    checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
+    checkRuntime(cudaFreeHost(rankCtx->collCounters));
+  #endif
 
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
