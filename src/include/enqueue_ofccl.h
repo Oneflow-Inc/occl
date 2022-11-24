@@ -130,7 +130,7 @@ struct ofcclRankCtx {
 
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
-#ifdef ARRAY_DEBUG_ON
+#ifdef ARRAY_DEBUG
   pthread_t barrierCntPrinter;
   BarrierCntPrinterArgs barrierCntPrinterArgs;
 #endif

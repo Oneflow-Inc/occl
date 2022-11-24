@@ -10,6 +10,7 @@
 // 跑几次 traverseTaskQ 后才去 checkSQ7TidyTaskQ
 #define TRAVERSE_TIMES 10
 #define TOLERANT_FAIL_CHECK_SQ_CNT 500
+#define TOLERANT_UNPROGRESSED_CNT 5000
 
 #define CNT_BEFORE_QUIT 5
 

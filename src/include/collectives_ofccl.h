@@ -10,8 +10,10 @@
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
-// #define ARRAY_DEBUG_ON 1
-// #define SHOW_SWITCH_QUIT_CNT 1
+// #define ARRAY_DEBUG 1
+// #define SHOW_SWITCH_CNT 1
+// #define SHOW_QUIT_CNT 1
+// #define SHOW_RUNNING_CNT 1
 
 #define NUM_BARRIERS 18
 #define BARCNT_INNER_SIZE 4
@@ -85,12 +87,13 @@ typedef struct {
   bool iWantToQuit;
   int seenAllBlockWantToQuitCounter;
 
-#ifdef SHOW_SWITCH_QUIT_CNT
+#ifdef SHOW_QUIT_CNT
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
   unsigned long long int totalVolunteerQuitCnt; // 同上
+  unsigned long long int totalUnprogressedQuitCnt;
 #endif
 
-#ifdef ARRAY_DEBUG_ON
+#ifdef ARRAY_DEBUG
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters;
 #endif
