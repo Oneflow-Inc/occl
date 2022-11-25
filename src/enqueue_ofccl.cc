@@ -810,7 +810,7 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[14] = &rankCtx->collCounters;
 
   struct cudaLaunchParams daemonKernelParam;
-  daemonKernelParam.func = (void *)daemonKernel;
+  daemonKernelParam.func = (void *)daemonKernel<1>;
   daemonKernelParam.gridDim = rankCtx->daemonKernelGridDim;
   daemonKernelParam.blockDim = rankCtx->daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
