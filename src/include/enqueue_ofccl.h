@@ -69,6 +69,17 @@ typedef struct {
 
 typedef struct {
   ofcclRankCtx *rankCtx;
+  long long int TRAVERSE_TIMES;
+  long long int TOLERANT_FAIL_CHECK_SQ_CNT;
+  long long int CNT_BEFORE_QUIT;
+  long long int TOLERANT_UNPROGRESSED_CNT;
+  long long int BASE_CTX_SWITCH_THRESHOLD;
+  long long int ARRAY_DEBUG;
+  long long int SHOW_QUIT_CNT;
+  long long int SHOW_SWITCH_CNT;
+  long long int SHOW_RUNNING_CNT;
+  long long int CQE_DEBUG_RANK_X;
+  long long int CQE_DEBUG_ALL_RANK;
 } ObserverThrdArgs;
 typedef struct {
   ofcclRankCtx *rankCtx;
@@ -100,7 +111,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[15];
+  void *argsptrs[26];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -130,10 +141,8 @@ struct ofcclRankCtx {
 
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
-#ifdef ARRAY_DEBUG
   pthread_t barrierCntPrinter;
   BarrierCntPrinterArgs barrierCntPrinterArgs;
-#endif
 };
 
 

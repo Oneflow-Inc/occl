@@ -94,7 +94,7 @@ class Primitives<
         connStepCache = *connStepPtr;
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
-        if (ctxSwitchCounter++ >= CtxSwitchThreshold) {
+        if (ctxSwitchCounter++ >= sharedCollCtx.ctxSwitchThreshold) {
           sharedCollCtx.saveCtx7Quit = 1;
           sharedCollCtx.loadAgain = 1;
 

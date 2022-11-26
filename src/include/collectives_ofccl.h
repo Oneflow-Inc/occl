@@ -10,23 +10,10 @@
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
-// #define ARRAY_DEBUG 1
-// #define SHOW_QUIT_CNT 1
-// #define SHOW_SWITCH_CNT 1
-// #define SHOW_RUNNING_CNT 1
-
-#define NUM_BARRIERS 18
-#define BARCNT_INNER_SIZE 4
+#define NUM_BARRIERS 30
+#define BARCNT_INNER_SIZE 10
 #define PrintTestQNum 10
-
-#define COLL_COUNTER_INNER_SIZE 10
-
-// static thread_local int CPUSleep = 0;
-// __device__ static thread_local int GPUSleep = 0;
-// static thread_local int CpuSleepUs = 1e6;
-// __device__ static thread_local clock_t GpuSpin = 1e9 * 2;
-// #define GpuSpin4Bid(i) (1 + i) * 1e9
-// #define GpuSpin4BidSmall(i) (6 + i) * 1e6
+#define COLL_COUNTER_INNER_SIZE 20
 
 // SQ read by device, written by host; CQ read by host, written by device;
 typedef struct {
@@ -87,16 +74,12 @@ typedef struct {
   bool iWantToQuit;
   int seenAllBlockWantToQuitCounter;
 
-#ifdef SHOW_QUIT_CNT
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
   unsigned long long int totalVolunteerQuitCnt; // 同上
   unsigned long long int totalUnprogressedQuitCnt;
-#endif
 
-#ifdef ARRAY_DEBUG
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters;
-#endif
 } BlkStatus;
 
 typedef struct {
@@ -143,9 +126,9 @@ typedef struct {
 
   /* ****** 上下文 ****** */
 
-  unsigned long long sqeReadCnt;
-  unsigned long long cqeWriteCnt;
-  unsigned long long cqePrepareCnt;
+  unsigned long long int sqeReadCnt;
+  unsigned long long int cqeWriteCnt;
+  unsigned long long int cqePrepareCnt;
 
   // ****** Prims Simple ******
   int saveCtx7Quit;
@@ -156,11 +139,12 @@ typedef struct {
   // ****** Ring AllReduce ******
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
+  unsigned long long int ctxSwitchThreshold;
 } CollCtx;
 
-template<int DUMMY>
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_FAIL_CHECK_SQ_CNT, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t ARRAY_DEBUG, const int64_t SHOW_QUIT_CNT, const int64_t SHOW_SWITCH_CNT, const int64_t SHOW_RUNNING_CNT, const int64_t CQE_DEBUG_RANK_X, const int64_t CQE_DEBUG_ALL_RANK);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
+
 
 // ***** 保留FUNC_INDEX *****
 

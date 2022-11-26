@@ -20,6 +20,7 @@
 #include "transport.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring> // std::memcpy
 #include <fstream>
@@ -32,9 +33,9 @@
 
 namespace {
 
-bool StringToInteger(const std::string& str, int64_t* value) {
+bool StringToInteger(const std::string& str, long long int* value) {
   char* end;
-  int64_t v = std::strtoll(str.data(), &end, 10);
+  long long int v = std::strtoll(str.data(), &end, 10);
   if (end == str.data()) {
     return false;
   } else {
@@ -43,10 +44,10 @@ bool StringToInteger(const std::string& str, int64_t* value) {
   }
 }
 
-static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_value) {
+static long long int ParseIntegerFromEnv(const std::string& env_var, long long int default_value) {
   const char* env_p = std::getenv(env_var.c_str());
   if (env_p == nullptr) { return default_value; }
-  int64_t value;
+  long long int value;
   if (StringToInteger(env_p, &value)) {
     return value;
   } else {
@@ -788,7 +789,7 @@ end:
 }
 
 // volunteer quit 调整：这个函数调整成一个专门的cudaLaunchKernel的包装函数
-void startKernel(ofcclRankCtx *rankCtx) {
+void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   checkRuntime(cudaSetDevice(rankCtx->rank));
   
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
@@ -809,8 +810,20 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
   rankCtx->argsptrs[14] = &rankCtx->collCounters;
 
+  rankCtx->argsptrs[15] = &args->TRAVERSE_TIMES;
+  rankCtx->argsptrs[16] = &args->TOLERANT_FAIL_CHECK_SQ_CNT;
+  rankCtx->argsptrs[17] = &args->CNT_BEFORE_QUIT;
+  rankCtx->argsptrs[18] = &args->TOLERANT_UNPROGRESSED_CNT;
+  rankCtx->argsptrs[19] = &args->BASE_CTX_SWITCH_THRESHOLD;
+  rankCtx->argsptrs[20] = &args->ARRAY_DEBUG;
+  rankCtx->argsptrs[21] = &args->SHOW_QUIT_CNT;
+  rankCtx->argsptrs[22] = &args->SHOW_SWITCH_CNT;
+  rankCtx->argsptrs[23] = &args->SHOW_RUNNING_CNT;
+  rankCtx->argsptrs[24] = &args->CQE_DEBUG_RANK_X;
+  rankCtx->argsptrs[25] = &args->CQE_DEBUG_ALL_RANK;
+
   struct cudaLaunchParams daemonKernelParam;
-  daemonKernelParam.func = (void *)daemonKernel<1>;
+  daemonKernelParam.func = (void *)daemonKernel;
   daemonKernelParam.gridDim = rankCtx->daemonKernelGridDim;
   daemonKernelParam.blockDim = rankCtx->daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
@@ -901,13 +914,12 @@ void *startKernel7SqObserver(void *args) {
     if (*rankCtx->finallyQuit) {
       break;
     }
-    startKernel(rankCtx);
+    startKernel(rankCtx, (ObserverThrdArgs *)args);
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, start Kernel", pthread_self(), rankCtx->rank);
   }
   return nullptr;
 }
 
-#ifdef ARRAY_DEBUG
 void printBarrierCnt(ofcclRankCtx *rankCtx, std::ofstream &file, int barrierId) {
   for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
     file << " (" << bid << ")";
@@ -1103,13 +1115,31 @@ void *startBarrierCntPrinter(void *args) {
   file.close();
   return nullptr;
 }
-#endif
 
 // 为了volunteer Quit进行的调整
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
-  int64_t SHOW_ALL_PREPARED_COLL = ParseIntegerFromEnv("SHOW_ALL_PREPARED_COLL", 0);
+  // 这两个目前搞不定
+  // long long int MAX_LENGTH = ParseIntegerFromEnv("MAX_LENGTH", 1000);
+  // long long int QLen = MAX_LENGTH; 
+
+  // 超参数：
+  long long int TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
+  long long int TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
+  long long int CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
+  long long int TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
+  long long int BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
+
+  // debug flag
+  long long int ARRAY_DEBUG = ParseIntegerFromEnv("ARRAY_DEBUG", 0);
+  long long int SHOW_QUIT_CNT = ParseIntegerFromEnv("SHOW_QUIT_CNT", 0);
+  long long int SHOW_SWITCH_CNT = ParseIntegerFromEnv("SHOW_SWITCH_CNT", 0);
+  long long int SHOW_RUNNING_CNT = ParseIntegerFromEnv("SHOW_RUNNING_CNT", 0);
+  long long int CQE_DEBUG_RANK_X = ParseIntegerFromEnv("CQE_DEBUG_RANK_X", -1);
+  long long int CQE_DEBUG_ALL_RANK = ParseIntegerFromEnv("CQE_DEBUG_ALL_RANK", 0);
+
+  long long int SHOW_ALL_PREPARED_COLL = ParseIntegerFromEnv("SHOW_ALL_PREPARED_COLL", 0);
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1257,10 +1287,10 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
 
-  #ifdef ARRAY_DEBUG
+  if (ARRAY_DEBUG == 1) {
     checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
     checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
-  #endif
+  }
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
@@ -1273,27 +1303,42 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx };
+  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, ARRAY_DEBUG, SHOW_QUIT_CNT, SHOW_SWITCH_CNT, SHOW_RUNNING_CNT, CQE_DEBUG_RANK_X, CQE_DEBUG_ALL_RANK };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
-  #ifdef ARRAY_DEBUG
+  if (ARRAY_DEBUG == 1) {
     rankCtx->barrierCntPrinterArgs = { rankCtx };
     pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
-  #endif
+  }
 
 end:
   return ret;
 }
 
 // !!!!!!!!!!!!!!!!! ALMOST DEPRECATED !!!!!!!!!!!!!!!!!
+// TODO: 试试看有没有保留的必要。
 NCCL_API(ncclResult_t, ofcclPrepareDone, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   // ***** ncclGroupEnd() *****
   ncclResult_t ret = ncclSuccess;
+  long long int TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
+  long long int TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
+  long long int CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
+  long long int TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
+  long long int BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
+
+  // debug flag
+  long long int ARRAY_DEBUG = ParseIntegerFromEnv("ARRAY_DEBUG", 0);
+  long long int SHOW_QUIT_CNT = ParseIntegerFromEnv("SHOW_QUIT_CNT", 0);
+  long long int SHOW_SWITCH_CNT = ParseIntegerFromEnv("SHOW_SWITCH_CNT", 0);
+  long long int SHOW_RUNNING_CNT = ParseIntegerFromEnv("SHOW_RUNNING_CNT", 0);
+  long long int CQE_DEBUG_RANK_X = ParseIntegerFromEnv("CQE_DEBUG_RANK_X", -1);
+  long long int CQE_DEBUG_ALL_RANK = ParseIntegerFromEnv("CQE_DEBUG_ALL_RANK", 0);
+  
+  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, ARRAY_DEBUG, SHOW_QUIT_CNT, SHOW_SWITCH_CNT, SHOW_RUNNING_CNT, CQE_DEBUG_RANK_X, CQE_DEBUG_ALL_RANK };
 
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
-
-  startKernel(rankCtx);
+  startKernel(rankCtx, &observerThrdArgs);
 
 end:
   return ret;
@@ -1303,6 +1348,7 @@ NCCL_API(ncclResult_t, ofcclDestroy, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
+  int64_t ARRAY_DEBUG = ParseIntegerFromEnv("ARRAY_DEBUG", 0);
 
   pthread_mutex_lock(&rankCtx->observer_mutex);
   rankCtx->noMoreSqes = 1;
@@ -1320,9 +1366,9 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
 
-  #ifdef ARRAY_DEBUG
+  if (ARRAY_DEBUG == 1) {
     pthread_join(rankCtx->barrierCntPrinter, nullptr);
-  #endif
+  }
 
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
@@ -1332,10 +1378,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   checkRuntime(cudaFree(rankCtx->globalVolunteerQuitCounter));
 
-  #ifdef ARRAY_DEBUG
+  if (ARRAY_DEBUG == 1) {
     checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
     checkRuntime(cudaFreeHost(rankCtx->collCounters));
-  #endif
+  }
 
   sqDestroy(rankCtx->sq);
   cqDestroy(rankCtx->cq);
