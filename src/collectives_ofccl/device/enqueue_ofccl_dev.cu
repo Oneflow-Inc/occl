@@ -508,7 +508,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
-  #ifdef ARRAY_DEBUG
+  #ifdef ARRAY_DEBUG // TODO: 这里是有问题的。
   #ifdef SHOW_RUNNING_CNT
     *(blkStatus.barrierCnt + 0 + 11 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     if (blkStatus.numActiveColls == 0) {
