@@ -788,7 +788,7 @@ end:
 }
 
 // volunteer quit 调整：这个函数调整成一个专门的cudaLaunchKernel的包装函数
-void startKernel(ofcclRankCtx *rankCtx) {
+void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   checkRuntime(cudaSetDevice(rankCtx->rank));
   
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
@@ -808,6 +808,12 @@ void startKernel(ofcclRankCtx *rankCtx) {
   rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
   rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
   rankCtx->argsptrs[14] = &rankCtx->collCounters;
+  
+  rankCtx->argsptrs[15] = &args->TRAVERSE_TIMES;
+  rankCtx->argsptrs[16] = &args->TOLERANT_FAIL_CHECK_SQ_CNT;
+  rankCtx->argsptrs[17] = &args->CNT_BEFORE_QUIT;
+  rankCtx->argsptrs[18] = &args->TOLERANT_UNPROGRESSED_CNT;
+  rankCtx->argsptrs[19] = &args->BASE_CTX_SWITCH_THRESHOLD;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -901,7 +907,7 @@ void *startKernel7SqObserver(void *args) {
     if (*rankCtx->finallyQuit) {
       break;
     }
-    startKernel(rankCtx);
+    startKernel(rankCtx, (ObserverThrdArgs *)args);
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, start Kernel", pthread_self(), rankCtx->rank);
   }
   return nullptr;
@@ -1111,6 +1117,17 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
   int64_t SHOW_ALL_PREPARED_COLL = ParseIntegerFromEnv("SHOW_ALL_PREPARED_COLL", 0);
   
+  // 超参数：
+  int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
+  int64_t TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
+  int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
+  int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
+  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
+
+  if (SHOW_ALL_PREPARED_COLL) {
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
+  }
+  
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
   // int front_of_panel = -1;
@@ -1273,7 +1290,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx };
+  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
   #ifdef ARRAY_DEBUG
@@ -1291,9 +1308,16 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   // ***** ncclGroupEnd() *****
   ncclResult_t ret = ncclSuccess;
 
+  int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
+  int64_t TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
+  int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
+  int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
+  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
+  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
+
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 
-  startKernel(rankCtx);
+  startKernel(rankCtx, &observerThrdArgs);
 
 end:
   return ret;
