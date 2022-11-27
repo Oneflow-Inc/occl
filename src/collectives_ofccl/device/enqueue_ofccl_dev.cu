@@ -269,11 +269,11 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
   return turn;
 }
 
-static __device__ void logTaskQ(int rank=-1) {
+static __device__ void logTaskQ(int thrdCudaDev, int rank=-1) {
   if (rank == -1) {
-    rank = sharedCollCtx.rank;
+    rank = thrdCudaDev;
   }
-  OFCCL_LOG_RANK_X_SH(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", sharedCollCtx.rank, blockIdx.x, threadIdx.x, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
+  OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", sharedCollCtx.rank, blockIdx.x, threadIdx.x, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
 }
 
 // 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
@@ -359,8 +359,10 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       }
 
       blkStatus.numActiveColls = new_numActiveColls;
-      #ifdef CQE_DEBUG_RANK_X
-        logTaskQ(CQE_DEBUG_RANK_X);
+      #ifdef CQE_DEBUG_ALL_RANK
+        logTaskQ(thrdCudaDev, -1);
+      #elif defined(CQE_DEBUG_RANK_X)
+        logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
       #endif
     }
   }
@@ -694,8 +696,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           }
         }
         blkStatus.numActiveColls = new_numActiveColls;
-        // #ifdef CQE_DEBUG_RANK_X
-        //   logTaskQ(CQE_DEBUG_RANK_X);
+        // #ifdef CQE_DEBUG_ALL_RANK
+        //   logTaskQ(thrdCudaDev, -1);
+        // #elif defined(CQE_DEBUG_RANK_X)
+        //   logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
         // #endif
       }
       ofcclBarrier(10);

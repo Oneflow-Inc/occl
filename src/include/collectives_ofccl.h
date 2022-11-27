@@ -21,9 +21,9 @@
 #define PrintTestQNum 10
 #define COLL_COUNTER_INNER_SIZE 10
 
-#define CQE_DEBUG_RANK_X 0
+// #define CQE_DEBUG_RANK_X 0
 
-// #define CQE_DEBUG_ALL_RANK 1
+#define CQE_DEBUG_ALL_RANK 1
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;

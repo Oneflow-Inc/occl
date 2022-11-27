@@ -1123,10 +1123,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
-
-  if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
-  }
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1298,6 +1294,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
   #endif
 
+  if (SHOW_ALL_PREPARED_COLL) {
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
+  }
 end:
   return ret;
 }
