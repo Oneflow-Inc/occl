@@ -683,7 +683,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         int new_numActiveColls = 0;
         for (int i = 0; i < blkStatus.numActiveColls; ++i) {
           int collIdInTaskQ = blkStatus.activeCollIds[i];
-          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
+          OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
           if (blkStatus.collStatus[collIdInTaskQ] == -1) { // 不应该有1 的存在了，只有-1或者2
             unprogressedCnt += 1;
             blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ;
@@ -696,11 +696,11 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           }
         }
         blkStatus.numActiveColls = new_numActiveColls;
-        // #ifdef CQE_DEBUG_ALL_RANK
-        //   logTaskQ(thrdCudaDev, -1);
-        // #elif defined(CQE_DEBUG_RANK_X)
-        //   logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
-        // #endif
+        #ifdef CQE_DEBUG_ALL_RANK
+          logTaskQ(thrdCudaDev, -1);
+        #elif defined(CQE_DEBUG_RANK_X)
+          logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
+        #endif
       }
       ofcclBarrier(10);
     }
