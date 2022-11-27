@@ -69,17 +69,11 @@ typedef struct {
 
 typedef struct {
   ofcclRankCtx *rankCtx;
-  long long int TRAVERSE_TIMES;
-  long long int TOLERANT_FAIL_CHECK_SQ_CNT;
-  long long int CNT_BEFORE_QUIT;
-  long long int TOLERANT_UNPROGRESSED_CNT;
-  long long int BASE_CTX_SWITCH_THRESHOLD;
-  long long int ARRAY_DEBUG;
-  long long int SHOW_QUIT_CNT;
-  long long int SHOW_SWITCH_CNT;
-  long long int SHOW_RUNNING_CNT;
-  long long int CQE_DEBUG_RANK_X;
-  long long int CQE_DEBUG_ALL_RANK;
+  int64_t TRAVERSE_TIMES;
+  int64_t TOLERANT_FAIL_CHECK_SQ_CNT;
+  int64_t CNT_BEFORE_QUIT;
+  int64_t TOLERANT_UNPROGRESSED_CNT;
+  int64_t BASE_CTX_SWITCH_THRESHOLD;
 } ObserverThrdArgs;
 typedef struct {
   ofcclRankCtx *rankCtx;
