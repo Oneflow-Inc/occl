@@ -88,7 +88,7 @@ namespace {
 
       // k-2 steps: reduce and copy to next GPU
       if (currentStep < nranks - 1) { // 2卡不执行这里。
-        ofcclBarrier(11, nthreads);;
+        ofcclBarrier(12, nthreads);;
         for (int j=currentStep + 1; j<nranks; ++j) { // j需要根据currentStep进行相应调整。原来j初值是2.
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
@@ -135,7 +135,7 @@ namespace {
 
       // k-2 steps: copy to next GPU
       if (currentStep < 2 * nranks - 2) { // 2卡不执行这里
-        ofcclBarrier(11, nthreads);;
+        ofcclBarrier(13, nthreads);;
         for (int j=currentStep-nranks+1; j<nranks-1; ++j) { // j需要根据currentStep进行相应调整。原来j初值是1. 第一次进入时，currentStep=nranks, j=1
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
@@ -159,7 +159,7 @@ namespace {
 
       // Make final copy from buffer to dest.
       if (currentStep < 2 * nranks - 1) {
-        ofcclBarrier(11, nthreads);;
+        ofcclBarrier(14, nthreads);;
         chunk = modRanks(ringIx + 1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
@@ -202,7 +202,7 @@ namespace {
     
     *(blkStatus.barrierCnt + 1 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
-    OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> leave runRing", sharedCollCtx.rank, blockIdx.x, tid);
+    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> leave runRing", sharedCollCtx.rank, blockIdx.x, tid);
   }
 
 

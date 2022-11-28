@@ -605,6 +605,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     blkStatus.seenAllBlockWantToQuitCounter = 0;
     blkStatus.currLoadedCollId = -1;
 
+    sharedCollCtx.saveCtx7Quit = 0;
+
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;
       blkStatus.collCounters = collCounters;
