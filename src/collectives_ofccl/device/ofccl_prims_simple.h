@@ -99,9 +99,9 @@ class Primitives<
           if ((flags & (Recv*RoleWaitRecv))) {
             OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step + StepPerSlice);
           }
-          // // if ((flags & (Send*RoleWaitSend))) {
-          // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          // // }
+          if ((flags & (Send*RoleWaitSend))) {
+            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          }
           __syncwarp(); // ！！！！！！为了打印log加的！
           
           return; // 使用return，而不是break。
@@ -144,9 +144,9 @@ class Primitives<
     if ((flags & (Recv*RoleWaitRecv))) {
       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step);
     }
-    // // if ((flags & (Send*RoleWaitSend))) {
-    // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
-    // // }
+    if ((flags & (Send*RoleWaitSend))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    }
     __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
@@ -157,9 +157,9 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    // // if ((flags & (Recv*RolePostRecv))) {
-    // //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
-    // // }
+    if ((flags & (Recv*RolePostRecv))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
+    }
     if ((flags & (Send*RolePostSend))) {
       OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
     }
@@ -235,7 +235,7 @@ class Primitives<
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
           sharedCollCtx.groups[group].dsts[0] = userBuff + dstIx + offset;
           
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx.rank, blockIdx.x, tid);
+        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx.rank, blockIdx.x, tid);
         
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
@@ -245,9 +245,10 @@ class Primitives<
             sharedCollCtx.offset4SimpleGenericOp = offset;
             // __threadfence_block();
           }
-          // *(blkStatus.barrierCnt + 0 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> barrierCnt 0", sharedCollCtx.rank, blockIdx.x, tid);
+          *(blkStatus.barrierCnt + 0 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           barrier(); // 我们在这里直接返回，跳过数据搬运，所以把相应的barrier调用了。
-          // *(blkStatus.barrierCnt + 1 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          *(blkStatus.barrierCnt + 1 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           return;
         }
         if (DirectRecv && sharedCollCtx.groups[group].srcs[0] == sharedCollCtx.groups[group].dsts[0]) {
@@ -276,9 +277,10 @@ class Primitives<
              Send*fan.nsend()+Dst, (T**)sharedCollCtx.groups[group].dsts,
              sliceSize);
         }
-        // *(blkStatus.barrierCnt + 0 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+        OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice = %d, offset = %d", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
+        *(blkStatus.barrierCnt + 0 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         barrier(); // This barrier has a counterpart in following loop
-        // *(blkStatus.barrierCnt + 1 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+        *(blkStatus.barrierCnt + 1 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         // if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
         // __syncwarp();
         // postPeer<Recv, Send>();
@@ -298,9 +300,11 @@ class Primitives<
       //   // since we've exited the loop above.
       //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       // }
-      // *(blkStatus.barrierCnt + 0 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+
+      OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice = %d, offset = %d", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
+      *(blkStatus.barrierCnt + 0 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       barrier(); // Has couterpart in preceding worker-only loop.
-      // *(blkStatus.barrierCnt + 1 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      *(blkStatus.barrierCnt + 1 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       if (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1) { // 需要在barrier之后才访问shmem。
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }
@@ -574,9 +578,7 @@ class Primitives<
   __device__ ~Primitives() {
     // Ensure sharedCollCtx.groups[].send/recvConns are available
     if (!(flags & ThreadsSynced)) {
-      // *(blkStatus.barrierCnt + 0 + 3 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       barrier();
-      // *(blkStatus.barrierCnt + 1 + 3 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     }
     // Save steps for the next operation
     if (flags & (RolePostSend|RolePostRecv)) {
@@ -584,19 +586,20 @@ class Primitives<
       conns[index]->step = step;
     }
     
-    // if ((flags & (RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
-    // }
-    // if ((flags & (RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
-    // }
-    // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+    if ((flags & (RolePostRecv))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
+    }
+    if ((flags & (RolePostSend))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
+    }
+    OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> barrierCnt 4", sharedCollCtx.rank, blockIdx.x, tid);
+    __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
     // Make sure all threads are done writing back conn->step and done using
     // sharedCollCtx.groups[group]
-    // *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     barrier();
-    // *(blkStatus.barrierCnt + 1 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    *(blkStatus.barrierCnt + 1 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   }
 
   __device__ void moveDataPtrs(intptr_t delta) {

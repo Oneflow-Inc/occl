@@ -1008,20 +1008,17 @@ void *startBarrierCntPrinter(void *args) {
       }
     }
   
-    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 0);
+    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
+    printBarrierCnt(rankCtx, file, 0);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 1);
+    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
+    printBarrierCnt(rankCtx, file, 1);
     
-    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 2);
+    file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
+    printBarrierCnt(rankCtx, file, 2);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 3);
-
-    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 4);
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
+    printBarrierCnt(rankCtx, file, 4);
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
@@ -1041,14 +1038,20 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:" << std::endl;
     // printBarrierCnt(rankCtx, file, 16);
 
-    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 14);
+    file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
+    printBarrierCnt(rankCtx, file, 14);
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:" << std::endl;
     // printBarrierCnt(rankCtx, file, 13);
 
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:" << std::endl;
     // printBarrierCnt(rankCtx, file, 7);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ enter manipulate TaskQ after traverse 17:" << std::endl;
+    printBarrierCnt(rankCtx, file, 17);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ leave manipulate TaskQ after traverse 18:" << std::endl;
+    printBarrierCnt(rankCtx, file, 18);
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
     // printBarrierCnt(rankCtx, file, 12);
