@@ -269,11 +269,11 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
   return turn;
 }
 
-static __device__ void logTaskQ(int thrdCudaDev, int rank=-1) {
+static __device__ void logTaskQ(int caller, int thrdCudaDev, int rank=-1) {
   if (rank == -1) {
     rank = thrdCudaDev;
   }
-  OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", sharedCollCtx.rank, blockIdx.x, threadIdx.x, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
+  OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, caller = %d, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", sharedCollCtx.rank, blockIdx.x, threadIdx.x, caller, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
 }
 
 // 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
@@ -328,6 +328,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       // }
 
       blkStatus.collStatus[newActiveCollId] = 1;
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, set blkStatus.collStatus[%d]=1;", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId);
       
       #ifdef CQE_DEBUG_RANK_X
         OFCCL_LOG_RANK_X(OFCCL_CQE, CQE_DEBUG_RANK_X, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicSqHead(sq), DevLogicSqTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.sqReadFrontier));
@@ -360,9 +361,9 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
       blkStatus.numActiveColls = new_numActiveColls;
       #ifdef CQE_DEBUG_ALL_RANK
-        logTaskQ(thrdCudaDev, -1);
+        logTaskQ(0, thrdCudaDev, -1);
       #elif defined(CQE_DEBUG_RANK_X)
-        logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
+        logTaskQ(0, thrdCudaDev, CQE_DEBUG_RANK_X);
       #endif
     }
   }
@@ -509,16 +510,23 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalColl
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, old blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
   
-  ofcclBarrier(4);  
+  bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
+  bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 在traverseTaskQ中遍历taskQ的情况下，其实只有在taskQ里只剩一个元素的时候，这个条件才可能成立
+  // bool loadedCollDone = (blkStatus.collStatus[blkStatus.currLoadedCollId] == 2); // 这里不用关心这个。
+  bool loadedCollSaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+
+  bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollSaveCtx7Quit;
+  bool needLoad = noLoadedColl || !sameLoadedColl;
+
+  ofcclBarrier(4);
   if (tid == 0) {
     // bugfix：不在这里重置，对于不需要save再load的-1的coll，就没机会重置了，进而在all_reduce.h里走不动。
-    blkStatus.collStatus[collId] = 1; // 每次加载的时候，重置为正常执行状态。即便是新的coll，也不要浪费if了。
+    blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
+
+    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, set blkStatus.collStatus[%d]=1; blkStatus.currLoadedCollId=%d, collId=%d, blkStatus.collStatus[blkStatus.currLoadedCollId]=%d, (blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1)=%d, (blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1))=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId, collId, blkStatus.collStatus[blkStatus.currLoadedCollId], blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1, blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1));
     
     // blkStatus.currLoadedCollId 和 sharedCollCtx是一体的。要更改blkStatus.currLoadedCollId 和 sharedCollCtx的时候，检查是否需要save sharedCollCtx
-    // blkStatus.currLoadedCollId != -1代表当前的sharedCollCtx是需要写回globalMem的，kernel初始化，以及完成一个coll的时候，会标记blkStatus.currLoadedCollId = -1，代表此时sharedCollCtx的内容不需要写回globalMem
-    // 第二个条件满足的时候，第三个条件应该当一定是满足的，已经被加载过的coll，到这时候不可能是纯洁的1，也不可能还残留在2。当然也不可能是0
-    // 需要写回的情况只有一种：之前在运行（A），上一个执行的coll跑了一半，现在要跑另一个coll了（B）。
-    if (blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1) {
+    if (needSave) {
       OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId);
       saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, blkStatus.currLoadedCollId);
     }
@@ -526,14 +534,12 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalColl
   ofcclBarrier(11);
 
   // 决定是否要load新的就是两个条件了：之前没有跑的，或者上一个执行的coll跑了一半，现在要跑一个新的
-  if (blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1)) {
+  if (needLoad) {
     OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId);
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
   }
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, new blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
-
-  // 进入maintainSharedCollCtx，要么是save7load（A & B），要么是only load（!A || B），要么是什么也不做（!B，事实上是A & !B，也就是跑了一半的那个又来跑了）
   return turn;
 }
 
@@ -634,8 +640,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
       blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
       for (int i = 0; i < blkStatus.numActiveColls; ++i) {
-        blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
+        int activeCollId = blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
         blkStatus.collStatus[blkStatus.activeCollIds[i]] = 1;
+        OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, set blkStatus.collStatus[%d]=1;", thrdCudaDev, blockIdx.x, threadIdx.x, activeCollId);
       }
       
       blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
@@ -703,9 +710,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         }
         blkStatus.numActiveColls = new_numActiveColls;
         #ifdef CQE_DEBUG_ALL_RANK
-          logTaskQ(thrdCudaDev, -1);
+          logTaskQ(1, thrdCudaDev, -1);
         #elif defined(CQE_DEBUG_RANK_X)
-          logTaskQ(thrdCudaDev, CQE_DEBUG_RANK_X);
+          logTaskQ(1, thrdCudaDev, CQE_DEBUG_RANK_X);
         #endif
       }
       *(blkStatus.barrierCnt + 0 + 18 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
