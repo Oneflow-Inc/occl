@@ -93,7 +93,7 @@ class Primitives<
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         if (ctxSwitchCounter++ >= sharedCollCtx.ctxSwitchThreshold) {
-          blkStatus.collStatus[blkStatus.currLoadedCollId] = -1;
+          sharedCollCtx.saveCtx7Quit = 1;
           sharedCollCtx.loadAgain = 1;
 
           if ((flags & (Recv*RoleWaitRecv))) {
@@ -239,13 +239,13 @@ class Primitives<
         
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
-        if (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1) {
+        if (sharedCollCtx.saveCtx7Quit == 1) {
           if (tid == 0) {
             sharedCollCtx.slice4SimpleGenericOp = slice;
             sharedCollCtx.offset4SimpleGenericOp = offset;
             // __threadfence_block();
           }
-          OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> barrierCnt 0", sharedCollCtx.rank, blockIdx.x, tid);
+          OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 0, slice = %d, offset = %d, genericOp worker return", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
           *(blkStatus.barrierCnt + 0 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           barrier(); // 我们在这里直接返回，跳过数据搬运，所以把相应的barrier调用了。
           *(blkStatus.barrierCnt + 1 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -277,7 +277,7 @@ class Primitives<
              Send*fan.nsend()+Dst, (T**)sharedCollCtx.groups[group].dsts,
              sliceSize);
         }
-        OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice = %d, offset = %d", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
+        OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem);
         *(blkStatus.barrierCnt + 0 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         barrier(); // This barrier has a counterpart in following loop
         *(blkStatus.barrierCnt + 1 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -301,11 +301,12 @@ class Primitives<
       //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       // }
 
-      OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice = %d, offset = %d", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
+      OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem);
       *(blkStatus.barrierCnt + 0 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       barrier(); // Has couterpart in preceding worker-only loop.
       *(blkStatus.barrierCnt + 1 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      if (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1) { // 需要在barrier之后才访问shmem。
+      if (sharedCollCtx.saveCtx7Quit == 1) { // 需要在barrier之后才访问shmem。
+         OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> after barrierCnt 2, slice = %d, offset = %d genericOp non-worker return", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
         return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }
       // 注意到这里的内存保护，先插入fence，而在fence之前有个barrier，worker线程中的barrier是在数据搬运完成之后调用的，所以这里就保证了数据搬运完成，插入fence的顺序；在插入fence之后，在通过postPeer使tail对接收端可见，使head对发送端可见。
@@ -586,17 +587,17 @@ class Primitives<
       conns[index]->step = step;
     }
     
-    if ((flags & (RolePostRecv))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
-    }
-    if ((flags & (RolePostSend))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
-    }
-    OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> barrierCnt 4", sharedCollCtx.rank, blockIdx.x, tid);
-    __syncwarp(); // ！！！！！！为了打印log加的！！！！
+    // if ((flags & (RolePostRecv))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
+    // }
+    // if ((flags & (RolePostSend))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.rank, blockIdx.x, tid, step);
+    // }
+    // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
     // Make sure all threads are done writing back conn->step and done using
     // sharedCollCtx.groups[group]
+    OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 4", sharedCollCtx.rank, blockIdx.x, tid);
     *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     barrier();
     *(blkStatus.barrierCnt + 1 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;

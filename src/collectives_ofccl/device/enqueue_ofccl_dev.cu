@@ -519,6 +519,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalColl
     // 第二个条件满足的时候，第三个条件应该当一定是满足的，已经被加载过的coll，到这时候不可能是纯洁的1，也不可能还残留在2。当然也不可能是0
     // 需要写回的情况只有一种：之前在运行（A），上一个执行的coll跑了一半，现在要跑另一个coll了（B）。
     if (blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1) {
+      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId);
       saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, blkStatus.currLoadedCollId);
     }
   }
@@ -526,6 +527,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalColl
 
   // 决定是否要load新的就是两个条件了：之前没有跑的，或者上一个执行的coll跑了一半，现在要跑一个新的
   if (blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1)) {
+    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId);
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
   }
 

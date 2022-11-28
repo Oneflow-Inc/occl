@@ -154,6 +154,7 @@ typedef struct {
   #endif
 
   // ****** Prims Simple ******
+  int saveCtx7Quit;
   int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;

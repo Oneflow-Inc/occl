@@ -27,8 +27,3 @@ inline __device__ unsigned long long int DevLogicSqHead(SQ *sq) {
   volatile unsigned long long int *headPtr = &(sq->head);
   return *headPtr % sq->length;
 }
-
-// Don't use barrier 0 as it's used by the final sync
-inline __device__ void ofcclBarrier(int barId, int numThreads=blockDim.x) {
-  asm volatile("bar.sync %0, %1;" :: "r"(barId), "r"(numThreads));
-}
