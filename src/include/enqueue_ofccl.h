@@ -75,8 +75,8 @@ typedef struct {
   long long int TOLERANT_UNPROGRESSED_CNT;
   long long int BASE_CTX_SWITCH_THRESHOLD;
   long long int ARRAY_DEBUG;
-  long long int SHOW_QUIT_CNT;
-  long long int SHOW_SWITCH_CNT;
+  // long long int SHOW_QUIT_CNT;
+  // long long int SHOW_SWITCH_CNT;
   long long int SHOW_RUNNING_CNT;
   long long int CQE_DEBUG_RANK_X;
   long long int CQE_DEBUG_ALL_RANK;
