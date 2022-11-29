@@ -96,13 +96,13 @@ class Primitives<
           sharedCollCtx.saveCtx7Quit = 1;
           sharedCollCtx.loadAgain = 1;
 
-          // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step + StepPerSlice);
-          // }
-          // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          // }
-          // __syncwarp(); // ！！！！！！为了打印log加的！
+          if ((flags & (Recv*RoleWaitRecv))) {
+            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step + StepPerSlice);
+          }
+          if ((flags & (Send*RoleWaitSend))) {
+            OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          }
+          __syncwarp(); // ！！！！！！为了打印log加的！
           
           return; // 使用return，而不是break。
         }
@@ -141,13 +141,13 @@ class Primitives<
       step += StepPerSlice;
     }
     
-    // if ((flags & (Recv*RoleWaitRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step);
-    // }
-    // if ((flags & (Send*RoleWaitSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
-    // }
-    // __syncwarp(); // ！！！！！！为了打印log加的！
+    if ((flags & (Recv*RoleWaitRecv))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks, connStepCache, step);
+    }
+    if ((flags & (Send*RoleWaitSend))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    }
+    __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
   template<int Recv, int Send>
@@ -157,13 +157,13 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
-    // }
-    // if ((flags & (Send*RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
-    // }
-    // __syncwarp(); // ！！！！！！为了打印log加的！
+    if ((flags & (Recv*RolePostRecv))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
+    }
+    if ((flags & (Send*RolePostSend))) {
+      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
+    }
+    __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
@@ -245,11 +245,11 @@ class Primitives<
             sharedCollCtx.offset4SimpleGenericOp = offset;
             // __threadfence_block();
           }
-          // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 0, slice = %d, offset = %d, genericOp worker return", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
+          OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 0, slice = %d, offset = %d, genericOp worker return", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
           *(blkStatus.barrierCnt + 0 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           barrier(); // 我们在这里直接返回，跳过数据搬运，所以把相应的barrier调用了。
           *(blkStatus.barrierCnt + 1 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-          return;
+          goto generic_op_quit;
         }
         if (DirectRecv && sharedCollCtx.groups[group].srcs[0] == sharedCollCtx.groups[group].dsts[0]) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
@@ -277,7 +277,7 @@ class Primitives<
              Send*fan.nsend()+Dst, (T**)sharedCollCtx.groups[group].dsts,
              sliceSize);
         }
-        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem);
+        OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
         *(blkStatus.barrierCnt + 0 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         barrier(); // This barrier has a counterpart in following loop
         *(blkStatus.barrierCnt + 1 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -301,13 +301,13 @@ class Primitives<
       //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       // }
 
-      // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem);
+      OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
       *(blkStatus.barrierCnt + 0 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       barrier(); // Has couterpart in preceding worker-only loop.
       *(blkStatus.barrierCnt + 1 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       if (sharedCollCtx.saveCtx7Quit == 1) { // 需要在barrier之后才访问shmem。
         //  OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> after barrierCnt 2, slice = %d, offset = %d genericOp non-worker return", sharedCollCtx.rank, blockIdx.x, tid, slice, offset);
-        return; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
+          goto generic_op_quit; // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
       }
       // 注意到这里的内存保护，先插入fence，而在fence之前有个barrier，worker线程中的barrier是在数据搬运完成之后调用的，所以这里就保证了数据搬运完成，插入fence的顺序；在插入fence之后，在通过postPeer使tail对接收端可见，使head对发送端可见。
       if (Send && (flags & RolePostSend) && sliceSize > 0 && index == 0) __threadfence_system();
@@ -317,8 +317,11 @@ class Primitives<
       slice += 1;
     }
     // waitPeer后边加了subBarrier来进行同步，但是postPeer后边没有任何同步方式，我们修改了nccl的行为方式，原来waitPeer那里可以无限等，现在加入了更加积极的主动跳过的方法，不加一个同步的话，postPeer里的工作本身并不轻松，可能导致block内线程的分化。
-
-    // __syncthreads(); // 1024解决卡住的bug，删掉这里，就好了。原因应该在于，我们在common_ofccl.h里限制了进入这里的线程范围，所以sync_threads肯定会卡住。但是为什么在一些位置加上log，就跳过了这个bug，不是很理解，可能是printf对那个buffer的操作，同步了线程吧。
+   
+    generic_op_quit:
+      *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      ofcclBarrier(14, nthreads);
+      *(blkStatus.barrierCnt + 1 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   }
 
   // TODO: 省略了 ScatterGatherOp
@@ -579,7 +582,9 @@ class Primitives<
   __device__ ~Primitives() {
     // Ensure sharedCollCtx.groups[].send/recvConns are available
     if (!(flags & ThreadsSynced)) {
+      // *(blkStatus.barrierCnt + 0 + 3 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       barrier();
+      // *(blkStatus.barrierCnt + 1 + 3 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     }
     // Save steps for the next operation
     if (flags & (RolePostSend|RolePostRecv)) {

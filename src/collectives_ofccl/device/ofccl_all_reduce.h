@@ -65,7 +65,6 @@ namespace {
       }
 
       if (currentStep < 1) {
-        ofcclBarrier(11, nthreads);;
         chunk = modRanks(ringIx + nranks-1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
@@ -88,8 +87,8 @@ namespace {
 
       // k-2 steps: reduce and copy to next GPU
       if (currentStep < nranks - 1) { // 2卡不执行这里。
-        ofcclBarrier(12, nthreads);;
         for (int j=currentStep + 1; j<nranks; ++j) { // j需要根据currentStep进行相应调整。原来j初值是2.
+
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
           nelem = min(realChunkSize, size-offset);
@@ -113,7 +112,6 @@ namespace {
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
       if (currentStep < nranks){
-        ofcclBarrier(11, nthreads);;
         chunk = ringIx + 0;
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
@@ -135,7 +133,6 @@ namespace {
 
       // k-2 steps: copy to next GPU
       if (currentStep < 2 * nranks - 2) { // 2卡不执行这里
-        ofcclBarrier(13, nthreads);;
         for (int j=currentStep-nranks+1; j<nranks-1; ++j) { // j需要根据currentStep进行相应调整。原来j初值是1. 第一次进入时，currentStep=nranks, j=1
           chunk = modRanks(ringIx + nranks-j);
           offset = calcOffset(chunk);
@@ -159,7 +156,6 @@ namespace {
 
       // Make final copy from buffer to dest.
       if (currentStep < 2 * nranks - 1) {
-        ofcclBarrier(14, nthreads);;
         chunk = modRanks(ringIx + 1);
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
@@ -182,7 +178,6 @@ namespace {
       // __syncwarp(); // ！！！！！！为了打印log加的！！！！
     }
   run_ring_end:
-    ofcclBarrier(11, nthreads);;
     if (tid == 0) {
       if (sharedCollCtx.saveCtx7Quit == 1) {
         blkStatus.collStatus[blkStatus.currLoadedCollId] = -1;
@@ -197,7 +192,6 @@ namespace {
       //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, runRing success, gridOffset = %lu, size = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, size, currentStep, loopSize);
       //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
       }
-      sharedCollCtx.saveCtx7Quit = 0; // 重置。
     }
     
     *(blkStatus.barrierCnt + 1 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;

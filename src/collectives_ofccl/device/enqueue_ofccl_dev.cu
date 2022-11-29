@@ -273,7 +273,7 @@ static __device__ void logTaskQ(int caller, int thrdCudaDev, int rank=-1) {
   if (rank == -1) {
     rank = thrdCudaDev;
   }
-  OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, caller = %d, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", sharedCollCtx.rank, blockIdx.x, threadIdx.x, caller, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
+  OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, caller = %d, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", thrdCudaDev, blockIdx.x, threadIdx.x, caller, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
 }
 
 // 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
@@ -505,8 +505,9 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   // }
 }
 
-static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
+static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int tid = threadIdx.x;
+  int bid = blockIdx.x;
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, old blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
   
@@ -522,19 +523,20 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalColl
   if (tid == 0) {
     // bugfix：不在这里重置，对于不需要save再load的-1的coll，就没机会重置了，进而在all_reduce.h里走不动。
     blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
-
-    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, set blkStatus.collStatus[%d]=1; blkStatus.currLoadedCollId=%d, collId=%d, blkStatus.collStatus[blkStatus.currLoadedCollId]=%d, (blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1)=%d, (blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1))=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId, collId, blkStatus.collStatus[blkStatus.currLoadedCollId], blkStatus.currLoadedCollId != -1 && collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1, blkStatus.currLoadedCollId == -1 || (collId != blkStatus.currLoadedCollId && blkStatus.collStatus[blkStatus.currLoadedCollId] == -1));
+    sharedCollCtx.saveCtx7Quit = 0; // 重置。
     
-    // blkStatus.currLoadedCollId 和 sharedCollCtx是一体的。要更改blkStatus.currLoadedCollId 和 sharedCollCtx的时候，检查是否需要save sharedCollCtx
     if (needSave) {
+      // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
+      CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
+
       OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId);
-      saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, blkStatus.currLoadedCollId);
+      saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
     }
   }
   ofcclBarrier(11);
 
-  // 决定是否要load新的就是两个条件了：之前没有跑的，或者上一个执行的coll跑了一半，现在要跑一个新的
   if (needLoad) {
+    CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId);
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
   }
@@ -571,11 +573,9 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
     // 这里不需要再判断blkStatus.collStatus[collId]了，因为这一次循环里只会遍历taskQ一次，出去之后就更新taskQ了。
     if (bid < blkLimit) { // blk天然分化，保留这个条件 // TODO: 如果节省if判断对性能有提升，可以改变处理方法，让所有block处理所有的集合通信。不过好像也省不了。。。总得判断。
-      // block内全部线程都执行：
-      CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
       // ***** 先准备好sharedCollCtx，全部线程都参与 *****
-      turn = maintainSharedCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
+      turn = maintainSharedCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
 
       // *(blkStatus.barrierCnt + 0 + 15 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 

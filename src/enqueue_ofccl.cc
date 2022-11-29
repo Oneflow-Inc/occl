@@ -1017,14 +1017,15 @@ void *startBarrierCntPrinter(void *args) {
     file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
     printBarrierCnt(rankCtx, file, 2);
 
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 4);
+
     file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
     printBarrierCnt(rankCtx, file, 4);
+    file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
-
-    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
-    printBarrierCnt(rankCtx, file, 11);
 
     // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
     // printBarrierCnt(rankCtx, file, 10);
@@ -1038,8 +1039,12 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:" << std::endl;
     // printBarrierCnt(rankCtx, file, 16);
 
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ genericOp end 19:" << std::endl;
+    printBarrierCnt(rankCtx, file, 19);
+
     file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
     printBarrierCnt(rankCtx, file, 14);
+    file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:" << std::endl;
     // printBarrierCnt(rankCtx, file, 13);
@@ -1052,6 +1057,9 @@ void *startBarrierCntPrinter(void *args) {
 
     file << "Rank " << rankCtx->rank << " ofcclBarrier @ leave manipulate TaskQ after traverse 18:" << std::endl;
     printBarrierCnt(rankCtx, file, 18);
+
+    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
+    printBarrierCnt(rankCtx, file, 11);
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
     // printBarrierCnt(rankCtx, file, 12);
