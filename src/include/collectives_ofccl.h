@@ -13,8 +13,8 @@
 #define SHOW_QUIT_CNT 1
 #define SHOW_SWITCH_CNT 1
 
-#define ARRAY_DEBUG 1
-#define SHOW_RUNNING_CNT 1
+// #define ARRAY_DEBUG 1
+// #define SHOW_RUNNING_CNT 1
 
 #define NUM_BARRIERS 30
 #define BARCNT_INNER_SIZE 10
@@ -23,7 +23,7 @@
 
 // #define CQE_DEBUG_RANK_X 0
 
-#define CQE_DEBUG_ALL_RANK 1
+// #define CQE_DEBUG_ALL_RANK 1
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
