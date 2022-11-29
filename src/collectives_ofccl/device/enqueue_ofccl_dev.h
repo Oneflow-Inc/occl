@@ -2,7 +2,7 @@
 #include "op128_ofccl.h"
 #include "common_ofccl.h" // for CollCtx
 
-// #define CQE_DEBUG_RANK_X 0
+#define CQE_DEBUG_RANK_X 0
 // #define CQE_DEBUG_ALL_RANK 1
 
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
