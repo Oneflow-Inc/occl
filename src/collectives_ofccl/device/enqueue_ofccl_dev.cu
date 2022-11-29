@@ -453,8 +453,10 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     __threadfence();
   }
 
-  // 这里不再给blkStatus.numActiveColls减1，只给executing置0。
-  blkStatus.currLoadedCollId = -1;
+  // bugfix: manipulateCQ7ResetDoneColl的调用时机，是traverseTaskQ外边，又遍历一次taskQ，所以要判断一下。这也是可以带来性能优化的地方。不判断会导致另一个coll从上次save的地方重新load，重新做已经完成的搬运，但是peer rank未必能配合，就会卡住。
+  if (doneCollId == blkStatus.currLoadedCollId) {
+    blkStatus.currLoadedCollId = -1;
+  }
 
   blkStatus.collStatus[doneCollId] = 0;
 
