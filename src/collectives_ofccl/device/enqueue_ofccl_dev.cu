@@ -531,7 +531,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
       CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
 
       saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
-      OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
     }
   }
   ofcclBarrier(11);
@@ -539,7 +539,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   if (needLoad) {
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
-    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
   }
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, new blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
@@ -696,7 +696,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         int new_numActiveColls = 0;
         for (int i = 0; i < blkStatus.numActiveColls; ++i) {
           int collIdInTaskQ = blkStatus.activeCollIds[i];
-          OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
+          // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
           if (blkStatus.collStatus[collIdInTaskQ] == -1) { // 不应该有1 的存在了，只有-1或者2
             unprogressedCnt += 1;
             blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ;

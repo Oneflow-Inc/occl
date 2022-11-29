@@ -903,7 +903,7 @@ void *startKernel7SqObserver(void *args) {
     // }
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
-    OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
       break;
     }
@@ -1215,7 +1215,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
     if (SHOW_ALL_PREPARED_COLL) {
-      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
     }
 
     rankCtx->hostCqes[collId].collId = collId;

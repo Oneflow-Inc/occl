@@ -160,9 +160,9 @@ class Primitives<
     // if ((flags & (Recv*RolePostRecv))) {
     //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.rank - 1 + sharedCollCtx.nRanks) % sharedCollCtx.nRanks);
     // }
-    if ((flags & (Send*RolePostSend))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
-    }
+    // if ((flags & (Send*RolePostSend))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.rank + 1) % sharedCollCtx.nRanks);
+    // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
