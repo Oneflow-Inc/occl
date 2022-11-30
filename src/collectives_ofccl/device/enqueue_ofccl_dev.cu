@@ -188,13 +188,69 @@ static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const str
   dstElem.redOpArg = srcElem.redOpArg;
 }
 
-static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int turn) {
+static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, int *globalVolunteerQuitCounter, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   // int nthreads = blockDim.x;
   // 构建任务列表
   // TODO: 并行提高复制效率。
   if (tid == 0) {
+
+    blkStatus.quit = 0;
+    blkStatus.iWantToQuit = false;
+    blkStatus.seenAllBlockWantToQuitCounter = 0;
+    blkStatus.currLoadedCollId = -1;
+
+    sharedCollCtx.saveCtx7Quit = 0;
+    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22);
+
+    #ifdef ARRAY_DEBUG
+      blkStatus.barrierCnt = barrierCnt;
+      blkStatus.collCounters = collCounters;
+    #endif
+
+    BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
+    blkStatus.hasVolunteerQuitted = myGlobalBlkStatus->hasVolunteerQuitted;
+
+    for (int i = 0; i < collCount; ++i) {
+      blkStatus.collStatus[i] = 0;
+    }
+
+    if (blkStatus.hasVolunteerQuitted == 0) {
+      blkStatus.sqReadFrontier = 0;
+      blkStatus.numActiveColls = 0;      
+
+      #ifdef SHOW_SWITCH_CNT
+        blkStatus.totalCtxSwitchCnt = 0;
+      #endif
+      #ifdef SHOW_QUIT_CNT
+        blkStatus.totalVolunteerQuitCnt = 0;
+        blkStatus.totalUnprogressedQuitCnt = 0;
+      #endif
+    } else { // 从volunteer quit恢复回来
+
+      blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
+      for (int i = 0; i < blkStatus.numActiveColls; ++i) {
+        int activeCollId = blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
+        blkStatus.collStatus[blkStatus.activeCollIds[i]] = 1;
+      }
+      
+      blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
+      blkStatus.hasVolunteerQuitted = 1;
+
+      #ifdef SHOW_SWITCH_CNT
+        blkStatus.totalCtxSwitchCnt = myGlobalBlkStatus->totalCtxSwitchCnt;
+      #endif
+      #ifdef SHOW_QUIT_CNT
+        blkStatus.totalVolunteerQuitCnt = myGlobalBlkStatus->totalVolunteerQuitCnt;
+        blkStatus.totalUnprogressedQuitCnt = myGlobalBlkStatus->totalUnprogressedQuitCnt;
+      #endif
+    }
+
+    if (bid == 0) {
+      atomicExch(globalVolunteerQuitCounter, 0); // 稳妥一些，启动的时候，0号block来置零。
+    }
+
     for (int i = 0; i < collCount; i++) {
       int collId = globalCollIds[i];
       // 以下这两个变量会限制很多行为。
@@ -599,62 +655,6 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_FAIL_CHECK_SQ_CNT, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
-  if (tid == 0) {
-    blkStatus.quit = 0;
-    blkStatus.iWantToQuit = false;
-    blkStatus.seenAllBlockWantToQuitCounter = 0;
-    blkStatus.currLoadedCollId = -1;
-
-    sharedCollCtx.saveCtx7Quit = 0;
-    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22);
-
-    #ifdef ARRAY_DEBUG
-      blkStatus.barrierCnt = barrierCnt;
-      blkStatus.collCounters = collCounters;
-    #endif
-
-    BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
-    blkStatus.hasVolunteerQuitted = myGlobalBlkStatus->hasVolunteerQuitted;
-
-    for (int i = 0; i < collCount; ++i) {
-      blkStatus.collStatus[i] = 0;
-    }
-
-    if (blkStatus.hasVolunteerQuitted == 0) {
-      blkStatus.sqReadFrontier = 0;
-      blkStatus.numActiveColls = 0;      
-
-      #ifdef SHOW_SWITCH_CNT
-        blkStatus.totalCtxSwitchCnt = 0;
-      #endif
-      #ifdef SHOW_QUIT_CNT
-        blkStatus.totalVolunteerQuitCnt = 0;
-        blkStatus.totalUnprogressedQuitCnt = 0;
-      #endif
-    } else { // 从volunteer quit恢复回来
-
-      blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
-      for (int i = 0; i < blkStatus.numActiveColls; ++i) {
-        int activeCollId = blkStatus.activeCollIds[i] = myGlobalBlkStatus->activeCollIds[i];
-        blkStatus.collStatus[blkStatus.activeCollIds[i]] = 1;
-      }
-      
-      blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
-      blkStatus.hasVolunteerQuitted = 1;
-
-      #ifdef SHOW_SWITCH_CNT
-        blkStatus.totalCtxSwitchCnt = myGlobalBlkStatus->totalCtxSwitchCnt;
-      #endif
-      #ifdef SHOW_QUIT_CNT
-        blkStatus.totalVolunteerQuitCnt = myGlobalBlkStatus->totalVolunteerQuitCnt;
-        blkStatus.totalUnprogressedQuitCnt = myGlobalBlkStatus->totalUnprogressedQuitCnt;
-      #endif
-    }
-
-    if (bid == 0) {
-      atomicExch(globalVolunteerQuitCounter, 0); // 稳妥一些，启动的时候，0号block来置零。
-    }
-  }
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
@@ -669,7 +669,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // int tempRound = 0;
   int turn = 0;
 
-  turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
+  turn = blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, globalVolunteerQuitCounter, turn);
 
   ofcclBarrier(5);
 
