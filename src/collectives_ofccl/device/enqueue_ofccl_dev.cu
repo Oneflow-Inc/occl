@@ -240,10 +240,6 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
           globalCollCtx4Blk7Coll->nRanks = comm->nRanks;
           globalCollCtx4Blk7Coll->abortFlag = comm->abortFlag;
 
-          for (int i = 0; i < NCCL_NUM_PROTOCOLS; i++) {
-            globalCollCtx4Blk7Coll->buffSizes[i] = comm->buffSizes[i];
-          }
-
           copyNcclWorkElem(globalCollCtx4Blk7Coll->workElem, globalDevComm7WorkElems[collId].first);
 
           /* ****** 上下文 ****** */
@@ -389,10 +385,6 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     sharedCollCtx.rank = globalCollCtx4Blk7Coll->rank;
     sharedCollCtx.nRanks = globalCollCtx4Blk7Coll->nRanks;
     sharedCollCtx.abortFlag = globalCollCtx4Blk7Coll->abortFlag;
-
-    for (int i = 0; i < NCCL_NUM_PROTOCOLS; i++) {
-      sharedCollCtx.buffSizes[i] = globalCollCtx4Blk7Coll->buffSizes[i];
-    }
 
     copyNcclWorkElem(sharedCollCtx.workElem, globalCollCtx4Blk7Coll->workElem);
 
@@ -614,6 +606,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     blkStatus.currLoadedCollId = -1;
 
     sharedCollCtx.saveCtx7Quit = 0;
+    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22);
 
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;
