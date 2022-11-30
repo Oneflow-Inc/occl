@@ -265,16 +265,16 @@ static __device__ int initContexts(int thrdCudaDev, int collCount, int *globalBl
       }
     }
   }
-  ofcclBarrier(1);
   return turn;
 }
-
+#if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
 static __device__ void logTaskQ(int caller, int thrdCudaDev, int rank=-1) {
   if (rank == -1) {
     rank = thrdCudaDev;
   }
   OFCCL_LOG_RANK_X(OFCCL_CQE, rank, "Rank<%d> Blk<%d> Thrd<%d>, caller = %d, numActiveColls=%d, TaskQ: [%d-%d-%d-%d-%d-%d-%d-%d-%d-%d]", thrdCudaDev, blockIdx.x, threadIdx.x, caller, blkStatus.numActiveColls, blkStatus.activeCollIds[0], blkStatus.activeCollIds[1], blkStatus.activeCollIds[2], blkStatus.activeCollIds[3], blkStatus.activeCollIds[4], blkStatus.activeCollIds[5], blkStatus.activeCollIds[6], blkStatus.activeCollIds[7], blkStatus.activeCollIds[8], blkStatus.activeCollIds[9]);
 }
+#endif
 
 // 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
 static __device__ void cancelQuit(int *globalVolunteerQuitCounter) {
@@ -421,9 +421,6 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     sharedCollCtx.ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
     // __threadfence_block();
   }
-  // *(blkStatus.barrierCnt + 0 + 6 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-  ofcclBarrier(2);
-  // *(blkStatus.barrierCnt + 1 + 6 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
   return turn;
 }
@@ -481,18 +478,19 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 }
 
 static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId) {
-  globalCollCtx4Blk7Coll->loadAgain = sharedCollCtx.loadAgain;
-  globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
-  globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
+  if(threadIdx.x == 0) {
+    globalCollCtx4Blk7Coll->loadAgain = sharedCollCtx.loadAgain;
+    globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
+    globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
+  
+    globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
+    globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
+  
+    #ifdef SHOW_SWITCH_CNT
+      blkStatus.totalCtxSwitchCnt++;
+    #endif
 
-  globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
-  globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
-
-  #ifdef SHOW_SWITCH_CNT
-    blkStatus.totalCtxSwitchCnt++;
-  #endif
-
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
 
   // // for debug
   // {
@@ -504,6 +502,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   //   uint64_t tail = sendConn->step;
   //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d save head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, collId, head, tail);
   // }
+  }
 }
 
 static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
@@ -520,29 +519,31 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollSaveCtx7Quit;
   bool needLoad = noLoadedColl || !sameLoadedColl;
 
-  ofcclBarrier(4);
   if (tid == 0) {
     // bugfix：不在这里重置，对于不需要save再load的-1的coll，就没机会重置了，进而在all_reduce.h里走不动。
     blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
     sharedCollCtx.saveCtx7Quit = 0; // 重置。
-    
-    if (needSave) {
-      // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
-      CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
-
-      saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
-    }
   }
-  ofcclBarrier(11);
+    
+  if (needSave) {
+    // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
+    CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
+
+    saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
+  }
 
   if (needLoad) {
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
   }
 
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, new blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
+  ofcclBarrier(4);
+  // if (needSave) {
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+  // }
+  // if (needLoad) {
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+  // }
   return turn;
 }
 
@@ -630,13 +631,13 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       blkStatus.sqReadFrontier = 0;
       blkStatus.numActiveColls = 0;      
 
-    #ifdef SHOW_SWITCH_CNT
-      blkStatus.totalCtxSwitchCnt = 0;
-    #endif
-    #ifdef SHOW_QUIT_CNT
-      blkStatus.totalVolunteerQuitCnt = 0;
-      blkStatus.totalUnprogressedQuitCnt = 0;
-    #endif
+      #ifdef SHOW_SWITCH_CNT
+        blkStatus.totalCtxSwitchCnt = 0;
+      #endif
+      #ifdef SHOW_QUIT_CNT
+        blkStatus.totalVolunteerQuitCnt = 0;
+        blkStatus.totalUnprogressedQuitCnt = 0;
+      #endif
     } else { // 从volunteer quit恢复回来
 
       blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
@@ -661,7 +662,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       atomicExch(globalVolunteerQuitCounter, 0); // 稳妥一些，启动的时候，0号block来置零。
     }
   }
-  ofcclBarrier(5);
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
@@ -678,6 +678,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   turn = initContexts(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, turn);
 
+  ofcclBarrier(5);
+
   int checkSQ7TidyTaskQFailCnt = 0;
   int unprogressedCnt = 0;
   while (true) {
@@ -688,9 +690,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       }
       turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn, &unprogressedCnt, BASE_CTX_SWITCH_THRESHOLD);
 
-      // *(blkStatus.barrierCnt + 0 + 17 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      ofcclBarrier(9);
-      // *(blkStatus.barrierCnt + 1 + 17 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       if (tid == 0) { // 遍历完一次之后，当前activeColl的后续工作，
         // 只有完成一个集合通信，才有必要操作taskQ
         int new_numActiveColls = 0;
@@ -719,10 +718,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       ofcclBarrier(10);
       // *(blkStatus.barrierCnt + 1 + 18 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     }
-
-    // *(blkStatus.barrierCnt + 0 + 12 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-    ofcclBarrier(6);
-    // *(blkStatus.barrierCnt + 1 + 12 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
     if (tid == 0) {
 
