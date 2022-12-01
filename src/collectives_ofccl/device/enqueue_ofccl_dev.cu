@@ -161,7 +161,7 @@ static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const str
   dstElem.nChannels = srcElem.nChannels;
 }
 
-static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, int *globalVolunteerQuitCounter, int turn) {
+static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, int turn) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   // int nthreads = blockDim.x;
@@ -170,11 +170,10 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
   if (tid == 0) {
 
     blkStatus.quit = 0;
-    blkStatus.iWantToQuit = false;
-    blkStatus.seenAllBlockWantToQuitCounter = 0;
     blkStatus.currLoadedCollId = -1;
 
     sharedCollCtx.saveCtx7Quit = 0;
+    sharedCollCtx.progressed = 0;
     sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
     sharedCollCtx.workElem.redOpArg = ncclDevSum; // TODO: oneflow目前只用了sum。
 
@@ -184,13 +183,13 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
     #endif
 
     BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
-    blkStatus.hasVolunteerQuitted = myGlobalBlkStatus->hasVolunteerQuitted;
+    blkStatus.hasQuitted = myGlobalBlkStatus->hasQuitted;
 
     for (int i = 0; i < collCount; ++i) {
       blkStatus.collStatus[i] = 0;
     }
 
-    if (blkStatus.hasVolunteerQuitted == 0) {
+    if (blkStatus.hasQuitted == 0) {
       blkStatus.sqReadFrontier = 0;
       blkStatus.numActiveColls = 0;      
 
@@ -198,10 +197,9 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
         blkStatus.totalCtxSwitchCnt = 0;
       #endif
       #ifdef SHOW_QUIT_CNT
-        blkStatus.totalVolunteerQuitCnt = 0;
         blkStatus.totalUnprogressedQuitCnt = 0;
       #endif
-    } else { // 从volunteer quit恢复回来
+    } else { // 从quit恢复回来
 
       blkStatus.numActiveColls = myGlobalBlkStatus->numActiveColls;
       for (int i = 0; i < blkStatus.numActiveColls; ++i) {
@@ -210,19 +208,14 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
       }
       
       blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
-      blkStatus.hasVolunteerQuitted = 1;
+      blkStatus.hasQuitted = 1;
 
       #ifdef SHOW_SWITCH_CNT
         blkStatus.totalCtxSwitchCnt = myGlobalBlkStatus->totalCtxSwitchCnt;
       #endif
       #ifdef SHOW_QUIT_CNT
-        blkStatus.totalVolunteerQuitCnt = myGlobalBlkStatus->totalVolunteerQuitCnt;
         blkStatus.totalUnprogressedQuitCnt = myGlobalBlkStatus->totalUnprogressedQuitCnt;
       #endif
-    }
-
-    if (bid == 0) {
-      atomicExch(globalVolunteerQuitCounter, 0); // 稳妥一些，启动的时候，0号block来置零。
     }
 
     for (int i = 0; i < collCount; i++) {
@@ -231,8 +224,8 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
       int blkLimit = sharedBlkCount4Coll[collId] = globalBlkCount4Coll[collId];
       // sharedThrdCount4Coll[collId] = globalThrdCount4Coll[collId];
 
-      // 下边这部分逻辑在在blkStatus.hasVolunteerQuitted == 1的情况下不执行，曾经退出过，恢复的时候就不要重新初始化了。
-      if (blkStatus.hasVolunteerQuitted == 0) {
+      // 下边这部分逻辑在在blkStatus.hasQuitted == 1的情况下不执行，曾经退出过，恢复的时候就不要重新初始化了。
+      if (blkStatus.hasQuitted == 0) {
         // 每个block一份globalShmem
         CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
 
@@ -302,17 +295,8 @@ static __device__ void logTaskQ(int caller, int thrdCudaDev, int rank=-1) {
 }
 #endif
 
-// 这个是有必要的，在没看到全部都要退出这个信息之前，还是可以撤回自己要退出的标志。
-static __device__ void cancelQuit(int *globalVolunteerQuitCounter) {
-  if (blkStatus.iWantToQuit) { // 如果我之前投票要退出，现在立刻撤回。
-    blkStatus.iWantToQuit = false;
-    blkStatus.seenAllBlockWantToQuitCounter = 0; // 保证我自己肯定不退了
-    atomicAdd(globalVolunteerQuitCounter, -1);
-  }
-}
-
 // 为了初步实现按需启停，增加一个“空read计数，读不到新的，增加计数”
-static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *failCnt, int *finallyQuit, int *globalVolunteerQuitCounter, int *unprogressedCnt) {
+static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, int *unprogressedCnt) {
   int bid = blockIdx.x;
 
   SQE target;
@@ -321,21 +305,13 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
   // 读不到新东西那就算了
 
   if (sqRead(sq, &target, thrdCudaDev) == -1) {
-    *failCnt += 1;
     *unprogressedCnt += 1;
     if (blkStatus.numActiveColls > 0) {
-      *failCnt = 0; // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
-      // 这种情况不重置unprogressedCnt，识别本地任务列表不空，但是无法推进的情况。
-      cancelQuit(globalVolunteerQuitCounter);
       
       // 没读到新的，应该不用处理taskQ了，因为每次遍历一次taskQ，都会处理。 
     }
     return;
   } else {
-    // TODO: 更改failCnt的更新逻辑，觉得自己死锁了，虽然任务列表不空，但是半天动不了，也可以退。
-    *failCnt = 0;
-    *unprogressedCnt = 0;
-    cancelQuit(globalVolunteerQuitCounter);
     if (target.quit) {
       blkStatus.quit = 1; // TODO: 从鲁棒性的角度来说，这里应该有机制保证看到这个quit sqe的时候，taskQ里的所有sqe也应该都处理完，才能退出。（不过目前可以先不管，可以由用户程序间接保证）；一个简单的保证方法是，加一个check。
       // if (bid == 0) {
@@ -347,6 +323,10 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
     int newActiveCollId = target.collId;
     int blkLimit = sharedBlkCount4Coll[newActiveCollId]; // 需要参与新读到的coll的block才会进行后续操作。
+
+    *unprogressedCnt = 0;
+    // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for coll_id = %d, reset *unprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId);
+
     if (bid < blkLimit) {
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
       // if (blkStatus.collStatus[newActiveCollId] != 0) { // 应该没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
@@ -375,7 +355,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
         if (collIdInTaskQ == newActiveCollId) {
           newActiveCollId_in_taskQ = true;
         }
-        if (blkStatus.collStatus[collIdInTaskQ] != 0) { // 1 正在执行和 -1 switch都算在执行中，要保留在任务列表中，应该不会有2
+        if (blkStatus.collStatus[collIdInTaskQ] != 0) { // 1_新加入、-2_switch、-1_switch但有progress 都算在执行中，要保留在任务列表中，应该不会有2
           // 在同一个数组上就地操作。new_numActiveColls一定是<=i的，所以不会有问题。
           blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ;
         }
@@ -536,7 +516,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
   bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 在traverseTaskQ中遍历taskQ的情况下，其实只有在taskQ里只剩一个元素的时候，这个条件才可能成立
   // bool loadedCollDone = (blkStatus.collStatus[blkStatus.currLoadedCollId] == 2); // 这里不用关心这个。
-  bool loadedCollSaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+  bool loadedCollSaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
 
   bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollSaveCtx7Quit;
   bool needLoad = noLoadedColl || !sameLoadedColl;
@@ -545,6 +525,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
     // bugfix：不在这里重置，对于不需要save再load的-1的coll，就没机会重置了，进而在all_reduce.h里走不动。
     blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
     sharedCollCtx.saveCtx7Quit = 0; // 重置。
+    sharedCollCtx.progressed = 0;
   }
     
   if (needSave) {
@@ -626,9 +607,18 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_FAIL_CHECK_SQ_CNT, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
+
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
+  // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+
+  // int tempRound = 0;
+  int turn = 0;
+
+  turn = blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters, turn);
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
@@ -636,18 +626,8 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     }
   #endif
 
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.totalVolunteerQuitCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalVolunteerQuitCnt, blkStatus.numActiveColls);
-  // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
-  // __syncwarp(); // ！！！！！！为了打印log加的！！！！
-
-  // int tempRound = 0;
-  int turn = 0;
-
-  turn = blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, globalVolunteerQuitCounter, turn);
-
   ofcclBarrier(5);
 
-  int checkSQ7TidyTaskQFailCnt = 0;
   int unprogressedCnt = 0;
   while (true) {
 
@@ -663,11 +643,21 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         for (int i = 0; i < blkStatus.numActiveColls; ++i) {
           int collIdInTaskQ = blkStatus.activeCollIds[i];
           // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
-          if (blkStatus.collStatus[collIdInTaskQ] == -1) { // 不应该有1 的存在了，只有-1或者2
-            unprogressedCnt += 1;
-            blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ;
+          if (blkStatus.collStatus[collIdInTaskQ] < 0) { // 不应该有1 的存在了，只有-1, -2或者2
+            blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ; // 小于0，就要继续放在taskQ里
+
+            // TODO: 也可以把这部分判断、操作挪到maintainSharedCtx那里，要运行一个coll之前，决定是否增加粘性，顺手记录unprogressedCnt。当然如果并行化了，或许应该在这里搞。
+            if (blkStatus.collStatus[collIdInTaskQ] == -2) {
+              unprogressedCnt += 1;
+            } else if (blkStatus.collStatus[collIdInTaskQ] == -1) {
+              unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
+              // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d, save but progressed, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
+              // TODO: 增加粘性
+            }
+
           } else if (blkStatus.collStatus[collIdInTaskQ] == 2) {
             unprogressedCnt = 0;
+            // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d, done, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
 
             CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collIdInTaskQ;
             manipulateCQ7ResetDoneColl(thrdCudaDev, collIdInTaskQ, cq, globalCqes, globalCollCtx4Blk7Coll, globalBlk2CollId2CollCtx);
@@ -687,70 +677,20 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     }
 
     if (tid == 0) {
-
-      // TODO: 可以在这里加一次对globalVolunteerQuitCounter的访问，保证这个小于gridDim.x才进入，但是这样会多一次访存，可能影响性能。同时这也不能100%保证没问题，而且现在的实测还没有出过问题
-      //（这只是更稳妥的做法，没啥实际意义，目前没发现这么做能抵御更多的边界情况）
-      // volatile int *observeGlobalVolunteerQuitCounterBeforeCheck = globalVolunteerQuitCounter;
-      // if (blkStatus.seenAllBlockWantToQuitCounter < 1 && *observeGlobalVolunteerQuitCounterBeforeCheck < gridDim.x) {
     
-      if (blkStatus.seenAllBlockWantToQuitCounter < 1) {// 看到过一次大家都要退出，就不再去检查sq了。尽量不产生遗留的block
-        checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, &checkSQ7TidyTaskQFailCnt, finallyQuit, globalVolunteerQuitCounter, &unprogressedCnt);
-      }
+      checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, finallyQuit, &unprogressedCnt);
 
       // 只有0号线程才会执行checkSQ7TidyTaskQ，自然只有0号线程才会更改checkSQ7TidyTaskQFailCnt，并且进行相应调整。
-
-      // checkSQ7TidyTaskQFailCnt = 0; // 想要结合进oneflow训练，不能禁止主动退出。
-
-      if (checkSQ7TidyTaskQFailCnt > TOLERANT_FAIL_CHECK_SQ_CNT) {
-        if (!blkStatus.iWantToQuit) {
-          blkStatus.iWantToQuit = true;
-          atomicAdd(globalVolunteerQuitCounter, 1); // 我自己第一次想quit的时候，投一票
-        }
-
-        volatile int *observeGlobalVolunteerQuitCounter = globalVolunteerQuitCounter; // 为了及时看到大家的投票情况。
-        if (*observeGlobalVolunteerQuitCounter == gridDim.x) {
-          blkStatus.seenAllBlockWantToQuitCounter++; // 看看大家的投票结果
-        } else {
-          blkStatus.seenAllBlockWantToQuitCounter = 0;
-        }
-
-        // 这样其实还是无法完全保证大家都可以安全退出。好的方法是，让遗留的block也可以退出，或者不产生遗留的block，现在采取的方法是后者。
-        if ((blkStatus.seenAllBlockWantToQuitCounter == CNT_BEFORE_QUIT && *observeGlobalVolunteerQuitCounter == gridDim.x)) { // 多次看到大家都要退出这一决议，并且又确认到确实是都要退出了。才会真正执行Volunteer Quit的动作。
-          BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
-
-          #ifdef SHOW_QUIT_CNT
-            ++blkStatus.totalVolunteerQuitCnt;
-          #endif
-          // 保存blkstatus
-          myGlobalBlkStatus->hasVolunteerQuitted = 1;
-          blkStatus.quit = 1;
-
-          myGlobalBlkStatus->sqReadFrontier = blkStatus.sqReadFrontier;
-          if (blkStatus.numActiveColls > 0) {
-            OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> blkStatus.numActiveColls = %d, but should be zero", thrdCudaDev, bid, threadIdx.x, blkStatus.numActiveColls);
-          }
-
-          #ifdef SHOW_SWITCH_CNT
-            myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
-          #endif
-          #ifdef SHOW_QUIT_CNT
-            myGlobalBlkStatus->totalVolunteerQuitCnt = blkStatus.totalVolunteerQuitCnt;
-            myGlobalBlkStatus->totalUnprogressedQuitCnt = blkStatus.totalUnprogressedQuitCnt;
-          #endif
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, Volunteer Quit, checkSQ7TidyTaskQFailCnt = %d, unprogressedCnt = %d, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, checkSQ7TidyTaskQFailCnt, unprogressedCnt, blkStatus.numActiveColls);
-        }
-      }
 
       if (unprogressedCnt >= TOLERANT_UNPROGRESSED_CNT && blkStatus.quit != 1) {
         BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
         #ifdef SHOW_QUIT_CNT
-          ++blkStatus.totalVolunteerQuitCnt;
           ++blkStatus.totalUnprogressedQuitCnt;
         #endif
 
         // 保存blkstatus
-        myGlobalBlkStatus->hasVolunteerQuitted = 1;
+        myGlobalBlkStatus->hasQuitted = 1;
         blkStatus.quit = 1;
         myGlobalBlkStatus->sqReadFrontier = blkStatus.sqReadFrontier;
 
@@ -763,7 +703,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
         #endif
         #ifdef SHOW_QUIT_CNT
-          myGlobalBlkStatus->totalVolunteerQuitCnt = blkStatus.totalVolunteerQuitCnt;
           myGlobalBlkStatus->totalUnprogressedQuitCnt = blkStatus.totalUnprogressedQuitCnt;
         #endif
       }
@@ -793,7 +732,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (blkStatus.quit == 1) {
       #ifdef SHOW_QUIT_CNT
         if (*finallyQuit == 1) {
-          OFCCL_LOG_THRD_0(OFCCL_FINAL_OR_VOLUNTEER_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu, totalVolunteerQuitCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt, blkStatus.totalVolunteerQuitCnt, blkStatus.totalUnprogressedQuitCnt);
+          OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt, blkStatus.totalUnprogressedQuitCnt);
         }
       #endif
       // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits", thrdCudaDev, blockIdx.x, tid);
@@ -801,7 +740,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         if (tid == 0) {
           *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           #ifdef SHOW_QUIT_CNT
-            *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 65 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalVolunteerQuitCnt;
             *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 66 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalUnprogressedQuitCnt;
           #endif
         }

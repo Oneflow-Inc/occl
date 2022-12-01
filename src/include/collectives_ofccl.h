@@ -81,19 +81,16 @@ typedef struct {
   int numActiveColls;
   int currLoadedCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
-  int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
+  int hasQuitted; // 记录曾经Quit过的状态，一旦被设置，就不再清零。
 
   int activeCollIds[MAX_LENGTH];
-  int collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-1：跑到一半switch
+  int collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-2：switch且没有progress；-1：switch但有progress
 
   // 考虑守护者kernel按需启停的时候这里的调整
   int quit;
-  bool iWantToQuit;
-  int seenAllBlockWantToQuitCounter;
 
 #ifdef SHOW_QUIT_CNT
   unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
-  unsigned long long int totalVolunteerQuitCnt; // 同上
   unsigned long long int totalUnprogressedQuitCnt;
 #endif
 
@@ -155,6 +152,7 @@ typedef struct {
 
   // ****** Prims Simple ******
   int saveCtx7Quit;
+  int progressed;
   int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;
@@ -165,7 +163,7 @@ typedef struct {
   int64_t ctxSwitchThreshold;
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *globalVolunteerQuitCounter, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_FAIL_CHECK_SQ_CNT, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t CNT_BEFORE_QUIT, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

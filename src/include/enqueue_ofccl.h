@@ -70,7 +70,6 @@ typedef struct {
 typedef struct {
   ofcclRankCtx *rankCtx;
   int64_t TRAVERSE_TIMES;
-  int64_t TOLERANT_FAIL_CHECK_SQ_CNT;
   int64_t CNT_BEFORE_QUIT;
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
@@ -83,7 +82,6 @@ typedef struct {
 struct ofcclRankCtx {
   int rank;
 
-  int *globalVolunteerQuitCounter;
   int *finallyQuit; // 只有一个int，最后收到quit sqe的时候，由0号block设置。因为startKernel7SqObserver线程里是在cudaStreamQuery返回cudaSuccess，表明kernel运行完退出，才会去查finallyQuit，这时候如果发现finallyQuit=1，那么可以有很大信心认为所有block都是最终退出了。
 
   sem_t getNewSqeSema;
@@ -92,7 +90,7 @@ struct ofcclRankCtx {
   pthread_t kernel7SqObserver;
   ObserverThrdArgs observerThrdArgs;
 
-  BlkStatus *globalBlkStatus; // 由于volunteer quit，需要保存、恢复blkStatus
+  BlkStatus *globalBlkStatus; // 由于quit，需要保存、恢复blkStatus
 
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
@@ -105,7 +103,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[20];
+  void *argsptrs[18];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
