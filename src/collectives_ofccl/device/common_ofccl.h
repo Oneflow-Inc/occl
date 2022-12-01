@@ -29,6 +29,11 @@ struct RunWorkElement {
   }
 };
 
+// Don't use barrier 0 as it's used by the final sync
+inline __device__ void ofcclBarrier(int barId, int numThreads=blockDim.x) {
+  asm volatile("bar.sync %0, %1;" :: "r"(barId), "r"(numThreads));
+}
+
 template<ncclFunc_t Fn, typename T, typename RedOp, int Algo, int Proto>
 struct RunWork {
   // This __forceinline__ is necessary. The compiler was inserting a function call

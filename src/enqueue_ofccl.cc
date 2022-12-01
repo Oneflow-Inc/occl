@@ -190,8 +190,9 @@ static ncclResult_t ofcclComputeColl(struct ncclInfo* info /* input */, struct n
   work->count = info->count;
   work->nChannels = info->nChannels;
   work->header.nWarps = info->nThreads / WARP_SIZE;
-  work->redOpArg = info->opFull.scalarArg;
-  work->redOpArgIsPtr = info->opFull.scalarArgIsPtr;
+  // work->redOpArg = info->opFull.scalarArg;
+  // work->redOpArgIsPtr = info->opFull.scalarArgIsPtr;
+  work->redOpArg = ncclDevSum; // TODO: 现在oneflow了只用了sum。
 
   // ***** skip special case comm->nRanks == 1 *****
 
@@ -1008,26 +1009,24 @@ void *startBarrierCntPrinter(void *args) {
       }
     }
   
-    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 0);
+    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
+    printBarrierCnt(rankCtx, file, 0);
 
-    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 1);
+    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
+    printBarrierCnt(rankCtx, file, 1);
     
-    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 2);
+    file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
+    printBarrierCnt(rankCtx, file, 2);
 
     // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 3);
-
-    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
     // printBarrierCnt(rankCtx, file, 4);
+
+    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
+    printBarrierCnt(rankCtx, file, 4);
+    file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
-
-    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
-    printBarrierCnt(rankCtx, file, 11);
 
     // file << "Rank " << rankCtx->rank << " enter traverse for & leave traverse for & collId & executing 10:" << std::endl;
     // printBarrierCnt(rankCtx, file, 10);
@@ -1041,14 +1040,27 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:" << std::endl;
     // printBarrierCnt(rankCtx, file, 16);
 
-    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
-    // printBarrierCnt(rankCtx, file, 14);
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ genericOp end 19:" << std::endl;
+    printBarrierCnt(rankCtx, file, 19);
+
+    file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
+    printBarrierCnt(rankCtx, file, 14);
+    file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:" << std::endl;
     // printBarrierCnt(rankCtx, file, 13);
 
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:" << std::endl;
     // printBarrierCnt(rankCtx, file, 7);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ enter manipulate TaskQ after traverse 17:" << std::endl;
+    printBarrierCnt(rankCtx, file, 17);
+
+    file << "Rank " << rankCtx->rank << " ofcclBarrier @ leave manipulate TaskQ after traverse 18:" << std::endl;
+    printBarrierCnt(rankCtx, file, 18);
+
+    file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
+    printBarrierCnt(rankCtx, file, 11);
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before checkSQ7TidyTaskQ 12:" << std::endl;
     // printBarrierCnt(rankCtx, file, 12);
@@ -1123,10 +1135,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
-
-  if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
-  }
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1208,7 +1216,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
     if (SHOW_ALL_PREPARED_COLL) {
-      OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+      // OFCCL_LOG(OFCCL_INIT, "Rank<%d>, coll_id = %d, comm->buffSizes[NCCL_PROTO_SIMPLE]=%d", rankCtx->rank, collId, comm->buffSizes[NCCL_PROTO_SIMPLE]);
     }
 
     rankCtx->hostCqes[collId].collId = collId;
@@ -1298,6 +1307,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     pthread_create(&rankCtx->barrierCntPrinter, nullptr, startBarrierCntPrinter, &rankCtx->barrierCntPrinterArgs);
   #endif
 
+  if (SHOW_ALL_PREPARED_COLL) {
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
+  }
 end:
   return ret;
 }

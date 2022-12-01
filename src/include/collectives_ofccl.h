@@ -10,16 +10,20 @@
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
-// #define ARRAY_DEBUG 1
 #define SHOW_QUIT_CNT 1
 #define SHOW_SWITCH_CNT 1
+
+// #define ARRAY_DEBUG 1
 // #define SHOW_RUNNING_CNT 1
 
 #define NUM_BARRIERS 30
 #define BARCNT_INNER_SIZE 10
 #define PrintTestQNum 10
-
 #define COLL_COUNTER_INNER_SIZE 10
+
+// #define CQE_DEBUG_RANK_X 0
+
+// #define CQE_DEBUG_ALL_RANK 1
 
 // static thread_local int CPUSleep = 0;
 // __device__ static thread_local int GPUSleep = 0;
@@ -75,12 +79,12 @@ typedef struct {
 
 typedef struct {
   int numActiveColls;
-  // int currActiveCollId;
+  int currLoadedCollId;
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
   int hasVolunteerQuitted; // 记录曾经volunteerQuit过的状态，一旦被设置，就不再清零。
 
   int activeCollIds[MAX_LENGTH];
-  bool collExecuting[MAX_LENGTH];
+  int collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-1：跑到一半switch
 
   // 考虑守护者kernel按需启停的时候这里的调整
   int quit;
@@ -143,9 +147,11 @@ typedef struct {
 
   /* ****** 上下文 ****** */
 
-  unsigned long long sqeReadCnt;
-  unsigned long long cqeWriteCnt;
-  unsigned long long cqePrepareCnt;
+  #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
+    unsigned long long sqeReadCnt;
+    unsigned long long cqeWriteCnt;
+    unsigned long long cqePrepareCnt;
+  #endif
 
   // ****** Prims Simple ******
   int saveCtx7Quit;
