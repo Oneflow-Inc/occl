@@ -111,6 +111,9 @@ class Primitives<
 
     if (flags & (Recv*RoleWaitRecv | Send*RoleWaitSend)) { // 这里还是只有特殊线程在做
 
+      // wait成功，在subBarrier和barrier之前，标记一下，保证后续的可见性。
+      sharedCollCtx.progressed |= (flags & RoleWaitRecv) | ((!Recv) & (flags & RoleWaitSend)); // 若RoleWaitRecv线程wait成功，那可以设置；若RoleWaitSend线程wait成功，只有在不需要recv的时候才可以设置；并且一旦设成1，就不再清零了。
+
       if (isSendNotRecv && (flags & SizesFifoEnabled)) // proxy 相关，不用考虑
         connSizesFifoPtr[step%NCCL_STEPS] = nelts*sizeof(T);
 

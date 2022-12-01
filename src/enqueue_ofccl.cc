@@ -788,7 +788,6 @@ end:
   return ret;
 }
 
-// volunteer quit 调整：这个函数调整成一个专门的cudaLaunchKernel的包装函数
 void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   checkRuntime(cudaSetDevice(rankCtx->rank));
   
@@ -804,17 +803,15 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[7] = &rankCtx->globalCollIds;
   rankCtx->argsptrs[8] = &rankCtx->globalDevComm7WorkElems;
   rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
-  rankCtx->argsptrs[10] = &rankCtx->globalVolunteerQuitCounter;
-  rankCtx->argsptrs[11] = &rankCtx->finallyQuit;
-  rankCtx->argsptrs[12] = &rankCtx->globalBlkStatus;
-  rankCtx->argsptrs[13] = &rankCtx->barrierCnt;
-  rankCtx->argsptrs[14] = &rankCtx->collCounters;
+  rankCtx->argsptrs[10] = &rankCtx->finallyQuit;
+  rankCtx->argsptrs[11] = &rankCtx->globalBlkStatus;
+  rankCtx->argsptrs[12] = &rankCtx->barrierCnt;
+  rankCtx->argsptrs[13] = &rankCtx->collCounters;
   
-  rankCtx->argsptrs[15] = &args->TRAVERSE_TIMES;
-  rankCtx->argsptrs[16] = &args->TOLERANT_FAIL_CHECK_SQ_CNT;
-  rankCtx->argsptrs[17] = &args->CNT_BEFORE_QUIT;
-  rankCtx->argsptrs[18] = &args->TOLERANT_UNPROGRESSED_CNT;
-  rankCtx->argsptrs[19] = &args->BASE_CTX_SWITCH_THRESHOLD;
+  rankCtx->argsptrs[14] = &args->TRAVERSE_TIMES;
+  rankCtx->argsptrs[15] = &args->CNT_BEFORE_QUIT;
+  rankCtx->argsptrs[16] = &args->TOLERANT_UNPROGRESSED_CNT;
+  rankCtx->argsptrs[17] = &args->BASE_CTX_SWITCH_THRESHOLD;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -883,25 +880,6 @@ void *startKernel7SqObserver(void *args) {
       // 这个函数返回，说明等来了一个新的sqe写入。
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, CpuLogicSqHead(rankCtx->sq), RingBufferLogicTail(rankCtx->sq));
     }
-
-    // TODO: 按理说这里用cudaStreamQuery查状态应该是等价的，不过高频反复轮询，可能会导致cuda本身的一些问题吧，就卡住了。先放掉这个bug吧。
-    // cudaError_t result = cudaStreamQuery(rankCtx->kernelStream);
-
-    // if (result == cudaSuccess) { // kernel执行完了，退出来了。
-    //   // kernel此时没在运行，有三种情况：没有启动；volunteer quit；以及看到了quit sqe，最终退出。
-    //   // 除了最后一种情况，其他两种情况都需要启动kernel。
-      
-    //   OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
-    //   if (*rankCtx->finallyQuit) {
-    //     return nullptr;
-    //   }
-
-    //   startKernel(rankCtx);
-    // } else if (result == cudaErrorNotReady) {// kernel还在执行，啥也不用做，满足预期：收到sqe的时候，kernel还在执行，有机会看到新写入的sqe，然后要保证rankCtx->finallyQuit被kernel设置，才舍得退出，应该保证了最终一致性。
-    //   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel STILL RUN, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
-    // } else { // unexpected
-    //   checkRuntime(result);
-    // }
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
@@ -1009,21 +987,21 @@ void *startBarrierCntPrinter(void *args) {
       }
     }
   
-    file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
-    printBarrierCnt(rankCtx, file, 0);
+    // file << "Rank " << rankCtx->rank << " barrier @ wroker wait fail 0:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 0);
 
-    file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
-    printBarrierCnt(rankCtx, file, 1);
+    // file << "Rank " << rankCtx->rank << " barrier @ worker transmit done 1:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 1);
     
-    file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
-    printBarrierCnt(rankCtx, file, 2);
+    // file << "Rank " << rankCtx->rank << " barrier @ controller 2:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 2);
 
     // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives begin 3:" << std::endl;
     // printBarrierCnt(rankCtx, file, 4);
 
-    file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
-    printBarrierCnt(rankCtx, file, 4);
-    file << std::endl;
+    // file << "Rank " << rankCtx->rank << " barrier @ ~Primitives end 4:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 4);
+    // file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ daemonKernel begin 8:" << std::endl;
     // printBarrierCnt(rankCtx, file, 8);
@@ -1040,12 +1018,12 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " # enter RunWork.run & # RunWork.run return 16:" << std::endl;
     // printBarrierCnt(rankCtx, file, 16);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ genericOp end 19:" << std::endl;
-    printBarrierCnt(rankCtx, file, 19);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ genericOp end 19:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 19);
 
-    file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
-    printBarrierCnt(rankCtx, file, 14);
-    file << std::endl;
+    // file << "Rank " << rankCtx->rank << " runRing begin & return 14:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 14);
+    // file << std::endl;
     
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ before traverse done 13:" << std::endl;
     // printBarrierCnt(rankCtx, file, 13);
@@ -1053,11 +1031,11 @@ void *startBarrierCntPrinter(void *args) {
     // file << "Rank " << rankCtx->rank << " ofcclBarrier @ after traverse done 7:" << std::endl;
     // printBarrierCnt(rankCtx, file, 7);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ enter manipulate TaskQ after traverse 17:" << std::endl;
-    printBarrierCnt(rankCtx, file, 17);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ enter manipulate TaskQ after traverse 17:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 17);
 
-    file << "Rank " << rankCtx->rank << " ofcclBarrier @ leave manipulate TaskQ after traverse 18:" << std::endl;
-    printBarrierCnt(rankCtx, file, 18);
+    // file << "Rank " << rankCtx->rank << " ofcclBarrier @ leave manipulate TaskQ after traverse 18:" << std::endl;
+    // printBarrierCnt(rankCtx, file, 18);
 
     file << "Rank " << rankCtx->rank << " # enter traverseTaskQ & # direct return & # return 11:" << std::endl;
     printBarrierCnt(rankCtx, file, 11);
@@ -1079,8 +1057,7 @@ void *startBarrierCntPrinter(void *args) {
     }
 
     for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-      file << "Rank " << rankCtx->rank << " Block " << bid << " totalVolunteerQuitCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 65 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalUnprogressedQuitCnt=" << 
+      file << "Rank " << rankCtx->rank << " Block " << bid << " totalUnprogressedQuitCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 66 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
     }
 
@@ -1123,7 +1100,6 @@ void *startBarrierCntPrinter(void *args) {
 }
 #endif
 
-// 为了volunteer Quit进行的调整
 NCCL_API(ncclResult_t, ofcclFinalizeRankCtx7StartHostThrds, ofcclRankCtx_t rankCtx);
 ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
@@ -1131,7 +1107,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   
   // 超参数：
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
-  int64_t TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
   int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
@@ -1276,8 +1251,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   checkRuntime(cudaMalloc(&rankCtx->globalBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalVolunteerQuitCounter, sizeof(int)));
-
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
 
@@ -1299,7 +1272,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
+  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
   #ifdef ARRAY_DEBUG
@@ -1308,7 +1281,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #endif
 
   if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_FAIL_CHECK_SQ_CNT=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, CNT_BEFORE_QUIT=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
   }
 end:
   return ret;
@@ -1321,11 +1294,10 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
 
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
-  int64_t TOLERANT_FAIL_CHECK_SQ_CNT = ParseIntegerFromEnv("TOLERANT_FAIL_CHECK_SQ_CNT", 500);
   int64_t CNT_BEFORE_QUIT = ParseIntegerFromEnv("CNT_BEFORE_QUIT", 5);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
-  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_FAIL_CHECK_SQ_CNT, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
+  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, CNT_BEFORE_QUIT, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
 
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 
@@ -1366,7 +1338,6 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalCollIds));
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
-  checkRuntime(cudaFree(rankCtx->globalVolunteerQuitCounter));
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
