@@ -64,31 +64,6 @@ static __device__ int copyToShmemLoop(T *dst, T const *src, int tid, int nthread
   return turn;
 }
 
-// 这个的目的应该是在“切片并行复制”之后，恢复标量的语义
-// 但是没用，而且在buffer里的数据是0.5，或者其他数字时，导致卡住。log发现buffer里的数字是0.25，可以正常运行，并且没有进入这里。所以直接注释了吧。
-// TODO: 但是这里卡住，总还是怪怪的。有空看看吧。
-// static __device__ void ofcclRedopPtrDeref(struct ncclWorkElem* we) {
-//   if (we->header.type != ncclWorkTypeUnused && we->redOpArgIsPtr) {
-//     /* redOpArg is a pointer to the scalar value, so we'll dereference it
-//      * here so that redOpArg holds the bits of the scalar going forward.
-//      * The tricky thing is we don't know its type T since that's encoded in
-//      * the funcIndex. Because it would be difficult to get sizeof(T) from
-//      * funcIndex, we'll cheat and just dereference the largest possible size
-//      * given the alignment of the pointer. We might be reading in more bytes
-//      * than we need but that's harmless.
-//      */
-//     if (we->redOpArg%2 != 0)
-//       we->redOpArg = *reinterpret_cast<uint8_t*>(we->redOpArg);
-//     else if (we->redOpArg%4 != 0)
-//       we->redOpArg = *reinterpret_cast<uint16_t*>(we->redOpArg);
-//     else if (we->redOpArg%8 != 0)
-//       we->redOpArg = *reinterpret_cast<uint32_t*>(we->redOpArg);
-//     else
-//       we->redOpArg = *reinterpret_cast<uint64_t*>(we->redOpArg);
-//     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, we->redOpArgIsPtr = %d, we->redOpArg = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, we->redOpArgIsPtr, we->redOpArg);
-//   }
-// }
-
 // share mem用超了。
 // TODO: 可以不同的algo、proto使用不同的数据类型，不过可以看看是不是有意义
 __shared__ CollCtx sharedCollCtx; // 不能static，primitives要用
@@ -177,15 +152,13 @@ static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const str
 
   dstElem.regUsed = srcElem.regUsed;
   dstElem.direct = srcElem.direct;
-  dstElem.redOpArgIsPtr = srcElem.redOpArgIsPtr;
   dstElem.sendbuff = srcElem.sendbuff;
   dstElem.recvbuff = srcElem.recvbuff;
   dstElem.count = srcElem.count;
   dstElem.lastChunkSize = srcElem.lastChunkSize;
   dstElem.root = srcElem.root;
-  dstElem.bid = srcElem.bid;
+  // dstElem.bid = srcElem.bid; // TODO: 这个先不用了，runRing里直接读了blockIdx
   dstElem.nChannels = srcElem.nChannels;
-  dstElem.redOpArg = srcElem.redOpArg;
 }
 
 static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, int *globalVolunteerQuitCounter, int turn) {
@@ -202,7 +175,8 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
     blkStatus.currLoadedCollId = -1;
 
     sharedCollCtx.saveCtx7Quit = 0;
-    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22);
+    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
+    sharedCollCtx.workElem.redOpArg = ncclDevSum; // TODO: oneflow目前只用了sum。
 
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;

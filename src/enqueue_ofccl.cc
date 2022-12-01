@@ -190,8 +190,9 @@ static ncclResult_t ofcclComputeColl(struct ncclInfo* info /* input */, struct n
   work->count = info->count;
   work->nChannels = info->nChannels;
   work->header.nWarps = info->nThreads / WARP_SIZE;
-  work->redOpArg = info->opFull.scalarArg;
-  work->redOpArgIsPtr = info->opFull.scalarArgIsPtr;
+  // work->redOpArg = info->opFull.scalarArg;
+  // work->redOpArgIsPtr = info->opFull.scalarArgIsPtr;
+  work->redOpArg = ncclDevSum; // TODO: 现在oneflow了只用了sum。
 
   // ***** skip special case comm->nRanks == 1 *****
 
