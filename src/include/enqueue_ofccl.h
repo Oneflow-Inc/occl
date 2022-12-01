@@ -70,7 +70,6 @@ typedef struct {
 typedef struct {
   ofcclRankCtx *rankCtx;
   int64_t TRAVERSE_TIMES;
-  int64_t CNT_BEFORE_QUIT;
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
 } ObserverThrdArgs;
@@ -103,7 +102,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[18];
+  void *argsptrs[17];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
