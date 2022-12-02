@@ -507,7 +507,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
   }
 }
 
-static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
+static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL, int *unprogressedCnt) {
   int tid = threadIdx.x;
   int bid = blockIdx.x;
 
@@ -516,17 +516,14 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
   bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 在traverseTaskQ中遍历taskQ的情况下，其实只有在taskQ里只剩一个元素的时候，这个条件才可能成立
   // bool loadedCollDone = (blkStatus.collStatus[blkStatus.currLoadedCollId] == 2); // 这里不用关心这个。
+
   bool loadedCollSaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
-
   bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollSaveCtx7Quit;
-  bool needLoad = noLoadedColl || !sameLoadedColl;
+  // TODO: 只有progressed，才需要save。
+  // bool loadedCollProgressed7SaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+  // bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
 
-  if (tid == 0) {
-    // bugfix：不在这里重置，对于不需要save再load的-1的coll，就没机会重置了，进而在all_reduce.h里走不动。
-    blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
-    sharedCollCtx.saveCtx7Quit = 0; // 重置。
-    sharedCollCtx.progressed = 0;
-  }
+  bool needLoad = noLoadedColl || !sameLoadedColl;
     
   if (needSave) {
     // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
@@ -540,6 +537,19 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
   }
 
+  if (tid == 0) {
+    if (blkStatus.collStatus[collId] == -1) {
+      sharedCollCtx.ctxSwitchThreshold += BOUNS_SWITCH_4_PROCESSED_COLL;
+      // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d, sharedCollCtx.ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatus[collId], sharedCollCtx.ctxSwitchThreshold);
+      *unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
+    } else if (blkStatus.collStatus[collId] == -2) {
+      *unprogressedCnt += 1;
+    }
+    blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
+    sharedCollCtx.saveCtx7Quit = 0; // 重置。
+    sharedCollCtx.progressed = 0;
+  }
+
   ofcclBarrier(4);
   // if (needSave) {
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
@@ -550,7 +560,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   return turn;
 }
 
-static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn, int *unprogressedCnt, int64_t BASE_CTX_SWITCH_THRESHOLD) {
+static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn, int *unprogressedCnt, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
   int bid = blockIdx.x;
 
   #if defined(ARRAY_DEBUG) && defined(SHOW_RUNNING_CNT)
@@ -580,7 +590,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
     if (bid < blkLimit) { // blk天然分化，保留这个条件 // TODO: 如果节省if判断对性能有提升，可以改变处理方法，让所有block处理所有的集合通信。不过好像也省不了。。。总得判断。
 
       // ***** 先准备好sharedCollCtx，全部线程都参与 *****
-      turn = maintainSharedCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
+      turn = maintainSharedCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collId, turn, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL, unprogressedCnt);
 
       // *(blkStatus.barrierCnt + 0 + 15 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
@@ -607,7 +617,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
@@ -635,7 +645,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (blkStatus.numActiveColls == 0) {
         break;
       }
-      turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn, &unprogressedCnt, BASE_CTX_SWITCH_THRESHOLD);
+      turn = traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, turn, &unprogressedCnt, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL);
 
       if (tid == 0) { // 遍历完一次之后，当前activeColl的后续工作，
         // 只有完成一个集合通信，才有必要操作taskQ
@@ -645,15 +655,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
           if (blkStatus.collStatus[collIdInTaskQ] < 0) { // 不应该有1 的存在了，只有-1, -2或者2
             blkStatus.activeCollIds[new_numActiveColls++] = collIdInTaskQ; // 小于0，就要继续放在taskQ里
-
-            // TODO: 也可以把这部分判断、操作挪到maintainSharedCtx那里，要运行一个coll之前，决定是否增加粘性，顺手记录unprogressedCnt。当然如果并行化了，或许应该在这里搞。
-            if (blkStatus.collStatus[collIdInTaskQ] == -2) {
-              unprogressedCnt += 1;
-            } else if (blkStatus.collStatus[collIdInTaskQ] == -1) {
-              unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
-              // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d, save but progressed, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatus[collIdInTaskQ]);
-              // TODO: 增加粘性
-            }
 
           } else if (blkStatus.collStatus[collIdInTaskQ] == 2) {
             unprogressedCnt = 0;

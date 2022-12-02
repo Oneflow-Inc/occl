@@ -811,6 +811,7 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[14] = &args->TRAVERSE_TIMES;
   rankCtx->argsptrs[15] = &args->TOLERANT_UNPROGRESSED_CNT;
   rankCtx->argsptrs[16] = &args->BASE_CTX_SWITCH_THRESHOLD;
+  rankCtx->argsptrs[17] = &args->BOUNS_SWITCH_4_PROCESSED_COLL;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -1107,7 +1108,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // 超参数：
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
-  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
+  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
+  int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1270,7 +1272,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
+  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
   #ifdef ARRAY_DEBUG
@@ -1279,7 +1281,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #endif
 
   if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld", TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD);
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld, BOUNS_SWITCH_4_PROCESSED_COLL=%ld", TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL);
   }
 end:
   return ret;
@@ -1293,8 +1295,9 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
 
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
-  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 100);
-  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD };
+  int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
+  int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
+  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL };
 
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 
