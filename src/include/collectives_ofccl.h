@@ -11,8 +11,7 @@
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 
-#define SHOW_QUIT_CNT 1
-#define SHOW_SWITCH_CNT 1
+#define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 // #define SHOW_RUNNING_CNT 1
@@ -90,8 +89,10 @@ typedef struct {
   // 考虑守护者kernel按需启停的时候这里的调整
   int quit;
 
-#ifdef SHOW_QUIT_CNT
-  unsigned long long int totalCtxSwitchCnt; // 统计信息，测量绝对性能的时候考虑删掉。
+#ifdef SHOW_CNT
+  unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
+  unsigned long long int totalCtxLoadCnt;
+  unsigned long long int totalProgressed7SwithchCnt;
   unsigned long long int totalUnprogressedQuitCnt;
 #endif
 

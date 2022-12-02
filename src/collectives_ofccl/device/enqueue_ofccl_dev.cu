@@ -193,10 +193,10 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
       blkStatus.sqReadFrontier = 0;
       blkStatus.numActiveColls = 0;      
 
-      #ifdef SHOW_SWITCH_CNT
-        blkStatus.totalCtxSwitchCnt = 0;
-      #endif
-      #ifdef SHOW_QUIT_CNT
+      #ifdef SHOW_CNT
+        blkStatus.totalCtxSaveCnt = 0;
+        blkStatus.totalCtxLoadCnt = 0;
+        blkStatus.totalProgressed7SwithchCnt = 0;
         blkStatus.totalUnprogressedQuitCnt = 0;
       #endif
     } else { // 从quit恢复回来
@@ -210,10 +210,10 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, int *globalBlkCo
       blkStatus.sqReadFrontier = myGlobalBlkStatus->sqReadFrontier;
       blkStatus.hasQuitted = 1;
 
-      #ifdef SHOW_SWITCH_CNT
-        blkStatus.totalCtxSwitchCnt = myGlobalBlkStatus->totalCtxSwitchCnt;
-      #endif
-      #ifdef SHOW_QUIT_CNT
+      #ifdef SHOW_CNT
+        blkStatus.totalCtxSaveCnt = myGlobalBlkStatus->totalCtxSaveCnt;
+        blkStatus.totalCtxLoadCnt = myGlobalBlkStatus->totalCtxLoadCnt;
+        blkStatus.totalProgressed7SwithchCnt = myGlobalBlkStatus->totalProgressed7SwithchCnt;
         blkStatus.totalUnprogressedQuitCnt = myGlobalBlkStatus->totalUnprogressedQuitCnt;
       #endif
     }
@@ -387,6 +387,9 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
   // __syncthreads(); // 全部线程都执行，可以使用这个同步。
 
   if (tid == 0) {
+    #ifdef SHOW_CNT
+      blkStatus.totalCtxLoadCnt++;
+    #endif
     sharedCollCtx.ringPrev = globalCollCtx4Blk7Coll->ringPrev;
     sharedCollCtx.ringNext = globalCollCtx4Blk7Coll->ringNext;
     sharedCollCtx.ringIndex = globalCollCtx4Blk7Coll->ringIndex;
@@ -488,11 +491,11 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
     globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
     globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
   
-    #ifdef SHOW_SWITCH_CNT
-      blkStatus.totalCtxSwitchCnt++;
+    #ifdef SHOW_CNT
+      blkStatus.totalCtxSaveCnt++;
     #endif
 
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSwitchCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSwitchCnt, blkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.totalCtxSaveCnt = %llu, blkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.totalCtxSaveCnt, blkStatus.numActiveColls);
 
   // // for debug
   // {
@@ -514,14 +517,14 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, old blkStatus.currLoadedCollId=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.currLoadedCollId);
   
   bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
-  bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 在traverseTaskQ中遍历taskQ的情况下，其实只有在taskQ里只剩一个元素的时候，这个条件才可能成立
-  // bool loadedCollDone = (blkStatus.collStatus[blkStatus.currLoadedCollId] == 2); // 这里不用关心这个。
+  bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 这个条件成立的情况不止一种。
 
-  bool loadedCollSaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
-  bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollSaveCtx7Quit;
+  bool loadedCollSaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
+  bool needSave = !sameLoadedColl && loadedCollSaveCtx7Quit;
+
   // TODO: 只有progressed，才需要save。
-  // bool loadedCollProgressed7SaveCtx7Quit = (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
-  // bool needSave = !noLoadedColl && !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
+  // bool loadedCollProgressed7SaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+  // bool needSave = !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
 
   bool needLoad = noLoadedColl || !sameLoadedColl;
     
@@ -539,9 +542,14 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
   if (tid == 0) {
     if (blkStatus.collStatus[collId] == -1) {
-      sharedCollCtx.ctxSwitchThreshold += BOUNS_SWITCH_4_PROCESSED_COLL;
+      // bugfix: 防止一个不需要load的coll，无休止增加下去。
+      sharedCollCtx.ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD + BOUNS_SWITCH_4_PROCESSED_COLL;
       // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatus is %d, sharedCollCtx.ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatus[collId], sharedCollCtx.ctxSwitchThreshold);
       *unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
+      
+      #ifdef SHOW_CNT
+        blkStatus.totalProgressed7SwithchCnt++;
+      #endif
     } else if (blkStatus.collStatus[collId] == -2) {
       *unprogressedCnt += 1;
     }
@@ -686,9 +694,14 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (unprogressedCnt >= TOLERANT_UNPROGRESSED_CNT && blkStatus.quit != 1) {
         BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
-        #ifdef SHOW_QUIT_CNT
-          ++blkStatus.totalUnprogressedQuitCnt;
-        #endif
+        // bugfix: 如果需要，save coll的上下文。
+        bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
+        bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
+        // bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+        if (needSave) {
+          CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
+          saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
+        }
 
         // 保存blkstatus
         myGlobalBlkStatus->hasQuitted = 1;
@@ -700,10 +713,11 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           myGlobalBlkStatus->activeCollIds[i] = blkStatus.activeCollIds[i];
         }
 
-        #ifdef SHOW_SWITCH_CNT
-          myGlobalBlkStatus->totalCtxSwitchCnt = blkStatus.totalCtxSwitchCnt;
-        #endif
-        #ifdef SHOW_QUIT_CNT
+        #ifdef SHOW_CNT
+          myGlobalBlkStatus->totalCtxSaveCnt = blkStatus.totalCtxSaveCnt;
+          myGlobalBlkStatus->totalCtxLoadCnt = blkStatus.totalCtxLoadCnt;
+          myGlobalBlkStatus->totalProgressed7SwithchCnt = blkStatus.totalProgressed7SwithchCnt;
+          ++blkStatus.totalUnprogressedQuitCnt;
           myGlobalBlkStatus->totalUnprogressedQuitCnt = blkStatus.totalUnprogressedQuitCnt;
         #endif
       }
@@ -718,29 +732,31 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     #ifdef ARRAY_DEBUG
     #ifdef SHOW_RUNNING_CNT
       if (tid == 0) {
-        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxSwitchCnt;
-        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
-        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = unprogressedCnt;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxSaveCnt;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxLoadCnt;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalProgressed7SwithchCnt;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = unprogressedCnt;
       }
     #endif
     #endif
 
     // 记录数组的前10项，未必都是有效的。所有线程都做，看到的应该是一样的。
     // for (int i = 0; i < PrintTestQNum; i++) {
-    //   *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (36 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.activeCollIds[i];
+    //   *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + (38 + i) * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.activeCollIds[i];
     // }
 
     if (blkStatus.quit == 1) {
-      #ifdef SHOW_QUIT_CNT
+      #ifdef SHOW_CNT
         if (*finallyQuit == 1) {
-          OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> collCount=%d, totalCtxSwitchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, collCount, blkStatus.totalCtxSwitchCnt, blkStatus.totalUnprogressedQuitCnt);
+          OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalProgressed7SwithchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.totalCtxSaveCnt, blkStatus.totalCtxLoadCnt, blkStatus.totalProgressed7SwithchCnt, blkStatus.totalUnprogressedQuitCnt);
         }
       #endif
       // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits", thrdCudaDev, blockIdx.x, tid);
       #ifdef ARRAY_DEBUG
         if (tid == 0) {
           *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-          #ifdef SHOW_QUIT_CNT
+          #ifdef SHOW_CNT
             *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 66 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalUnprogressedQuitCnt;
           #endif
         }
