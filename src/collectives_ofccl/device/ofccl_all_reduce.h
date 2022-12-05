@@ -17,8 +17,9 @@ namespace {
     const int nranks = sharedCollCtx.nRanks;
     const ssize_t loopSize = nChannels*nranks*chunkSize; // 没有办法按照应用的buff的大小来切分chunk，而是需要从硬件的角度去指定chunkSize。所以可能要运行多次逻辑上的ringAllReduce操作。
     const ssize_t size = args->count;
-
-    // *(blkStatus.barrierCnt + 0 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 0 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
 
     // TODO: minChunkSize 是LL和LL128用的，先省略
 
@@ -189,7 +190,7 @@ namespace {
           blkStatus.collStatus[blkStatus.currLoadedCollId] = -1;
         }
 
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx&Quit, gridOffset = %lu, currentStep = %d", sharedCollCtx.rank, blockIdx.x, tid, gridOffset, currentStep);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx&Quit, coll_id = %d, blkStatus.collStatus[blkStatus.currLoadedCollId]=%d, gridOffset = %lu, currentStep = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, blkStatus.collStatus[blkStatus.currLoadedCollId], gridOffset, currentStep);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
       } else {
         blkStatus.collStatus[blkStatus.currLoadedCollId] = 2;
@@ -198,8 +199,9 @@ namespace {
       }
     }
     
-    // *(blkStatus.barrierCnt + 1 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 1 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
     // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> leave runRing", sharedCollCtx.rank, blockIdx.x, tid);
   }
 

@@ -14,7 +14,6 @@
 #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
-// #define SHOW_RUNNING_CNT 1
 
 #define NUM_BARRIERS 30
 #define BARCNT_INNER_SIZE 10
@@ -113,56 +112,46 @@ typedef struct {
 // sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
 // 准备抛弃旧的collCtx结构，只保留我们需要的。
 typedef struct {
-  // union {
-  //   uint64_t ll128warp[NCCL_LL128_MAX_NTHREADS/WARP_SIZE][NCCL_LL128_SHMEM_ELEMS_PER_THREAD*WARP_SIZE]; // 这个占得大，占了40960
-  //   CollCtxGroup groups[NCCL_MAX_GROUPS]; // 这个只占了3968
-  // };
-  // uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
-  // struct ncclDevComm comm;
-  // struct ncclChannel channel;
-  // uint64_t pad;
-  // struct ncclWork work; // TODO: 可以考虑把这个换成workElem，省点shmem。
+  // TODO: 对LL、LL128的支持
 
-  /* ****** 手动加载用得到的shmemData ****** */
-  // 这两个是启动相应的coll的执行之后，Primitive构造函数里填充的
-  CollCtxGroup groups[NCCL_MAX_GROUPS];
-  uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+  /* ****** 每次执行需要重置 ****** */
+  int saveCtx7Quit;
 
-  struct ncclWorkElem workElem; // 复杂
 
+  /* ****** 每次load需要重置、加载 ****** */
+  int progressed;
+  struct ncclWorkElem workElem;
   // 来自channel.ring
   int ringPrev;
   int ringNext;
   int ringIndex;
-
   // 来自channel
   struct ncclPeer* devPeers;
-
   // 来自comm(devComm, 不是普通comm)
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
   volatile uint32_t *abortFlag;
-  int buffSizes[NCCL_NUM_PROTOCOLS];
+  // Prims Simple的上下文
+  int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
+  int slice4SimpleGenericOp;
+  int offset4SimpleGenericOp;
+  int64_t ctxSwitchThreshold;
 
-  /* ****** 上下文 ****** */
-
+  // Ring AllReduce的上下文
+  int currentStep4RingAllReduce;
+  ssize_t gridOffset4RingAllReduce;
   #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
     unsigned long long sqeReadCnt;
     unsigned long long cqeWriteCnt;
     unsigned long long cqePrepareCnt;
   #endif
 
-  // ****** Prims Simple ******
-  int saveCtx7Quit;
-  int progressed;
-  int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
-  int slice4SimpleGenericOp;
-  int offset4SimpleGenericOp;
+  /* ****** 不需要load和save ****** */ 
+  // 这两个是启动相应的coll的执行之后，Primitive构造函数里填充的
+  CollCtxGroup groups[NCCL_MAX_GROUPS];
+  uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
+  int buffSizes[NCCL_NUM_PROTOCOLS]; // 来自comm(devComm, 不是普通comm)
 
-  // ****** Ring AllReduce ******
-  int currentStep4RingAllReduce;
-  ssize_t gridOffset4RingAllReduce;
-  int64_t ctxSwitchThreshold;
 } CollCtx;
 
 extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);

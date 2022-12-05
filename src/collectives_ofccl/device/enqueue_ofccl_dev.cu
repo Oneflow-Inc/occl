@@ -416,6 +416,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     // TODO: 目前只有simple ring allreduce，之后考虑通用性和扩展性。
     blkStatus.currLoadedCollId = collId;
     
+    sharedCollCtx.progressed = 0;
     sharedCollCtx.loadAgain = globalCollCtx4Blk7Coll->loadAgain;
     sharedCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->slice4SimpleGenericOp;
     sharedCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->offset4SimpleGenericOp;
@@ -519,12 +520,12 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
   bool sameLoadedColl = (collId == blkStatus.currLoadedCollId); // 这个条件成立的情况不止一种。
 
-  bool loadedCollSaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
-  bool needSave = !sameLoadedColl && loadedCollSaveCtx7Quit;
+  // bool loadedCollSaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
+  // bool needSave = !sameLoadedColl && loadedCollSaveCtx7Quit;
 
   // TODO: 只有progressed，才需要save。
-  // bool loadedCollProgressed7SaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
-  // bool needSave = !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
+  bool loadedCollProgressed7SaveCtx7Quit = !noLoadedColl && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+  bool needSave = !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
 
   bool needLoad = noLoadedColl || !sameLoadedColl;
     
@@ -533,11 +534,15 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
     CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
 
     saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
+
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
   }
 
   if (needLoad) {
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
+
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.loadAgain=%d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.loadAgain, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
   }
 
   if (tid == 0) {
@@ -551,27 +556,22 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
         blkStatus.totalProgressed7SwithchCnt++;
       #endif
     } else if (blkStatus.collStatus[collId] == -2) {
+      sharedCollCtx.ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
       *unprogressedCnt += 1;
     }
-    blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。
+
+    blkStatus.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。 
     sharedCollCtx.saveCtx7Quit = 0; // 重置。
-    sharedCollCtx.progressed = 0;
   }
 
   ofcclBarrier(4);
-  // if (needSave) {
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
-  // }
-  // if (needLoad) {
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
-  // }
   return turn;
 }
 
 static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn, int *unprogressedCnt, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
   int bid = blockIdx.x;
 
-  #if defined(ARRAY_DEBUG) && defined(SHOW_RUNNING_CNT)
+  #if defined(ARRAY_DEBUG)
     *(blkStatus.barrierCnt + 0 + 11 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     if (blkStatus.numActiveColls == 0) {
       *(blkStatus.barrierCnt + 1 + 11 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -617,7 +617,7 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
     // *(blkStatus.barrierCnt + 1 + 10 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   }
-  #if defined(ARRAY_DEBUG) && defined(SHOW_RUNNING_CNT)
+  #if defined(ARRAY_DEBUG)
     *(blkStatus.barrierCnt + 2 + 11 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   #endif
 
@@ -694,10 +694,10 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (unprogressedCnt >= TOLERANT_UNPROGRESSED_CNT && blkStatus.quit != 1) {
         BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
 
-        // bugfix: 如果需要，save coll的上下文。
+        // bugfix: 如果需要，应该save coll的上下文。
         bool noLoadedColl = (blkStatus.currLoadedCollId == -1);
-        bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
-        // bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1);
+        // bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] < 0);
+        bool needSave = (!noLoadedColl) && (blkStatus.collStatus[blkStatus.currLoadedCollId] == -1); // TODO
         if (needSave) {
           CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + blkStatus.currLoadedCollId;
           saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
@@ -730,7 +730,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     // // daemonKernel一开始这个数组用不上，可以用来记点其他信息
 
     #ifdef ARRAY_DEBUG
-    #ifdef SHOW_RUNNING_CNT
       if (tid == 0) {
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxSaveCnt;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.totalCtxLoadCnt;
@@ -738,7 +737,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.numActiveColls;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = unprogressedCnt;
       }
-    #endif
     #endif
 
     // 记录数组的前10项，未必都是有效的。所有线程都做，看到的应该是一样的。
