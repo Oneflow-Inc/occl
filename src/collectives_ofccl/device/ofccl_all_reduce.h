@@ -181,19 +181,19 @@ namespace {
   run_ring_end:
     if (tid == 0) {
       if (sharedCollCtx.saveCtx7Quit == 1) {
-        blkStatus.collStatus[blkStatus.currLoadedCollId] = -2;
+        blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = -2;
         // 说明是跑到一半要退出了，保存上下文
         sharedCollCtx.currentStep4RingAllReduce = currentStep;
         sharedCollCtx.gridOffset4RingAllReduce = gridOffset;
 
         if (sharedCollCtx.progressed == 1) { // 不需要在下边完成的情况下判断是否progress。
-          blkStatus.collStatus[blkStatus.currLoadedCollId] = -1;
+          blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = -1;
         }
 
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx&Quit, coll_id = %d, blkStatus.collStatus[blkStatus.currLoadedCollId]=%d, gridOffset = %lu, currentStep = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, blkStatus.collStatus[blkStatus.currLoadedCollId], gridOffset, currentStep);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, runRing saveCtx&Quit, coll_id = %d, blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId]=%d, gridOffset = %lu, currentStep = %d", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId], gridOffset, currentStep);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
       } else {
-        blkStatus.collStatus[blkStatus.currLoadedCollId] = 2;
+        blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = 2;
       //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, runRing success, gridOffset = %lu, size = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, size, currentStep, loopSize);
       //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
       }

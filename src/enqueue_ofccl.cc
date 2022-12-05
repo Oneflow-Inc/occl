@@ -735,7 +735,7 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   return ret;
 }
 
-ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx) {  
+ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, short collId, ofcclRankCtx_t rankCtx) {  
   ncclResult_t ret = ncclSuccess;
   
   if (rankCtx->collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
@@ -857,7 +857,7 @@ void *startPoller(void *args) {
     if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
       sched_yield();
     } else {
-      int collId = target.collId;
+      short collId = target.collId;
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
       // *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
@@ -933,14 +933,16 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
 
   for (int bid = 0; bid < printBlkNum; ++bid) {
     file << " (" << bid << ")";
-    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+    for (int i = 0; i < rankCtx->collCount; ++i) {
+      short collId = rankCtx->hostCollIds[i];
       file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
     }
     file << std::endl;
   }
   if (printBlkNum > 1 && needSum) {
     file << " (BLK SUM)";
-    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+    for (int i = 0; i < rankCtx->collCount; ++i) {
+      short collId = rankCtx->hostCollIds[i];
       unsigned long long sumCounter = 0;
       for (int bid = 0; bid < printBlkNum; ++bid) {
         sumCounter += *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -954,7 +956,8 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
 void printCollCounterCompareBlock(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId) {
   int printBlkNum = rankCtx->daemonKernelGridDim.x;
 
-  for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+  for (int i = 0; i < rankCtx->collCount; ++i) {
+    short collId = rankCtx->hostCollIds[i];
     file << " {" << collId << "}<";  
     for (int bid = 0; bid < printBlkNum; ++bid) {
       file << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -1143,7 +1146,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   // ***** first for loop *****
   for (int i = 0; i < rankCtx->collCount; i++) {
-    int collId = rankCtx->hostCollIds[i];
+    short collId = rankCtx->hostCollIds[i];
     ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
@@ -1167,7 +1170,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->daemonKernelBlockDim.x = 0;
 
   for (int i = 0; i < rankCtx->collCount; i++) {
-    int collId = rankCtx->hostCollIds[i];
+    short collId = rankCtx->hostCollIds[i];
     ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
@@ -1256,7 +1259,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
 
+  rankCtx->hostBlkStatus = (BlkStatus *)calloc(rankCtx->daemonKernelGridDim.x, sizeof(BlkStatus));
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlkStatus, rankCtx->hostBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus), cudaMemcpyHostToDevice)); // 确保第一次进去，myGlobalBlkStatus->hasQuitted == 0
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
@@ -1337,6 +1342,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
   checkRuntime(cudaFree(rankCtx->globalThrdCount4Coll));
+  free(rankCtx->hostBlkStatus);
   checkRuntime(cudaFree(rankCtx->globalCollIds));
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));

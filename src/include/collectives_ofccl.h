@@ -33,7 +33,7 @@
 
 // SQ read by device, written by host; CQ read by host, written by device;
 typedef struct {
-  int collId;
+  short collId;
   int counter;
 
   const void *sendbuff;
@@ -51,7 +51,7 @@ typedef struct {
 } SQ;
 
 typedef struct {
-  int collId;
+  short collId;
   int counter;
 } CQE;
 
@@ -76,29 +76,52 @@ typedef struct {
   int *contexts;
 } CollExecContext;
 
-typedef struct {
-  int numActiveColls;
-  int currLoadedCollId;
+typedef struct alignas(16) {
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
+  #ifdef SHOW_CNT
+    unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
+    unsigned long long int totalCtxLoadCnt;
+    unsigned long long int totalProgressed7SwithchCnt;
+    unsigned long long int totalUnprogressedQuitCnt;
+  #endif
+  int numActiveColls;
+
+} DynamicBlkStatus;
+
+typedef struct alignas(16) {
+  // 加载这个数组时，元素都设成0就好
+  char collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-2：switch且没有progress；-1：switch但有progress
+} CollStatusAlign;
+
+typedef struct alignas(16) {
+  short activeCollIds[MAX_LENGTH];
+} ActiveCollIdsAlign;
+
+typedef struct alignas(16) {
+  /* ****** 根据hasQuitted的值，决定重置还是从globalMem里读 ****** */
+  DynamicBlkStatus dynamicBlkStatus;
+
+
+  /* ****** 根据宏单独处理 ****** */ 
+  #ifdef ARRAY_DEBUG
+    unsigned long long int *barrierCnt;
+    unsigned long long int *collCounters;
+  #endif
+
+
+  /* ****** 数组有单独复制 ****** */
+  // 这样的好处是以16B复制的时候，没有越界风险
+  CollStatusAlign collStatusAlign;
+  ActiveCollIdsAlign activeCollIdsAlign;
+
+
+  /* ****** 固定从globalMem里读 ****** */
   int hasQuitted; // 记录曾经Quit过的状态，一旦被设置，就不再清零。
 
-  int activeCollIds[MAX_LENGTH];
-  int collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-2：switch且没有progress；-1：switch但有progress
 
-  // 考虑守护者kernel按需启停的时候这里的调整
+  /* ****** daemonKernel每次启动需要重置 ****** */
   int quit;
-
-#ifdef SHOW_CNT
-  unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
-  unsigned long long int totalCtxLoadCnt;
-  unsigned long long int totalProgressed7SwithchCnt;
-  unsigned long long int totalUnprogressedQuitCnt;
-#endif
-
-#ifdef ARRAY_DEBUG
-  unsigned long long int *barrierCnt;
-  unsigned long long int *collCounters;
-#endif
+  short currLoadedCollId;
 } BlkStatus;
 
 typedef struct {
@@ -154,7 +177,7 @@ typedef struct {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

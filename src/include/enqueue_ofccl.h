@@ -54,7 +54,7 @@ inline unsigned long long int CpuLogicCqTail(CQ *cq) {
   return *tailPtr % cq->length;
 }
 
-extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, short collId, ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
@@ -90,6 +90,7 @@ struct ofcclRankCtx {
   pthread_t kernel7SqObserver;
   ObserverThrdArgs observerThrdArgs;
 
+  BlkStatus *hostBlkStatus;
   BlkStatus *globalBlkStatus; // 由于quit，需要保存、恢复blkStatus
 
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
@@ -112,8 +113,8 @@ struct ofcclRankCtx {
   int *globalBlkCount4Coll;
   int hostThrdCount4Coll[MAX_LENGTH];
   int *globalThrdCount4Coll;
-  int hostCollIds[MAX_LENGTH];
-  int *globalCollIds;
+  short hostCollIds[MAX_LENGTH];
+  short *globalCollIds;
   DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
   DevComm7WorkElem *globalDevComm7WorkElems;
   CollCtx *globalBlk2CollId2CollCtx;

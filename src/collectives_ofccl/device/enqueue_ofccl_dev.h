@@ -2,6 +2,10 @@
 #include "op128_ofccl.h"
 #include "common_ofccl.h" // for CollCtx
 
+#define COPY_ELEM_SIZE 16
+#define CS_ELEM_SIZE sizeof(char) // CollStatus
+#define ACI_ELEM_SIZE sizeof(short) // ActiveCollIds
+
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
 
 #define DevRingBufferLogicFrontier(B, frontier) (frontier % (B)->length)

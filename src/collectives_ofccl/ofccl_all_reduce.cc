@@ -10,8 +10,8 @@
 #include "nccl.h"
 #include <pthread.h>
 
-NCCL_API(ncclResult_t, ofcclPrepareAllReduce, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
-ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
+NCCL_API(ncclResult_t, ofcclPrepareAllReduce, size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, short collId, ofcclRankCtx_t rankCtx);
+ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, short collId, ofcclRankCtx_t rankCtx) {
   NVTX3_FUNC_RANGE_IN(ofccl_domain);
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     nullptr, nullptr, count, datatype, op, 0, comm, nullptr, /* Args */
@@ -20,8 +20,8 @@ ncclResult_t ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRe
   
 }
 
-NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
+NCCL_API(ncclResult_t, ofcclRunAllReduce, const void* sendbuff, void* recvbuff, short collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, short collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
 
   SQE sqe = { collId, 0, sendbuff, recvbuff, false };
   int thrdCudaDev;

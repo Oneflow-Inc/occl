@@ -192,17 +192,6 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
  * below).
  */
 
-/*
- * OFCCL prepare collective
- *
- * Calculate nChannels, gridDim, blockDim, etc given count
- * 
- * Should not expose to clients.
- *
- */
-// ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
-// ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
-
 
 /*
  * Create OfcclRankCtxOfcclRankCtx for one rank.
@@ -309,8 +298,8 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
  * 
  * 
  */
-ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
-ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t  ofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, short collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, short collId, ofcclRankCtx_t rankCtx);
 
 /*
  * OFCCL Run All-Reduce
@@ -323,8 +312,8 @@ ncclResult_t pofcclPrepareAllReduce(size_t count, ncclDataType_t datatype, ncclR
  * OFCCL manages the stream itself, client does not need to provide one.
  *
  */
-ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
-ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, short collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunAllReduce(const void* sendbuff, void* recvbuff, short collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
 /*
  * Reduce-Scatter
