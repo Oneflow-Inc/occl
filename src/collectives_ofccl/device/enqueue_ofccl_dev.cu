@@ -130,6 +130,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
 
     blkStatus.quit = 0;
     blkStatus.currLoadedCollId = -1;
+    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
   }
 
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
@@ -172,9 +173,6 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
   // TODO: 并行提高复制效率。
   if (tid == 0) {
 
-    sharedCollCtx.saveCtx7Quit = 0;
-    sharedCollCtx.progressed = 0;
-    sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
     for (int i = 0; i < collCount; i++) {
       int collId = sharedIdsAlign.collIds[i];
       // 以下这两个变量会限制很多行为。
@@ -192,16 +190,16 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
           ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
           ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
 
-          globalCollCtx4Blk7Coll->ringPrev = channel->ring.prev;
-          globalCollCtx4Blk7Coll->ringNext = channel->ring.next;
-          globalCollCtx4Blk7Coll->ringIndex = channel->ring.index;
-          globalCollCtx4Blk7Coll->devPeers = channel->devPeers; // 直接赋值指针
+          globalCollCtx4Blk7Coll->staticCollCtx.ringPrev = channel->ring.prev;
+          globalCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
+          globalCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
+          globalCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
 
-          globalCollCtx4Blk7Coll->rank = comm->rank;
-          globalCollCtx4Blk7Coll->nRanks = comm->nRanks;
-          globalCollCtx4Blk7Coll->abortFlag = comm->abortFlag;
+          globalCollCtx4Blk7Coll->staticCollCtx.rank = comm->rank;
+          globalCollCtx4Blk7Coll->staticCollCtx.nRanks = comm->nRanks;
+          globalCollCtx4Blk7Coll->staticCollCtx.abortFlag = comm->abortFlag;
 
-          copyNcclWorkElem(globalCollCtx4Blk7Coll->workElem, globalDevComm7WorkElems[collId].first);
+          copyNcclWorkElem(globalCollCtx4Blk7Coll->staticCollCtx.workElem, globalDevComm7WorkElems[collId].first);
 
           /* ****** 上下文 ****** */
 
@@ -212,12 +210,12 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
           #endif
 
           // bugfix: 下边原来都是设置的globalBlk2CollId2CollCtx->XXXX，相当于都设置了第0个block的第0个coll。。。。。。。
-          globalCollCtx4Blk7Coll->loadAgain = 0;
-          globalCollCtx4Blk7Coll->slice4SimpleGenericOp = 0;
-          globalCollCtx4Blk7Coll->offset4SimpleGenericOp = 0;
+          globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
+          globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
+          globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
 
-          globalCollCtx4Blk7Coll->currentStep4RingAllReduce = 0;
-          globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
+          globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
+          globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
         }
       }
     }
@@ -280,8 +278,8 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
         OFCCL_LOG(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicSqHead(sq), DevLogicSqTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
       #endif
       
-      globalCollCtx4Blk7Coll->workElem.sendbuff = target.sendbuff;
-      globalCollCtx4Blk7Coll->workElem.recvbuff = target.recvbuff;
+      globalCollCtx4Blk7Coll->staticCollCtx.workElem.sendbuff = target.sendbuff;
+      globalCollCtx4Blk7Coll->staticCollCtx.workElem.recvbuff = target.recvbuff;
 
       // maintain the taskQ here.
       // 新加入的集合通信放在末位，最后执行。如果新加入的集合通信存在于当前的blkStatus.activeCollIds里边，也不必强行放到末位。
@@ -319,45 +317,45 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
     #ifdef SHOW_CNT
       blkStatus.dynamicBlkStatus.totalCtxLoadCnt++;
     #endif
-    sharedCollCtx.ringPrev = globalCollCtx4Blk7Coll->ringPrev;
-    sharedCollCtx.ringNext = globalCollCtx4Blk7Coll->ringNext;
-    sharedCollCtx.ringIndex = globalCollCtx4Blk7Coll->ringIndex;
-    sharedCollCtx.devPeers = globalCollCtx4Blk7Coll->devPeers;
-
-    sharedCollCtx.rank = globalCollCtx4Blk7Coll->rank;
-    sharedCollCtx.nRanks = globalCollCtx4Blk7Coll->nRanks;
-    sharedCollCtx.abortFlag = globalCollCtx4Blk7Coll->abortFlag;
-
-    copyNcclWorkElem(sharedCollCtx.workElem, globalCollCtx4Blk7Coll->workElem);
-
-    // // for debug
-    // {
-    //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-    //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-    //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-    //   uint64_t head = recvConn->step;
-    //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-    //   uint64_t tail = sendConn->step;
-    //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d load head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, collId, head, tail);
-    // }
-
-    // 加载algo、proto、func相关的运行上下文。
-    // TODO: 目前只有simple ring allreduce，之后考虑通用性和扩展性。
     blkStatus.currLoadedCollId = collId;
-    
-    sharedCollCtx.progressed = 0;
-    sharedCollCtx.loadAgain = globalCollCtx4Blk7Coll->loadAgain;
-    sharedCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->slice4SimpleGenericOp;
-    sharedCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->offset4SimpleGenericOp;
 
-    // sharedCollCtx.totalSteps4RingAllReduce = 2 * sharedCollCtx.nRanks - 1;
-    sharedCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->currentStep4RingAllReduce;
-    sharedCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->gridOffset4RingAllReduce;
+    sharedCollCtx.progressed = 0;
     sharedCollCtx.ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
+    
+    sharedCollCtx.staticCollCtx.ringPrev = globalCollCtx4Blk7Coll->staticCollCtx.ringPrev;
+    sharedCollCtx.staticCollCtx.ringNext = globalCollCtx4Blk7Coll->staticCollCtx.ringNext;
+    sharedCollCtx.staticCollCtx.ringIndex = globalCollCtx4Blk7Coll->staticCollCtx.ringIndex;
+    sharedCollCtx.staticCollCtx.devPeers = globalCollCtx4Blk7Coll->staticCollCtx.devPeers;
+
+    sharedCollCtx.staticCollCtx.rank = globalCollCtx4Blk7Coll->staticCollCtx.rank;
+    sharedCollCtx.staticCollCtx.nRanks = globalCollCtx4Blk7Coll->staticCollCtx.nRanks;
+    sharedCollCtx.staticCollCtx.abortFlag = globalCollCtx4Blk7Coll->staticCollCtx.abortFlag;    
+    sharedCollCtx.dynamicCollCtx.loadAgain = globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain;
+    sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp = globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp;
+    sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp = globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp;
+    sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce = globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce;
+    sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce = globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce;
+
+    copyNcclWorkElem(sharedCollCtx.staticCollCtx.workElem, globalCollCtx4Blk7Coll->staticCollCtx.workElem);
     // __threadfence_block();
   }
 
   return turn;
+}
+
+static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId) {
+  if(threadIdx.x == 0) {
+    globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = sharedCollCtx.dynamicCollCtx.loadAgain;
+    globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp;
+    globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp;
+  
+    globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce;
+    globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce;
+  
+    #ifdef SHOW_CNT
+      blkStatus.dynamicBlkStatus.totalCtxSaveCnt++;
+    #endif
+  }
 }
 
 static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
@@ -392,52 +390,12 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
   blkStatus.collStatusAlign.collStatus[doneCollId] = 0;
 
-  globalCollCtx4Blk7Coll->loadAgain = 0;
-
   // ResetDoneColl
-  globalCollCtx4Blk7Coll->slice4SimpleGenericOp = 0;
-  globalCollCtx4Blk7Coll->offset4SimpleGenericOp = 0;
-  globalCollCtx4Blk7Coll->currentStep4RingAllReduce = 0;
-  globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = 0;
-
-  // for debug
-  // {
-  //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-  //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-  //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-  //   uint64_t head = recvConn->step;
-  //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-  //   uint64_t tail = sendConn->step;
-  //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d done head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, tid, doneCollId, head, tail);
-  // }
-}
-
-static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId) {
-  if(threadIdx.x == 0) {
-    globalCollCtx4Blk7Coll->loadAgain = sharedCollCtx.loadAgain;
-    globalCollCtx4Blk7Coll->slice4SimpleGenericOp = sharedCollCtx.slice4SimpleGenericOp;
-    globalCollCtx4Blk7Coll->offset4SimpleGenericOp = sharedCollCtx.offset4SimpleGenericOp;
-  
-    globalCollCtx4Blk7Coll->currentStep4RingAllReduce = sharedCollCtx.currentStep4RingAllReduce;
-    globalCollCtx4Blk7Coll->gridOffset4RingAllReduce = sharedCollCtx.gridOffset4RingAllReduce;
-  
-    #ifdef SHOW_CNT
-      blkStatus.dynamicBlkStatus.totalCtxSaveCnt++;
-    #endif
-
-  // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, blkStatus.dynamicBlkStatus.totalCtxSaveCnt = %llu, blkStatus.dynamicBlkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.numActiveColls);
-
-  // // for debug
-  // {
-  //   struct ncclPeer *recvPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringPrev];
-  //   struct ncclPeer *sendPeer = &sharedCollCtx.devPeers[sharedCollCtx.ringNext];
-  //   struct ncclConnInfo *recvConn = &recvPeer->recv[0].conn;
-  //   uint64_t head = recvConn->step;
-  //   struct ncclConnInfo *sendConn = &sendPeer->send[0].conn;
-  //   uint64_t tail = sendConn->step;
-  //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d save head = %llu, tail = %llu", sharedCollCtx.rank, blockIdx.x, threadIdx.x, collId, head, tail);
-  // }
-  }
+  globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
 }
 
 static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL, int *unprogressedCnt) {
@@ -464,14 +422,14 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
     saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, blkStatus.currLoadedCollId);
 
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.currLoadedCollId, sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce);
   }
 
   if (needLoad) {
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
 
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.loadAgain=%d, sharedCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.loadAgain, sharedCollCtx.slice4SimpleGenericOp, sharedCollCtx.offset4SimpleGenericOp, sharedCollCtx.currentStep4RingAllReduce, sharedCollCtx.gridOffset4RingAllReduce);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx.dynamicCollCtx.loadAgain=%d, sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx.dynamicCollCtx.loadAgain, sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx.dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx.dynamicCollCtx.gridOffset4RingAllReduce);
   }
 
   if (tid == 0) {
@@ -533,8 +491,8 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
       // ***** 然后调用ofcclFunc *****
       int wid = threadIdx.x / WARP_SIZE;
-      if (wid < sharedCollCtx.workElem.header.nWarps) {
-        ofcclFuncs[sharedCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
+      if (wid < sharedCollCtx.staticCollCtx.workElem.header.nWarps) {
+        ofcclFuncs[sharedCollCtx.staticCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
       }
 
       // *(blkStatus.barrierCnt + 1 + 15 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;

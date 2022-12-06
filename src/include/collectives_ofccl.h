@@ -132,18 +132,8 @@ typedef struct {
   int totalSendSize[NCCL_MAX_SLICE_PER_CHUNK];
 } CollCtxGroup;
 
-// sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
-// 准备抛弃旧的collCtx结构，只保留我们需要的。
 typedef struct alignas(16) {
-  // TODO: 对LL、LL128的支持
-
-  /* ****** 每次执行需要重置 ****** */
-  int saveCtx7Quit;
-
-
-  /* ****** 每次load需要重置、加载 ****** */
-  int progressed;
-  struct ncclWorkElem workElem;
+  struct ncclWorkElem workElem; // sizeof(struct ncclWorkElem)=64
   // 来自channel.ring
   int ringPrev;
   int ringNext;
@@ -154,21 +144,45 @@ typedef struct alignas(16) {
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
   volatile uint32_t *abortFlag;
+} StaticCollCtx;
+
+typedef struct alignas(16) {
   // Prims Simple的上下文
   int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;
-  int64_t ctxSwitchThreshold;
   // Ring AllReduce的上下文
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
+
+} DynamicCollCtx;
+
+// sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512, sizeof(struct ncclWorkElem)=64, sizeof(struct ncclWorkElemHeader)=4
+// 准备抛弃旧的collCtx结构，只保留我们需要的。
+typedef struct alignas(16) {
+  // TODO: 对LL、LL128的支持
+
+
+  /* ****** 每次执行需要重置 ****** */
+  int saveCtx7Quit;
+
+
+  /* ****** 每次load需要重置、加载 ****** */
+  // ---- load的时候用常数重置 ----
+  int progressed;
+  int64_t ctxSwitchThreshold;
+  // ---- 只需要load，不需要save ----
+  StaticCollCtx staticCollCtx;
+  // ---- load、save的时候都需要和globalMem发生关系；完成的时候需要用0重置 ----
+  DynamicCollCtx dynamicCollCtx;
+
+
+  /* ****** 不需要load和save ****** */ 
   #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
     unsigned long long sqeReadCnt;
     unsigned long long cqeWriteCnt;
     unsigned long long cqePrepareCnt;
   #endif
-
-  /* ****** 不需要load和save ****** */ 
   // 这两个是启动相应的coll的执行之后，Primitive构造函数里填充的
   CollCtxGroup groups[NCCL_MAX_GROUPS];
   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
