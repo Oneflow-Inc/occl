@@ -33,7 +33,7 @@
 
 // SQ read by device, written by host; CQ read by host, written by device;
 typedef struct {
-  short collId;
+  int collId;
   int counter;
 
   const void *sendbuff;
@@ -51,7 +51,7 @@ typedef struct {
 } SQ;
 
 typedef struct {
-  short collId;
+  int collId;
   int counter;
 } CQE;
 
@@ -121,7 +121,7 @@ typedef struct alignas(16) {
 
   /* ****** daemonKernel每次启动需要重置 ****** */
   int quit;
-  short currLoadedCollId;
+  int currLoadedCollId;
 } BlkStatus;
 
 typedef struct {
@@ -134,7 +134,7 @@ typedef struct {
 
 // sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
 // 准备抛弃旧的collCtx结构，只保留我们需要的。
-typedef struct {
+typedef struct alignas(16) {
   // TODO: 对LL、LL128的支持
 
   /* ****** 每次执行需要重置 ****** */
@@ -159,7 +159,6 @@ typedef struct {
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;
   int64_t ctxSwitchThreshold;
-
   // Ring AllReduce的上下文
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
@@ -177,7 +176,7 @@ typedef struct {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

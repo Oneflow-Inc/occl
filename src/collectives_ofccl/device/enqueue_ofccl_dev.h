@@ -3,12 +3,20 @@
 #include "common_ofccl.h" // for CollCtx
 
 #define COPY_ELEM_SIZE 16
-#define CS_ELEM_SIZE sizeof(char) // CollStatus
-#define ACI_ELEM_SIZE sizeof(short) // ActiveCollIds
+#define CHAR_ELEM_SIZE sizeof(char) // CollStatus
+#define SHORT_ELEM_SIZE sizeof(short) // ActiveCollIds
 
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
 
 #define DevRingBufferLogicFrontier(B, frontier) (frontier % (B)->length)
+
+typedef struct alignas(16) {
+  short collIds[MAX_LENGTH];
+} IdsAlign;
+
+typedef struct alignas(16) {
+  char blkCount4Coll[MAX_LENGTH];
+} BlkCount4CollAlign;
 
 inline __device__ bool DevCqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);

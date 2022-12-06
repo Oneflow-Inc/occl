@@ -21,6 +21,8 @@ namespace {
       *(blkStatus.barrierCnt + 0 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     #endif
 
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> args->bid=%d", sharedCollCtx.rank, blockIdx.x, tid, args->bid);
+
     // TODO: minChunkSize 是LL和LL128用的，先省略
 
     // TODO: ofccl/src/include/devcomm.h中ncclRing的定义里，int prev和int next两个成员变量的定位是Shortcuts for userRanks[1] and userRanks[n-1]。不过我们直接把int取出来存着应该没问题。

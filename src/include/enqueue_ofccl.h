@@ -54,7 +54,7 @@ inline unsigned long long int CpuLogicCqTail(CQ *cq) {
   return *tailPtr % cq->length;
 }
 
-extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, short collId, ofcclRankCtx_t rankCtx);
+extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
@@ -109,8 +109,8 @@ struct ofcclRankCtx {
 
   CQE hostCqes[MAX_LENGTH];
   CQE *globalCqes;
-  int hostBlkCount4Coll[MAX_LENGTH];
-  int *globalBlkCount4Coll;
+  char hostBlkCount4Coll[MAX_LENGTH];
+  char *globalBlkCount4Coll;
   int hostThrdCount4Coll[MAX_LENGTH];
   int *globalThrdCount4Coll;
   short hostCollIds[MAX_LENGTH];

@@ -393,6 +393,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
   int nChannels = elem->nChannels; // ofcclComputeColl里边直接复制getAlgoInfo里存在ncclInfo里的计算结果
   size_t channelSize = elem->count*ncclTypeSize(proxyOp->dtype)/elem->nChannels;
   enum ncclWorkElemType workElemType = proxyOp->redOp == ncclNumOps ? ncclWorkTypeColl : ncclWorkTypeRegColl;  // redOp is only set when using CollNet
+  // OFCCL_LOG(OFCCL, "nChannels=%d", nChannels);
   
   for (int bid=0; bid<nChannels; bid++) {
     int channelId = ofGetNextChannel(comm);
@@ -404,6 +405,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
 
     elem->bid = bid % nChannels;
+    // OFCCL_LOG(OFCCL, "elem->bid=%d", elem->bid);
     struct ncclWork* w = NULL;
     int segment = -1;
     // 原来的nccl代码中，这里会尝试设置一个更大的segment：Try to pack more segments into a single operation
@@ -735,7 +737,7 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   return ret;
 }
 
-ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, short collId, ofcclRankCtx_t rankCtx) {  
+ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx) {  
   ncclResult_t ret = ncclSuccess;
   
   if (rankCtx->collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
@@ -857,7 +859,7 @@ void *startPoller(void *args) {
     if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
       sched_yield();
     } else {
-      short collId = target.collId;
+      int collId = target.collId;
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
       // *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
@@ -934,7 +936,7 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
   for (int bid = 0; bid < printBlkNum; ++bid) {
     file << " (" << bid << ")";
     for (int i = 0; i < rankCtx->collCount; ++i) {
-      short collId = rankCtx->hostCollIds[i];
+      int collId = rankCtx->hostCollIds[i];
       file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
     }
     file << std::endl;
@@ -942,7 +944,7 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
   if (printBlkNum > 1 && needSum) {
     file << " (BLK SUM)";
     for (int i = 0; i < rankCtx->collCount; ++i) {
-      short collId = rankCtx->hostCollIds[i];
+      int collId = rankCtx->hostCollIds[i];
       unsigned long long sumCounter = 0;
       for (int bid = 0; bid < printBlkNum; ++bid) {
         sumCounter += *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -957,7 +959,7 @@ void printCollCounterCompareBlock(ofcclRankCtx *rankCtx, std::ofstream &file, in
   int printBlkNum = rankCtx->daemonKernelGridDim.x;
 
   for (int i = 0; i < rankCtx->collCount; ++i) {
-    short collId = rankCtx->hostCollIds[i];
+    int collId = rankCtx->hostCollIds[i];
     file << " {" << collId << "}<";  
     for (int bid = 0; bid < printBlkNum; ++bid) {
       file << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -1146,7 +1148,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   // ***** first for loop *****
   for (int i = 0; i < rankCtx->collCount; i++) {
-    short collId = rankCtx->hostCollIds[i];
+    int collId = rankCtx->hostCollIds[i];
     ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     NCCLCHECKGOTO(ofcclSetupAsyncKernels(comm), ret, end);
@@ -1170,7 +1172,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->daemonKernelBlockDim.x = 0;
 
   for (int i = 0; i < rankCtx->collCount; i++) {
-    short collId = rankCtx->hostCollIds[i];
+    int collId = rankCtx->hostCollIds[i];
     ofcclCommArgs *args = rankCtx->ofcclCommList + collId;
     ncclComm_t comm = args->comm;
     struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
@@ -1240,14 +1242,14 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalCqes, MAX_LENGTH * sizeof(CQE)));
   checkRuntime(cudaMemcpy(rankCtx->globalCqes, rankCtx->hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalBlkCount4Coll, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(rankCtx->globalBlkCount4Coll, rankCtx->hostBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalBlkCount4Coll, MAX_LENGTH * sizeof(char)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlkCount4Coll, rankCtx->hostBlkCount4Coll, MAX_LENGTH * sizeof(char), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&rankCtx->globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
   checkRuntime(cudaMemcpy(rankCtx->globalThrdCount4Coll, rankCtx->hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
+  checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
   checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
