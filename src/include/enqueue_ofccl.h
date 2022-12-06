@@ -117,6 +117,7 @@ struct ofcclRankCtx {
   short *globalCollIds;
   DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
   DevComm7WorkElem *globalDevComm7WorkElems;
+  CollCtx *hostBlk2CollId2CollCtx;
   CollCtx *globalBlk2CollId2CollCtx;
   
   SQ *sq;

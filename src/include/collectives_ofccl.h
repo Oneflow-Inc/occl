@@ -3,6 +3,7 @@
 
 #include "collectives.h"
 #include "devcomm.h"
+#include "nccl.h"
 #include <cstdint>
 #include <pthread.h>
 #include <sys/types.h>
@@ -65,8 +66,8 @@ typedef struct {
 } CQ;
 
 struct DevComm7WorkElem {
+  ncclComm *oriComm;
   struct ncclDevComm* comm;
-  // TODO: 或许会有扩展性问题。
   ncclWorkElem first;
 };
 

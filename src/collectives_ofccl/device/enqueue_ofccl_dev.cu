@@ -25,7 +25,7 @@ __shared__ CollCtx sharedCollCtx; // 不能static，primitives要用
 
 __shared__ BlkStatus blkStatus; // 取消static，放到prim里边打印log。
 
-static __shared__ IdsAlign sharedIdsAlign;
+// static __shared__ IdsAlign sharedIdsAlign;
 static __shared__ BlkCount4CollAlign sharedBlkCount4CollAlign;
 
 static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
@@ -144,14 +144,6 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
     copy16B(tid, &blkStatus.dynamicBlkStatus, &myGlobalBlkStatus->dynamicBlkStatus, sizeof(DynamicBlkStatus));
   }
 
-  int idTotalBytes = roundUp(collCount * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
-  int idDoneBytes = 0;
-  while (idDoneBytes < idTotalBytes) {
-    int targetBytes = min(nthreads * COPY_ELEM_SIZE, idTotalBytes - idDoneBytes);
-    copy16B(tid, (char *)(sharedIdsAlign.collIds) + idDoneBytes, (char *)globalCollIds + idDoneBytes, targetBytes);
-    idDoneBytes += targetBytes;
-  }
-
   int bcTotalBytes = roundUp(collCount * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
   int bcDoneBytes = 0;
   while (bcDoneBytes < bcTotalBytes) {
@@ -169,59 +161,9 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
     copy16B(tid, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + aciDoneBytes, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + aciDoneBytes, targetBytes);
     aciDoneBytes += targetBytes;
   }
-
-  // TODO: 并行提高复制效率。
-  if (tid == 0) {
-
-    for (int i = 0; i < collCount; i++) {
-      int collId = sharedIdsAlign.collIds[i];
-      // 以下这两个变量会限制很多行为。
-      int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[collId];
-
-      // 下边这部分逻辑在在blkStatus.hasQuitted == 1的情况下不执行，曾经退出过，恢复的时候就不要重新初始化了。
-      if (hasQuitted == 0) {
-        // 每个block一份globalShmem
-        CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
-
-        // ***** 移植ncclKernel的逻辑 *****
-        if (bid < blkLimit) {
-
-          /* ****** 手动加载用得到的shmemData ****** */
-          ncclDevComm *comm = globalDevComm7WorkElems[collId].comm;
-          ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
-
-          globalCollCtx4Blk7Coll->staticCollCtx.ringPrev = channel->ring.prev;
-          globalCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
-          globalCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
-          globalCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
-
-          globalCollCtx4Blk7Coll->staticCollCtx.rank = comm->rank;
-          globalCollCtx4Blk7Coll->staticCollCtx.nRanks = comm->nRanks;
-          globalCollCtx4Blk7Coll->staticCollCtx.abortFlag = comm->abortFlag;
-
-          copyNcclWorkElem(globalCollCtx4Blk7Coll->staticCollCtx.workElem, globalDevComm7WorkElems[collId].first);
-
-          /* ****** 上下文 ****** */
-
-          #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
-            globalCollCtx4Blk7Coll->sqeReadCnt = 0;
-            globalCollCtx4Blk7Coll->cqePrepareCnt = 0;
-            globalCollCtx4Blk7Coll->cqeWriteCnt = 0;
-          #endif
-
-          // bugfix: 下边原来都是设置的globalBlk2CollId2CollCtx->XXXX，相当于都设置了第0个block的第0个coll。。。。。。。
-          globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
-          globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
-          globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
-
-          globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
-          globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
-        }
-      }
-    }
-  }
   return turn;
 }
+
 #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
 static __device__ void logTaskQ(int caller, int thrdCudaDev, int rank=-1) {
   if (rank == -1) {

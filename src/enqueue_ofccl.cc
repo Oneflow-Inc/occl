@@ -8,6 +8,7 @@
 #include "checks.h"
 #include "collectives_ofccl.h"
 #include "debug.h"
+#include "devcomm.h"
 #include "enqueue.h" // struct ncclQueueInfo
 #include "argcheck.h"
 #include "bootstrap.h"
@@ -1190,6 +1191,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     }
     rankCtx->hostDevComm7WorkElems[collId].comm = comm->devComm;
     rankCtx->hostDevComm7WorkElems[collId].first = comm->args;
+    rankCtx->hostDevComm7WorkElems[collId].oriComm = comm;
     
     struct cudaLaunchParams *params = comm->myParams;
     rankCtx->daemonKernelGridDim = dim3(std::max(rankCtx->daemonKernelGridDim.x, params->gridDim.x));
@@ -1233,7 +1235,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx));
+  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu, sizeof(DynamicBlkStatus)=%lu, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, alignof(DynamicCollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx), sizeof(DynamicBlkStatus), sizeof(StaticCollCtx), sizeof(DynamicCollCtx), alignof(DynamicCollCtx));
   
   rankCtx->sq = sqCreate(rankCtx->queueLength);
   rankCtx->cq = cqCreate(rankCtx->queueLength);
@@ -1248,15 +1250,59 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
   checkRuntime(cudaMemcpy(rankCtx->globalThrdCount4Coll, rankCtx->hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
-  checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
+  // checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
+  // checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
-  checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
+  // checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
+  // checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaStreamCreate(&rankCtx->kernelStream));
 
+  rankCtx->hostBlk2CollId2CollCtx = (CollCtx *)calloc(rankCtx->daemonKernelGridDim.x * MAX_LENGTH, sizeof(CollCtx));
+  for (int i = 0; i < rankCtx->collCount; ++i) {
+    int collId = rankCtx->hostCollIds[i];
+    int blkLimit = rankCtx->hostBlkCount4Coll[collId];
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      CollCtx *hostCollCtx4Blk7Coll = rankCtx->hostBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
+      if (bid < blkLimit) {
+        struct ncclWorkElem *srcElem = &(rankCtx->hostDevComm7WorkElems[collId].first);
+        struct ncclWorkElem *dstElem = &(hostCollCtx4Blk7Coll->staticCollCtx.workElem);
+        dstElem->header.funcIndex = srcElem->header.funcIndex;
+        dstElem->header.type = srcElem->header.type;
+        dstElem->header.nWarps = srcElem->header.nWarps;
+        dstElem->header.isLast = srcElem->header.isLast;
+        dstElem->regUsed = srcElem->regUsed;
+        dstElem->direct = srcElem->direct;
+        dstElem->count = srcElem->count;
+        dstElem->lastChunkSize = srcElem->lastChunkSize;
+        dstElem->root = srcElem->root;
+        dstElem->nChannels = srcElem->nChannels;
+        dstElem->redOpArg = srcElem->redOpArg;
+
+        ncclComm *comm = rankCtx->hostDevComm7WorkElems[collId].oriComm;
+        ncclChannel *channel = comm->channels + bid;
+        hostCollCtx4Blk7Coll->staticCollCtx.rank = comm->rank;
+        hostCollCtx4Blk7Coll->staticCollCtx.nRanks = comm->nRanks;
+        hostCollCtx4Blk7Coll->staticCollCtx.abortFlag = comm->abortFlag;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringPrev = channel->ring.prev;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
+        hostCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
+        #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
+          hostCollCtx4Blk7Coll->sqeReadCnt = 0;
+          hostCollCtx4Blk7Coll->cqePrepareCnt = 0;
+          hostCollCtx4Blk7Coll->cqeWriteCnt = 0;
+        #endif
+        hostCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
+      }
+    }
+  }
   checkRuntime(cudaMalloc(&rankCtx->globalBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlk2CollId2CollCtx, rankCtx->hostBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
@@ -1348,6 +1394,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalCollIds));
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
+  free(rankCtx->hostBlk2CollId2CollCtx);
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaFreeHost(rankCtx->barrierCnt));
