@@ -8,6 +8,7 @@
 #include "checks.h"
 #include "collectives_ofccl.h"
 #include "debug.h"
+#include "devcomm.h"
 #include "enqueue.h" // struct ncclQueueInfo
 #include "argcheck.h"
 #include "bootstrap.h"
@@ -393,6 +394,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
   int nChannels = elem->nChannels; // ofcclComputeColl里边直接复制getAlgoInfo里存在ncclInfo里的计算结果
   size_t channelSize = elem->count*ncclTypeSize(proxyOp->dtype)/elem->nChannels;
   enum ncclWorkElemType workElemType = proxyOp->redOp == ncclNumOps ? ncclWorkTypeColl : ncclWorkTypeRegColl;  // redOp is only set when using CollNet
+  // OFCCL_LOG(OFCCL, "nChannels=%d", nChannels);
   
   for (int bid=0; bid<nChannels; bid++) {
     int channelId = ofGetNextChannel(comm);
@@ -404,6 +406,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
 
     elem->bid = bid % nChannels;
+    // OFCCL_LOG(OFCCL, "elem->bid=%d", elem->bid);
     struct ncclWork* w = NULL;
     int segment = -1;
     // 原来的nccl代码中，这里会尝试设置一个更大的segment：Try to pack more segments into a single operation
@@ -933,14 +936,16 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
 
   for (int bid = 0; bid < printBlkNum; ++bid) {
     file << " (" << bid << ")";
-    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+    for (int i = 0; i < rankCtx->collCount; ++i) {
+      int collId = rankCtx->hostCollIds[i];
       file << " {" << collId << "}" << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
     }
     file << std::endl;
   }
   if (printBlkNum > 1 && needSum) {
     file << " (BLK SUM)";
-    for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+    for (int i = 0; i < rankCtx->collCount; ++i) {
+      int collId = rankCtx->hostCollIds[i];
       unsigned long long sumCounter = 0;
       for (int bid = 0; bid < printBlkNum; ++bid) {
         sumCounter += *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -954,7 +959,8 @@ void printCollCounter(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId)
 void printCollCounterCompareBlock(ofcclRankCtx *rankCtx, std::ofstream &file, int counterId) {
   int printBlkNum = rankCtx->daemonKernelGridDim.x;
 
-  for (int collId = 0; collId < rankCtx->collCount; ++collId) {
+  for (int i = 0; i < rankCtx->collCount; ++i) {
+    int collId = rankCtx->hostCollIds[i];
     file << " {" << collId << "}<";  
     for (int bid = 0; bid < printBlkNum; ++bid) {
       file << *(rankCtx->collCounters + counterId + collId * COLL_COUNTER_INNER_SIZE + bid * MAX_LENGTH * COLL_COUNTER_INNER_SIZE);
@@ -1185,6 +1191,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     }
     rankCtx->hostDevComm7WorkElems[collId].comm = comm->devComm;
     rankCtx->hostDevComm7WorkElems[collId].first = comm->args;
+    rankCtx->hostDevComm7WorkElems[collId].oriComm = comm;
     
     struct cudaLaunchParams *params = comm->myParams;
     rankCtx->daemonKernelGridDim = dim3(std::max(rankCtx->daemonKernelGridDim.x, params->gridDim.x));
@@ -1228,7 +1235,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // ***** 在独立的线程中启动守护者kernel *****
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
-  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, offsetof(struct CollCtx, work)=%lu, sizeof(struct ncclWorkElem)=%lu, alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), offsetof(CollCtx, work), sizeof(struct ncclWorkElem), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx));
+  // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu, sizeof(DynamicBlkStatus)=%lu, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, alignof(DynamicCollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx), sizeof(DynamicBlkStatus), sizeof(StaticCollCtx), sizeof(DynamicCollCtx), alignof(DynamicCollCtx));
   
   rankCtx->sq = sqCreate(rankCtx->queueLength);
   rankCtx->cq = cqCreate(rankCtx->queueLength);
@@ -1237,26 +1244,72 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalCqes, MAX_LENGTH * sizeof(CQE)));
   checkRuntime(cudaMemcpy(rankCtx->globalCqes, rankCtx->hostCqes, MAX_LENGTH * sizeof(CQE), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalBlkCount4Coll, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(rankCtx->globalBlkCount4Coll, rankCtx->hostBlkCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  checkRuntime(cudaMalloc(&rankCtx->globalBlkCount4Coll, MAX_LENGTH * sizeof(char)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlkCount4Coll, rankCtx->hostBlkCount4Coll, MAX_LENGTH * sizeof(char), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMalloc(&rankCtx->globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
   checkRuntime(cudaMemcpy(rankCtx->globalThrdCount4Coll, rankCtx->hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(int)));
-  checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
+  // checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
+  // checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
-  checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
+  // checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
+  // checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaStreamCreate(&rankCtx->kernelStream));
 
+  rankCtx->hostBlk2CollId2CollCtx = (CollCtx *)calloc(rankCtx->daemonKernelGridDim.x * MAX_LENGTH, sizeof(CollCtx));
+  for (int i = 0; i < rankCtx->collCount; ++i) {
+    int collId = rankCtx->hostCollIds[i];
+    int blkLimit = rankCtx->hostBlkCount4Coll[collId];
+    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
+      CollCtx *hostCollCtx4Blk7Coll = rankCtx->hostBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
+      if (bid < blkLimit) {
+        struct ncclWorkElem *srcElem = &(rankCtx->hostDevComm7WorkElems[collId].first);
+        struct ncclWorkElem *dstElem = &(hostCollCtx4Blk7Coll->staticCollCtx.workElem);
+        dstElem->header.funcIndex = srcElem->header.funcIndex;
+        dstElem->header.type = srcElem->header.type;
+        dstElem->header.nWarps = srcElem->header.nWarps;
+        dstElem->header.isLast = srcElem->header.isLast;
+        dstElem->regUsed = srcElem->regUsed;
+        dstElem->direct = srcElem->direct;
+        dstElem->count = srcElem->count;
+        dstElem->lastChunkSize = srcElem->lastChunkSize;
+        dstElem->root = srcElem->root;
+        dstElem->nChannels = srcElem->nChannels;
+        dstElem->redOpArg = srcElem->redOpArg;
+
+        ncclComm *comm = rankCtx->hostDevComm7WorkElems[collId].oriComm;
+        ncclChannel *channel = comm->channels + bid;
+        hostCollCtx4Blk7Coll->staticCollCtx.rank = comm->rank;
+        hostCollCtx4Blk7Coll->staticCollCtx.nRanks = comm->nRanks;
+        hostCollCtx4Blk7Coll->staticCollCtx.abortFlag = comm->abortFlag;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringPrev = channel->ring.prev;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
+        hostCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
+        #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
+          hostCollCtx4Blk7Coll->sqeReadCnt = 0;
+          hostCollCtx4Blk7Coll->cqePrepareCnt = 0;
+          hostCollCtx4Blk7Coll->cqeWriteCnt = 0;
+        #endif
+        hostCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
+      }
+    }
+  }
   checkRuntime(cudaMalloc(&rankCtx->globalBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlk2CollId2CollCtx, rankCtx->hostBlk2CollId2CollCtx, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * sizeof(CollCtx), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaMallocHost(&rankCtx->finallyQuit, sizeof(int)));
   *rankCtx->finallyQuit = 0;
 
+  rankCtx->hostBlkStatus = (BlkStatus *)calloc(rankCtx->daemonKernelGridDim.x, sizeof(BlkStatus));
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
+  checkRuntime(cudaMemcpy(rankCtx->globalBlkStatus, rankCtx->hostBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus), cudaMemcpyHostToDevice)); // 确保第一次进去，myGlobalBlkStatus->hasQuitted == 0
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
@@ -1337,9 +1390,11 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalCqes));
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
   checkRuntime(cudaFree(rankCtx->globalThrdCount4Coll));
+  free(rankCtx->hostBlkStatus);
   checkRuntime(cudaFree(rankCtx->globalCollIds));
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
+  free(rankCtx->hostBlk2CollId2CollCtx);
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaFreeHost(rankCtx->barrierCnt));

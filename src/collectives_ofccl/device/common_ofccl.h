@@ -50,7 +50,7 @@ struct RunWork {
 // Examples :     AllReduce, RING, LL,    Sum,   uint8
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
-  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.workElem); \
+  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.staticCollCtx.workElem); \
 }
 
 #define IMPL_COLL4(func, algo, devredop, type, ncclType) \

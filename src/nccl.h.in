@@ -192,17 +192,6 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
  * below).
  */
 
-/*
- * OFCCL prepare collective
- *
- * Calculate nChannels, gridDim, blockDim, etc given count
- * 
- * Should not expose to clients.
- *
- */
-// ncclResult_t  ofcclPrepareCollComm(struct ncclInfo* info, int collId);
-// ncclResult_t pofcclPrepareCollComm(struct ncclInfo* info, int collId);
-
 
 /*
  * Create OfcclRankCtxOfcclRankCtx for one rank.

@@ -3,6 +3,7 @@
 
 #include "collectives.h"
 #include "devcomm.h"
+#include "nccl.h"
 #include <cstdint>
 #include <pthread.h>
 #include <sys/types.h>
@@ -65,8 +66,8 @@ typedef struct {
 } CQ;
 
 struct DevComm7WorkElem {
+  ncclComm *oriComm;
   struct ncclDevComm* comm;
-  // TODO: 或许会有扩展性问题。
   ncclWorkElem first;
 };
 
@@ -76,29 +77,52 @@ typedef struct {
   int *contexts;
 } CollExecContext;
 
-typedef struct {
-  int numActiveColls;
-  int currLoadedCollId;
+typedef struct alignas(16) {
   unsigned long long int sqReadFrontier; // 每个block的0号线程操作
+  #ifdef SHOW_CNT
+    unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
+    unsigned long long int totalCtxLoadCnt;
+    unsigned long long int totalProgressed7SwithchCnt;
+    unsigned long long int totalUnprogressedQuitCnt;
+  #endif
+  int numActiveColls;
+
+} DynamicBlkStatus;
+
+typedef struct alignas(16) {
+  // 加载这个数组时，元素都设成0就好
+  char collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-2：switch且没有progress；-1：switch但有progress
+} CollStatusAlign;
+
+typedef struct alignas(16) {
+  short activeCollIds[MAX_LENGTH];
+} ActiveCollIdsAlign;
+
+typedef struct alignas(16) {
+  /* ****** 根据hasQuitted的值，决定重置还是从globalMem里读 ****** */
+  DynamicBlkStatus dynamicBlkStatus;
+
+
+  /* ****** 根据宏单独处理 ****** */ 
+  #ifdef ARRAY_DEBUG
+    unsigned long long int *barrierCnt;
+    unsigned long long int *collCounters;
+  #endif
+
+
+  /* ****** 数组有单独复制 ****** */
+  // 这样的好处是以16B复制的时候，没有越界风险
+  CollStatusAlign collStatusAlign;
+  ActiveCollIdsAlign activeCollIdsAlign;
+
+
+  /* ****** 固定从globalMem里读 ****** */
   int hasQuitted; // 记录曾经Quit过的状态，一旦被设置，就不再清零。
 
-  int activeCollIds[MAX_LENGTH];
-  int collStatus[MAX_LENGTH]; // 0：没在执行；1：正在执行；2：执行完成；-2：switch且没有progress；-1：switch但有progress
 
-  // 考虑守护者kernel按需启停的时候这里的调整
+  /* ****** daemonKernel每次启动需要重置 ****** */
   int quit;
-
-#ifdef SHOW_CNT
-  unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
-  unsigned long long int totalCtxLoadCnt;
-  unsigned long long int totalProgressed7SwithchCnt;
-  unsigned long long int totalUnprogressedQuitCnt;
-#endif
-
-#ifdef ARRAY_DEBUG
-  unsigned long long int *barrierCnt;
-  unsigned long long int *collCounters;
-#endif
+  int currLoadedCollId;
 } BlkStatus;
 
 typedef struct {
@@ -109,18 +133,8 @@ typedef struct {
   int totalSendSize[NCCL_MAX_SLICE_PER_CHUNK];
 } CollCtxGroup;
 
-// sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512
-// 准备抛弃旧的collCtx结构，只保留我们需要的。
-typedef struct {
-  // TODO: 对LL、LL128的支持
-
-  /* ****** 每次执行需要重置 ****** */
-  int saveCtx7Quit;
-
-
-  /* ****** 每次load需要重置、加载 ****** */
-  int progressed;
-  struct ncclWorkElem workElem;
+typedef struct alignas(16) {
+  struct ncclWorkElem workElem; // sizeof(struct ncclWorkElem)=64
   // 来自channel.ring
   int ringPrev;
   int ringNext;
@@ -131,22 +145,45 @@ typedef struct {
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
   volatile uint32_t *abortFlag;
+} StaticCollCtx; // sizeof(StaticCollCtx)=112
+
+typedef struct alignas(16) {
   // Prims Simple的上下文
   int loadAgain; // 是不是曾经执行了一半，被换出去了，这次是又一次执行。主要用来控制ofccl/src/collectives_ofccl/device/ofccl_prims_simple.h里loadConn时候的roundUp行为，防止异常更新自己的step(head/tail)。正式一点可以搞个issue记录问题，然后在commit里说fix issue。懒得搞了。这个变量是只要曾经被换出去过，就一直是1了，这样每次创建prim，loadConn的时候，才可以都跳过roundUp。
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;
-  int64_t ctxSwitchThreshold;
-
   // Ring AllReduce的上下文
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
+
+} DynamicCollCtx; // sizeof(DynamicCollCtx)=32
+
+// sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512, sizeof(struct ncclWorkElem)=64, sizeof(struct ncclWorkElemHeader)=4
+// 准备抛弃旧的collCtx结构，只保留我们需要的。
+typedef struct alignas(16) {
+  // TODO: 对LL、LL128的支持
+
+
+  /* ****** 每次执行需要重置 ****** */
+  int saveCtx7Quit;
+
+
+  /* ****** 每次load需要重置、加载 ****** */
+  // ---- load的时候用常数重置 ----
+  int progressed;
+  int64_t ctxSwitchThreshold;
+  // ---- 只需要load，不需要save ----
+  StaticCollCtx staticCollCtx;
+  // ---- load、save的时候都需要和globalMem发生关系；完成的时候需要用0重置 ----
+  DynamicCollCtx dynamicCollCtx;
+
+
+  /* ****** 不需要load和save ****** */ 
   #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
     unsigned long long sqeReadCnt;
     unsigned long long cqeWriteCnt;
     unsigned long long cqePrepareCnt;
   #endif
-
-  /* ****** 不需要load和save ****** */ 
   // 这两个是启动相应的coll的执行之后，Primitive构造函数里填充的
   CollCtxGroup groups[NCCL_MAX_GROUPS];
   uint64_t redOpArgs[NCCL_MAX_DIRECT_ARITY+1];
@@ -154,7 +191,7 @@ typedef struct {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, int *globalBlkCount4Coll, int *globalThrdCount4Coll, int *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

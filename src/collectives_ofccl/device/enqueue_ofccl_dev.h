@@ -2,9 +2,30 @@
 #include "op128_ofccl.h"
 #include "common_ofccl.h" // for CollCtx
 
+#define COPY_ELEM_SIZE 16
+#define CHAR_ELEM_SIZE sizeof(char) // CollStatus
+#define SHORT_ELEM_SIZE sizeof(short) // ActiveCollIds
+
 #define DevRingBufferGetFrontier(B, frontier) ((B)->buffer + (frontier % (B)->length))
 
 #define DevRingBufferLogicFrontier(B, frontier) (frontier % (B)->length)
+
+#define DEBUG_PARA_LD 1
+// #define DEBUG_PARA_SV 1
+
+#define ONE_THRD_DO if (tid == 31) {
+#define ONE_THRD_DO_END }
+
+// #define ONE_THRD_DO {
+// #define ONE_THRD_DO_END }
+
+typedef struct alignas(16) {
+  short collIds[MAX_LENGTH];
+} IdsAlign;
+
+typedef struct alignas(16) {
+  char blkCount4Coll[MAX_LENGTH];
+} BlkCount4CollAlign;
 
 inline __device__ bool DevCqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);

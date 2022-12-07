@@ -90,6 +90,7 @@ struct ofcclRankCtx {
   pthread_t kernel7SqObserver;
   ObserverThrdArgs observerThrdArgs;
 
+  BlkStatus *hostBlkStatus;
   BlkStatus *globalBlkStatus; // 由于quit，需要保存、恢复blkStatus
 
   ofcclCommArgs ofcclCommList[MAX_LENGTH];
@@ -108,14 +109,15 @@ struct ofcclRankCtx {
 
   CQE hostCqes[MAX_LENGTH];
   CQE *globalCqes;
-  int hostBlkCount4Coll[MAX_LENGTH];
-  int *globalBlkCount4Coll;
+  char hostBlkCount4Coll[MAX_LENGTH];
+  char *globalBlkCount4Coll;
   int hostThrdCount4Coll[MAX_LENGTH];
   int *globalThrdCount4Coll;
-  int hostCollIds[MAX_LENGTH];
-  int *globalCollIds;
+  short hostCollIds[MAX_LENGTH];
+  short *globalCollIds;
   DevComm7WorkElem hostDevComm7WorkElems[MAX_LENGTH];
   DevComm7WorkElem *globalDevComm7WorkElems;
+  CollCtx *hostBlk2CollId2CollCtx;
   CollCtx *globalBlk2CollId2CollCtx;
   
   SQ *sq;
