@@ -10,9 +10,10 @@
 
 #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
-#define QLen MAX_LENGTH
+#define QLen MAX_LENGTH + 1
 
-#define SHOW_CNT 1
+// 还是不考虑把这个变成模板参数了，因为影响了struct的定义，少复制一些。
+// #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
@@ -44,11 +45,10 @@ typedef struct {
 } SQE;
 
 typedef struct {
-  SQE *buffer;
+  SQE buffer[QLen];
   unsigned long long int length;
   unsigned long long int head;
   unsigned long long int tail;
-  pthread_mutex_t mutex;
 } SQ;
 
 typedef struct {
@@ -57,12 +57,11 @@ typedef struct {
 } CQE;
 
 typedef struct {
-  CQE *buffer;
+  CQE buffer[QLen];
   unsigned long long int length;
   unsigned long long int head;
   unsigned long long int tail;
   unsigned long long int frontier;
-  pthread_mutex_t mutex;
 } CQ;
 
 struct DevComm7WorkElem {
@@ -192,6 +191,10 @@ typedef struct alignas(16) {
 } CollCtx;
 
 extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+
+template<typename Q>
+extern __global__ void qCreateKernel(Q *q);
+
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

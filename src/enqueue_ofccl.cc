@@ -615,33 +615,12 @@ static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NU
   }
 };
 
-
-// still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
-static SQ *sqCreate(unsigned long long int length) {
-  SQ *sq = nullptr;
-  checkRuntime(cudaMallocHost(&sq, sizeof(SQ)));
-  sq->length = length + 1;
-  sq->head = 0;
-  sq->tail = 0;
-  checkRuntime(cudaMallocHost(&(sq->buffer), sq->length * sizeof(SQE)));
-  pthread_mutex_init(&sq->mutex, nullptr);
-
-  return sq;
-}
-
-static void sqDestroy(SQ *sq) {
-  if (sq) {
-    checkRuntime(cudaFreeHost(sq->buffer));
-    checkRuntime(cudaFreeHost(sq));
-  }
-}
-
 int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
-  pthread_mutex_lock(&sq->mutex);
+  pthread_mutex_lock(&rankCtx->sqMutex);
 
   if (CpuSqFull(sq)) {
     // not an error; caller keeps trying.
-    pthread_mutex_unlock(&sq->mutex);
+    pthread_mutex_unlock(&rankCtx->sqMutex);
     return -1;
   }
   *RingBufferGetTail(sq) = *sqe;
@@ -652,7 +631,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   sq->tail += 1;
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
-  pthread_mutex_unlock(&sq->mutex);
+  pthread_mutex_unlock(&rankCtx->sqMutex);
 
   if (sqe->collId != -1) {
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> set callback for coll_id = %d", pthread_self(), rankCtx->rank, sqe->collId);
@@ -674,25 +653,6 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   return 0;
 }
 
-static CQ *cqCreate(unsigned long long int length) {
-  CQ *cq = nullptr;
-  checkRuntime(cudaMallocHost(&cq, sizeof(CQ)));
-  cq->length = length + 1;
-  cq->head = 0;
-  cq->tail = 0;
-  cq->frontier = 0;
-  checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(CQE)));
-  // pthread_mutex_init(&cq->mutex, nullptr);
-
-  return cq;
-}
-
-static void cqDestroy(CQ *cq) {
-  if (cq) {
-    checkRuntime(cudaFreeHost(cq->buffer));
-    checkRuntime(cudaFreeHost(cq));
-  }
-}
 // thread_local static int tempRound = 0;
 static int cqRead(CQ *cq, CQE *target, int rank) {
   // pthread_mutex_lock(&cq->mutex);
@@ -730,7 +690,6 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   *rankCtx = newOfcclRankCtx;
 
   newOfcclRankCtx->rank = rank;
-  newOfcclRankCtx->queueLength = QLen;
   newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy、值的初始化还是放到ofcclPrepareDone里边做
@@ -796,25 +755,25 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, gridDim=(%d, %d, %d), blockDim=(%d, %d, %d)", pthread_self(), rankCtx->rank, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelGridDim.y, rankCtx->daemonKernelGridDim.z, rankCtx->daemonKernelBlockDim.x, rankCtx->daemonKernelBlockDim.y, rankCtx->daemonKernelBlockDim.z);
 
-  rankCtx->argsptrs[0] = &rankCtx->sq;
-  rankCtx->argsptrs[1] = &rankCtx->cq;
-  rankCtx->argsptrs[2] = &rankCtx->rank;
-  rankCtx->argsptrs[3] = &rankCtx->collCount;
-  rankCtx->argsptrs[4] = &rankCtx->globalCqes;
-  rankCtx->argsptrs[5] = &rankCtx->globalBlkCount4Coll;
-  rankCtx->argsptrs[6] = &rankCtx->globalThrdCount4Coll;
-  rankCtx->argsptrs[7] = &rankCtx->globalCollIds;
-  rankCtx->argsptrs[8] = &rankCtx->globalDevComm7WorkElems;
-  rankCtx->argsptrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
-  rankCtx->argsptrs[10] = &rankCtx->finallyQuit;
-  rankCtx->argsptrs[11] = &rankCtx->globalBlkStatus;
-  rankCtx->argsptrs[12] = &rankCtx->barrierCnt;
-  rankCtx->argsptrs[13] = &rankCtx->collCounters;
+  rankCtx->daemonKernelArgsPtrs[0] = &rankCtx->sq;
+  rankCtx->daemonKernelArgsPtrs[1] = &rankCtx->cq;
+  rankCtx->daemonKernelArgsPtrs[2] = &rankCtx->rank;
+  rankCtx->daemonKernelArgsPtrs[3] = &rankCtx->collCount;
+  rankCtx->daemonKernelArgsPtrs[4] = &rankCtx->globalCqes;
+  rankCtx->daemonKernelArgsPtrs[5] = &rankCtx->globalBlkCount4Coll;
+  rankCtx->daemonKernelArgsPtrs[6] = &rankCtx->globalThrdCount4Coll;
+  rankCtx->daemonKernelArgsPtrs[7] = &rankCtx->globalCollIds;
+  rankCtx->daemonKernelArgsPtrs[8] = &rankCtx->globalDevComm7WorkElems;
+  rankCtx->daemonKernelArgsPtrs[9] = &rankCtx->globalBlk2CollId2CollCtx;
+  rankCtx->daemonKernelArgsPtrs[10] = &rankCtx->finallyQuit;
+  rankCtx->daemonKernelArgsPtrs[11] = &rankCtx->globalBlkStatus;
+  rankCtx->daemonKernelArgsPtrs[12] = &rankCtx->barrierCnt;
+  rankCtx->daemonKernelArgsPtrs[13] = &rankCtx->collCounters;
   
-  rankCtx->argsptrs[14] = &args->TRAVERSE_TIMES;
-  rankCtx->argsptrs[15] = &args->TOLERANT_UNPROGRESSED_CNT;
-  rankCtx->argsptrs[16] = &args->BASE_CTX_SWITCH_THRESHOLD;
-  rankCtx->argsptrs[17] = &args->BOUNS_SWITCH_4_PROCESSED_COLL;
+  rankCtx->daemonKernelArgsPtrs[14] = &args->TRAVERSE_TIMES;
+  rankCtx->daemonKernelArgsPtrs[15] = &args->TOLERANT_UNPROGRESSED_CNT;
+  rankCtx->daemonKernelArgsPtrs[16] = &args->BASE_CTX_SWITCH_THRESHOLD;
+  rankCtx->daemonKernelArgsPtrs[17] = &args->BOUNS_SWITCH_4_PROCESSED_COLL;
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -822,8 +781,8 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   daemonKernelParam.blockDim = rankCtx->daemonKernelBlockDim;
   daemonKernelParam.sharedMem = 0;
   // daemonKernelParam.sharedMem = 60 * 1024 * MAX_LENGTH;
-  daemonKernelParam.stream = rankCtx->kernelStream;
-  daemonKernelParam.args = rankCtx->argsptrs;
+  daemonKernelParam.stream = rankCtx->daemonKernelStream;
+  daemonKernelParam.args = rankCtx->daemonKernelArgsPtrs;
 
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
 
@@ -884,7 +843,7 @@ void *startKernel7SqObserver(void *args) {
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, CpuLogicSqHead(rankCtx->sq), RingBufferLogicTail(rankCtx->sq));
     }
 
-    checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
+    checkRuntime(cudaStreamSynchronize(rankCtx->daemonKernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
       break;
@@ -1236,9 +1195,12 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
   // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu, sizeof(DynamicBlkStatus)=%lu, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, alignof(DynamicCollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx), sizeof(DynamicBlkStatus), sizeof(StaticCollCtx), sizeof(DynamicCollCtx), alignof(DynamicCollCtx));
+
+  checkRuntime(cudaStreamCreate(&rankCtx->sqWriteStream));
+  checkRuntime(cudaStreamCreate(&rankCtx->cqReadStream));
   
-  rankCtx->sq = sqCreate(rankCtx->queueLength);
-  rankCtx->cq = cqCreate(rankCtx->queueLength);
+  rankCtx->sq = qCreate<SQ, SQE>(rankCtx);
+  rankCtx->cq = qCreate<CQ, CQE>(rankCtx);
 
   // TODO: 之后考虑换成ofccl/src/include/alloc.h里的宏。
   checkRuntime(cudaMalloc(&rankCtx->globalCqes, MAX_LENGTH * sizeof(CQE)));
@@ -1256,7 +1218,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
   // checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
 
-  checkRuntime(cudaStreamCreate(&rankCtx->kernelStream));
+  checkRuntime(cudaStreamCreate(&rankCtx->daemonKernelStream));
 
   rankCtx->hostBlk2CollId2CollCtx = (CollCtx *)calloc(rankCtx->daemonKernelGridDim.x * MAX_LENGTH, sizeof(CollCtx));
   for (int i = 0; i < rankCtx->collCount; ++i) {
@@ -1401,8 +1363,8 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
     checkRuntime(cudaFreeHost(rankCtx->collCounters));
   #endif
 
-  sqDestroy(rankCtx->sq);
-  cqDestroy(rankCtx->cq);
+  qDestroy(rankCtx->sq);
+  qDestroy(rankCtx->cq);
 
   // ***** seems do not need to transverse ofcclCommList *****
   rankCtx->collCount = 0;

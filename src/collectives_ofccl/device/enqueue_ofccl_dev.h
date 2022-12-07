@@ -48,3 +48,12 @@ inline __device__ unsigned long long int DevLogicSqHead(SQ *sq) {
   volatile unsigned long long int *headPtr = &(sq->head);
   return *headPtr % sq->length;
 }
+
+template<typename Q>
+__global__ void qCreateKernel(Q *q) {
+  if (threadIdx.x == 0) {
+    q->length = QLen;
+    q->head = 0;
+    q->tail = 0;
+  }
+}
