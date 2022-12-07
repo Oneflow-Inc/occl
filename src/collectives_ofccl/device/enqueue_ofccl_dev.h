@@ -10,6 +10,9 @@
 
 #define DevRingBufferLogicFrontier(B, frontier) (frontier % (B)->length)
 
+#define DEBUG_PARA_LD 1
+// #define DEBUG_PARA_SV 1
+
 typedef struct alignas(16) {
   short collIds[MAX_LENGTH];
 } IdsAlign;

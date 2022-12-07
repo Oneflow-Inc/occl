@@ -145,7 +145,7 @@ typedef struct alignas(16) {
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
   volatile uint32_t *abortFlag;
-} StaticCollCtx;
+} StaticCollCtx; // sizeof(StaticCollCtx)=112
 
 typedef struct alignas(16) {
   // Prims Simple的上下文
@@ -156,7 +156,7 @@ typedef struct alignas(16) {
   int currentStep4RingAllReduce;
   ssize_t gridOffset4RingAllReduce;
 
-} DynamicCollCtx;
+} DynamicCollCtx; // sizeof(DynamicCollCtx)=32
 
 // sizeof(CollCtx)=42104, sizeof(CollCtxGroup)=248, sizeof(ncclDevComm)=40, sizeof(ncclChannel)=512, sizeof(ncclWork)=512, sizeof(struct ncclWorkElem)=64, sizeof(struct ncclWorkElemHeader)=4
 // 准备抛弃旧的collCtx结构，只保留我们需要的。
