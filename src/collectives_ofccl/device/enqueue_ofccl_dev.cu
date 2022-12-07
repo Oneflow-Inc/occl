@@ -99,7 +99,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   return 0;
 }
 
-// TODO: 为了性能，考虑恢复成多线程一起复制的写法。
+#ifndef DEBUG_PARA_LD
 static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const struct ncclWorkElem &srcElem) {
   dstElem.header.funcIndex = srcElem.header.funcIndex;
   dstElem.header.type = srcElem.header.type;
@@ -116,6 +116,7 @@ static __device__ void copyNcclWorkElem (struct ncclWorkElem &dstElem, const str
   dstElem.nChannels = srcElem.nChannels;
   dstElem.redOpArg = srcElem.redOpArg;
 }
+#endif
 
 static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, int turn) {
   int bid = blockIdx.x;
@@ -123,7 +124,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
   int nthreads = blockDim.x;
   
 
-  if (tid == 31) {
+  ONE_THRD_DO
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;
       blkStatus.collCounters = collCounters;
@@ -134,7 +135,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
     sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
 
     zeros[0] = zeros[1] = 0llu;
-  }
+  ONE_THRD_DO_END
 
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
   int hasQuitted = myGlobalBlkStatus->hasQuitted; // 每个线程都读。
@@ -257,7 +258,8 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int tid = threadIdx.x;
 
-  if (tid == 31) { // 31线程不需要参加下边copy16B的执行，稍稍提高点效率
+  // TODO: 考虑让所有线程都执行常数初始化。
+  ONE_THRD_DO
     #ifdef SHOW_CNT
       blkStatus.dynamicBlkStatus.totalCtxLoadCnt++;
     #endif
@@ -265,7 +267,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 
     sharedCollCtx.progressed = 0;
     sharedCollCtx.ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
-  }
+  ONE_THRD_DO_END
 
   copy16B(tid, &sharedCollCtx.dynamicCollCtx, &globalCollCtx4Blk7Coll->dynamicCollCtx, sizeof(DynamicCollCtx));
   copy16B(tid, &sharedCollCtx.staticCollCtx, &globalCollCtx4Blk7Coll->staticCollCtx, sizeof(StaticCollCtx));
@@ -276,7 +278,7 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int tid = threadIdx.x;
 
-  if (tid == 31) { // 31线程不需要参加下边copy16B的执行，稍稍提高点效率
+  if (tid == 0) { // 31线程不需要参加下边copy16B的执行，稍稍提高点效率
     #ifdef SHOW_CNT
       blkStatus.dynamicBlkStatus.totalCtxLoadCnt++;
     #endif
@@ -310,9 +312,9 @@ static __device__ int loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Co
 static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId) {
   int tid = threadIdx.x;
   #ifdef SHOW_CNT
-    if(tid == 31) {
+    ONE_THRD_DO
       blkStatus.dynamicBlkStatus.totalCtxSaveCnt++;
-    }
+    ONE_THRD_DO_END
   #endif
   copy16B(tid, &globalCollCtx4Blk7Coll->dynamicCollCtx, &sharedCollCtx.dynamicCollCtx, sizeof(DynamicCollCtx));
 }

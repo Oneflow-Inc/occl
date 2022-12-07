@@ -13,6 +13,12 @@
 #define DEBUG_PARA_LD 1
 // #define DEBUG_PARA_SV 1
 
+#define ONE_THRD_DO if (tid == 31) {
+#define ONE_THRD_DO_END }
+
+// #define ONE_THRD_DO {
+// #define ONE_THRD_DO_END }
+
 typedef struct alignas(16) {
   short collIds[MAX_LENGTH];
 } IdsAlign;
