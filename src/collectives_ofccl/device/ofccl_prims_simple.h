@@ -68,7 +68,7 @@ class Primitives<
   inline __device__ bool checkAbort(int &spins) {
     spins++;
     if (!(flags & Aborted) && spins == OFCCL_SPINS_BEFORE_CHECK_ABORT) {
-      flags |= *sharedCollCtx.staticCollCtx.abortFlag ? Aborted : 0;
+      flags |= *sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.abortFlag ? Aborted : 0;
       spins = 0;
     }
     return flags & Aborted;
@@ -84,23 +84,23 @@ class Primitives<
       // int spins = 0;
       unsigned long long int ctxSwitchCounter = 0;
 
-      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         
         connStepCache = *connStepPtr;
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
-        //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx.staticCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
-        if (ctxSwitchCounter++ >= sharedCollCtx.ctxSwitchThreshold) {
-          sharedCollCtx.saveCtx7Quit = 1;
-          sharedCollCtx.dynamicCollCtx.loadAgain = 1;
+        //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
+        if (ctxSwitchCounter++ >= sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold) {
+          sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit = 1;
+          sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain = 1;
 
           // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.staticCollCtx.rank - 1 + sharedCollCtx.staticCollCtx.nRanks) % sharedCollCtx.staticCollCtx.nRanks, connStepCache, step + StepPerSlice);
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank - 1 + sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks, connStepCache, step + StepPerSlice);
           // }
           // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.staticCollCtx.rank + 1) % sharedCollCtx.staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank + 1) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
           // }
           // __syncwarp(); // ！！！！！！为了打印log加的！
           
@@ -112,14 +112,14 @@ class Primitives<
     if (flags & (Recv*RoleWaitRecv | Send*RoleWaitSend)) { // 这里还是只有特殊线程在做
 
       // wait成功，在subBarrier和barrier之前，标记一下，保证后续的可见性。
-      atomicOr(&sharedCollCtx.progressed, (((flags & RoleWaitRecv) != 0) || ((!Recv) && ((flags & RoleWaitSend) != 0))));
+      atomicOr(&sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].progressed, (((flags & RoleWaitRecv) != 0) || ((!Recv) && ((flags & RoleWaitSend) != 0))));
       // 若RoleWaitRecv线程wait成功，那可以设置；若RoleWaitSend线程wait成功，只有在不需要recv的时候才可以设置；并且一旦设成1，就不再清零了。
 
       if (isSendNotRecv && (flags & SizesFifoEnabled)) // proxy 相关，不用考虑
         connSizesFifoPtr[step%NCCL_STEPS] = nelts*sizeof(T);
 
-      void **ptrs = isSendNotRecv ? (sharedCollCtx.groups[group].dsts + Dst)
-                                  : (sharedCollCtx.groups[group].srcs + Src);
+      void **ptrs = isSendNotRecv ? (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts + Dst)
+                                  : (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs + Src);
       if (flags & OffsFifoEnabled) // proxy 相关，不用考虑
         ptrs[index] = connEltsFifo + loadInt(connOffsFifoPtr + (step%NCCL_STEPS))/sizeof(T);
       else if (isSendNotRecv && DirectSend) {
@@ -146,10 +146,10 @@ class Primitives<
     }
     
     // if ((flags & (Recv*RoleWaitRecv))) {
-    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.staticCollCtx.rank - 1 + sharedCollCtx.staticCollCtx.nRanks) % sharedCollCtx.staticCollCtx.nRanks, connStepCache, step);
+    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank - 1 + sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks, connStepCache, step);
     // }
     // if ((flags & (Send*RoleWaitSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx.staticCollCtx.rank + 1) % sharedCollCtx.staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank + 1) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
     // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
@@ -162,10 +162,10 @@ class Primitives<
     }
     
     // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx.staticCollCtx.rank - 1 + sharedCollCtx.staticCollCtx.nRanks) % sharedCollCtx.staticCollCtx.nRanks);
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank - 1 + sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks);
     // }
     // if ((flags & (Send*RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx.staticCollCtx.rank + 1) % sharedCollCtx.staticCollCtx.nRanks);
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank + 1) % sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks);
     // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
@@ -183,7 +183,7 @@ class Primitives<
     constexpr int Dst = DstBuf != -1;
 
     nelem = nelem < 0 ? 0 : nelem;
-    // stepSize(sharedCollCtx.comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T))
+    // stepSize(sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].comm.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T))
     // SlicePerChunk = 2, StepPerSlice = 2
     int sliceSize = stepSize*StepPerSlice;
     sliceSize = max(divUp(nelem, 16*SlicePerChunk)*16, sliceSize/32);
@@ -192,9 +192,9 @@ class Primitives<
     // 之后刚恢复回来那次，才应该读保存的ctx。
     int slice = 0;
     int offset = 0;
-    if (genericOpExecCnt++ == 0 && sharedCollCtx.dynamicCollCtx.loadAgain == 1) {
-      slice = sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp;
-      offset = sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp;
+    if (genericOpExecCnt++ == 0 && sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain == 1) {
+      slice = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp;
+      offset = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp;
     }
 
     if (tid < nworkers && offset < nelem) {
@@ -232,25 +232,25 @@ class Primitives<
       do {
         sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
         
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, sliceSize, nelem, slice, SlicePerChunk);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, sliceSize = %d, nelem = %d, slice = %d, SlicePerChunk = %d", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, sliceSize, nelem, slice, SlicePerChunk);
 
         if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)))
-          sharedCollCtx.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
+          sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
-          sharedCollCtx.groups[group].dsts[0] = userBuff + dstIx + offset;
+          sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts[0] = userBuff + dstIx + offset;
           
-        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid);
+        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid);
         
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
-        if (sharedCollCtx.saveCtx7Quit == 1) {
+        if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit == 1) {
           if (tid == 0) {
-            sharedCollCtx.dynamicCollCtx.slice4SimpleGenericOp = slice;
-            sharedCollCtx.dynamicCollCtx.offset4SimpleGenericOp = offset;
+            sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp = slice;
+            sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp = offset;
             // __threadfence_block();
-            // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, slice = %d", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, slice);
+            // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, slice = %d", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, slice);
           }
-          // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 0, slice = %d, offset = %d, genericOp worker return", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, slice, offset);
+          // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 0, slice = %d, offset = %d, genericOp worker return", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, slice, offset);
           #ifdef ARRAY_DEBUG
             *(blkStatus.barrierCnt + 0 + 0 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
           #endif
@@ -262,33 +262,33 @@ class Primitives<
           goto generic_op_quit;
           // return;
         }
-        if (DirectRecv && sharedCollCtx.groups[group].srcs[0] == sharedCollCtx.groups[group].dsts[0]) {
+        if (DirectRecv && sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs[0] == sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts[0]) {
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send) {
             // (1-Send) is only there to avoid compilation errors in case MaxSend=0 (and Send=0).
             ReduceOrCopyMulti<Unroll, RedOp, T, 1, 1, 1, (1-Send)+MaxSend, 0>
               (tid, nworkers, nullptr, false,
-               1, (T const**)sharedCollCtx.groups[group].srcs,
-               fan.nsend(), (T**)sharedCollCtx.groups[group].dsts+1,
+               1, (T const**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs,
+               fan.nsend(), (T**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts+1,
                sliceSize);
           }
-        } else if (DirectSend && !DirectRecv && SrcBuf != Input && sharedCollCtx.groups[group].dsts[Dst] == nullptr) {
+        } else if (DirectSend && !DirectRecv && SrcBuf != Input && sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
           ReduceOrCopyMulti<Unroll, RedOp, T, 1, 1, 1, 1, 0>
-            (tid, nworkers, sharedCollCtx.redOpArgs, postOp,
-             Recv, (T const**)sharedCollCtx.groups[group].srcs,
-             Dst, (T**)sharedCollCtx.groups[group].dsts,
+            (tid, nworkers, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].redOpArgs, postOp,
+             Recv, (T const**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs,
+             Dst, (T**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts,
              sliceSize);
         } else {
           constexpr int PreOpN = SrcBuf != Input ? 0 :
                                  DirectRecv*MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1+NCCL_MAX_DIRECT_ARITY) : 1;
           ReduceOrCopyMulti<Unroll, RedOp, T, Recv+Src, Recv*MaxRecv+Src, Send+Dst, Send*MaxSend+Dst, PreOpN>
-            (tid, nworkers, sharedCollCtx.redOpArgs, postOp,
-             Recv*fan.nrecv()+Src, (T const**)sharedCollCtx.groups[group].srcs,
-             Send*fan.nsend()+Dst, (T**)sharedCollCtx.groups[group].dsts,
+            (tid, nworkers, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].redOpArgs, postOp,
+             Recv*fan.nrecv()+Src, (T const**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].srcs,
+             Send*fan.nsend()+Dst, (T**)sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].dsts,
              sliceSize);
         }
-        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
+        // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrier Cnt 1, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
         #ifdef ARRAY_DEBUG
           *(blkStatus.barrierCnt + 0 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         #endif
@@ -316,7 +316,7 @@ class Primitives<
       //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       // }
 
-      // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
+      // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
       #ifdef ARRAY_DEBUG
         *(blkStatus.barrierCnt + 0 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       #endif
@@ -324,8 +324,8 @@ class Primitives<
       #ifdef ARRAY_DEBUG
         *(blkStatus.barrierCnt + 1 + 2 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
       #endif
-      if (sharedCollCtx.saveCtx7Quit == 1) { // 需要在barrier之后才访问shmem。
-        //  OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> after barrierCnt 2, slice = %d, offset = %d genericOp non-worker return", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, slice, offset);
+      if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit == 1) { // 需要在barrier之后才访问shmem。
+        //  OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> after barrierCnt 2, slice = %d, offset = %d genericOp non-worker return", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, slice, offset);
           // 通常情况下，nworkers以外的线程跑到这里，所以在上边的waitPeer里也不会做什么，各个线程的slice和offset看起来应该是通过barrier的同步，可以同步更新，所以之后恢复的时候，直接恢复0号线程的slice和offset应该没问题；他这里就不用保存了；加一个判断不让它跑到postPeer就好。
           
           goto generic_op_quit; 
@@ -359,15 +359,15 @@ class Primitives<
     if (flags & (RoleWaitRecv|RolePostRecv)) {
       auto *conn = &peer->recv[connIndex].conn;
       step = conn->step; // uint64_t step;      // Keep where we are // 设置好就不会变了；每个线程有自己的值
-      if (sharedCollCtx.dynamicCollCtx.loadAgain == 0) {
+      if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain == 0) {
         step = roundUp(step, SlicePerChunk*StepPerSlice); // return (x+y-1) - (x+y-1)%y;，就是向上取到y的倍数
       }
       
       // if ((flags & (RoleWaitRecv))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, load step(head) = %llu from conns", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
       // }
       // if ((flags & (RolePostRecv))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, load step(head) = %llu from conns", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
       // }
       // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
@@ -377,7 +377,7 @@ class Primitives<
       }
       if (flags & RoleWaitRecv) { // 0 * 8 + 0 号线程是 RoleWaitRecv
         // conn 来自于&peer->recv[connIndex].conn，构造函数里connIndex是0，所以不论这里的index是几，都是同一个conn，所以目前不用太关心
-        sharedCollCtx.groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
+        sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns[index] = conn; // WaitRecv role saves since that's who needs it in setDataPtrs()
         connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
         connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0; // 这个和proxy相关，先不关注。int *offsFifo;      // Buffer fifo from proxy to GPU，所以对GPU是recv
@@ -412,15 +412,15 @@ class Primitives<
     if (flags & (RoleWaitSend|RolePostSend)) {
       auto *conn = &peer->send[connIndex].conn;
       step = conn->step;
-      if (sharedCollCtx.dynamicCollCtx.loadAgain == 0) {
+      if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain == 0) {
         step = roundUp(step, SlicePerChunk*StepPerSlice);
       }
 
       // if ((flags & (RoleWaitSend))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load step(tail) = %llu from conns", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, load step(tail) = %llu from conns", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
       // }
       // if ((flags & (RolePostSend))) {
-      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load step(tail) = %llu from conns", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, load step(tail) = %llu from conns", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
       // }
       // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
@@ -428,7 +428,7 @@ class Primitives<
         connStepPtr = conn->tail;
       }
       if (flags & RoleWaitSend) {
-        sharedCollCtx.groups[group].sendConns[index] = conn; // WaitSend role saves since that's who needs it in setDataPtrs()
+        sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index] = conn; // WaitSend role saves since that's who needs it in setDataPtrs()
         connStepPtr = conn->head;
         connStepCache = *connStepPtr;
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0;
@@ -467,7 +467,7 @@ class Primitives<
   __device__ void setDataPtrs(void const *inputBuf, void *outputBuf, uint64_t redOpArg, struct ncclWorkElemReg* e) {
     if (flags & RoleInput) { // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
       userBuff = (T*)inputBuf;
-      sharedCollCtx.redOpArgs[0] = redOpArg;  // scaler for local input
+      sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].redOpArgs[0] = redOpArg;  // scaler for local input
     }
     if (flags & RoleOutput) userBuff = (T*)outputBuf; // 1 * 8 + 1 号线程是 RoleOutput 9
     bool recvProvider = flags == (flags|RoleWaitRecv|DirectWrite);
@@ -478,14 +478,14 @@ class Primitives<
     // 打log 显示上边5个变量全是0
 
     // if (!(recvProvider == 0 && sendAcceptor == 0 && sendProvider == 0 && recvAcceptor == 0 && regUsed == 0)) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, recvProvider=%d, sendAcceptor=%d, sendProvider=%d, recvAcceptor=%d, regUsed=%d", sharedCollCtx.staticCollCtx.rank, blockIdx.x, threadIdx.x, recvProvider, sendAcceptor, sendProvider, recvAcceptor, regUsed);
+    //   OFCCL_LOG(OFCCL, "Rank<%d>, Blk<%d>, Thrd<%d>, recvProvider=%d, sendAcceptor=%d, sendProvider=%d, recvAcceptor=%d, regUsed=%d", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, threadIdx.x, recvProvider, sendAcceptor, sendProvider, recvAcceptor, regUsed);
     //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
     // }
 
     // 模板参数 Direct 是 1
     if (Direct && recvProvider) {
       int spins = 0;
-      void *volatile *slot = sharedCollCtx.groups[group].recvConns[index]->ptrExchange;
+      void *volatile *slot = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns[index]->ptrExchange;
       // Wait for consumer to consume previous value before trampling it.
       while (*slot != nullptr && !checkAbort(spins));
       directBuff = (T*)outputBuf;
@@ -496,7 +496,7 @@ class Primitives<
     }
     if (Direct && sendAcceptor) {
       int spins = 0;
-      void *volatile *slot = sharedCollCtx.groups[group].sendConns[index]->ptrExchange;
+      void *volatile *slot = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index]->ptrExchange;
       void *ptr;
       while (true) {
         ptr = *slot;
@@ -508,9 +508,9 @@ class Primitives<
     }
     if (Direct && sendProvider) {
       int spins = 0;
-      void *volatile *slot = sharedCollCtx.groups[group].sendConns[index]->ptrExchange;
-      volatile uint64_t* argSlot0 = sharedCollCtx.groups[group].sendConns[index]->redOpArgExchange;
-      volatile uint64_t* argSlot1 = sharedCollCtx.groups[group].sendConns[index]->redOpArgExchange+1;
+      void *volatile *slot = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index]->ptrExchange;
+      volatile uint64_t* argSlot0 = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index]->redOpArgExchange;
+      volatile uint64_t* argSlot1 = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index]->redOpArgExchange+1;
       // Wait for consumer to consume previous value before trampling it.
       while ((*slot != nullptr || *argSlot0 != 0 || *argSlot1 !=0) && !checkAbort(spins));
       // If there is no recv, then we are directly pulling from input buffer (e.g. directScatter)
@@ -526,9 +526,9 @@ class Primitives<
     }
     if (Direct && recvAcceptor) {
       int spins = 0;
-      void *volatile *slot = sharedCollCtx.groups[group].recvConns[index]->ptrExchange;
-      volatile uint64_t* argSlot0 = sharedCollCtx.groups[group].recvConns[index]->redOpArgExchange;
-      volatile uint64_t* argSlot1 = sharedCollCtx.groups[group].recvConns[index]->redOpArgExchange+1;
+      void *volatile *slot = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns[index]->ptrExchange;
+      volatile uint64_t* argSlot0 = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns[index]->redOpArgExchange;
+      volatile uint64_t* argSlot1 = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns[index]->redOpArgExchange+1;
       void *ptr;
       while (true) {
         ptr = *slot;
@@ -544,7 +544,7 @@ class Primitives<
           arg1 = *argSlot1;
           if ((arg0 != 0 && arg1 != 0) || checkAbort(spins)) break;
         }
-        sharedCollCtx.redOpArgs[1+index] = ((arg1 & 0xffffffff)<<32) | (arg0 & 0xffffffff);
+        sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].redOpArgs[1+index] = ((arg1 & 0xffffffff)<<32) | (arg0 & 0xffffffff);
       }
       *argSlot0 = 0; *argSlot1 = 0;
       *slot = nullptr;
@@ -558,7 +558,7 @@ class Primitives<
     ):
     tid(tid),
     genericOpExecCnt(0),
-    stepSize(sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
+    stepSize(sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
 
     // For send operations, we need an extra warp to overlap the threadfence and the copy
     this->nthreads = nthreads;
@@ -596,8 +596,8 @@ class Primitives<
     if (flags & (RoleWaitRecv|RolePostRecv)) peer = recvPeers[index]; // 有RoleWaitRecv或RolePostRecv标记的线程，设置其peer。虽然我们给线程分配了0-7的index，但是只给index=0的线程分配了recv相关的flag。这个函数同时也会根据conn.direct，为flags追加DirectRead、DirectWrite
     if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index]; // 同上
     
-    loadRecvConn(&sharedCollCtx.staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
-    loadSendConn(&sharedCollCtx.staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
+    loadRecvConn(&sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
+    loadSendConn(&sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
 
     // inputBuf = sendbuff, outputBuf = recvbuff
     setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e); // 事实上也是需要被指定了flag的线程才会进行相应的工作
@@ -606,7 +606,7 @@ class Primitives<
   }
 
   __device__ ~Primitives() {
-    // Ensure sharedCollCtx.groups[].send/recvConns are available
+    // Ensure sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[].send/recvConns are available
     if (!(flags & ThreadsSynced)) {
       #ifdef ARRAY_DEBUG
         *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -618,21 +618,21 @@ class Primitives<
     }
     // Save steps for the next operation
     if (flags & (RolePostSend|RolePostRecv)) {
-      auto *conns = (flags & RolePostSend) ? sharedCollCtx.groups[group].sendConns : sharedCollCtx.groups[group].recvConns;
+      auto *conns = (flags & RolePostSend) ? sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].sendConns : sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group].recvConns;
       conns[index]->step = step;
     }
     
     // if ((flags & (RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
     // }
     // if ((flags & (RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid, step);
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, step);
     // }
     // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
     // Make sure all threads are done writing back conn->step and done using
-    // sharedCollCtx.groups[group]
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 4", sharedCollCtx.staticCollCtx.rank, blockIdx.x, tid);
+    // sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].groups[group]
+    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 4", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid);
     #ifdef ARRAY_DEBUG
       *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     #endif

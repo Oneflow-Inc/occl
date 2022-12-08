@@ -1288,6 +1288,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
         hostCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
         hostCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
         hostCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
+        hostCollCtx4Blk7Coll->staticCollCtx.collId = collId;
         #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
           hostCollCtx4Blk7Coll->sqeReadCnt = 0;
           hostCollCtx4Blk7Coll->cqePrepareCnt = 0;

@@ -24,7 +24,7 @@ struct ProtoSimple {
 
   // Data bytes (no flags etc) in one step of the fifo queue.
   __device__ static int calcBytePerStep() {
-    return sharedCollCtx.buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
+    return sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
   }
   // Granularity of data bytes transferred per thread.
   __device__ static int calcBytePerGrain() { 
