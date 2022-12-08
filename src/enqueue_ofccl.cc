@@ -617,19 +617,30 @@ static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NU
 
 int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
   pthread_mutex_lock(&rankCtx->sqMutex);
+  *rankCtx->sqWriteRetFlag = 0;
+  void *sqWriteArgsPtrs[5];
+  sqWriteArgsPtrs[0] = &rankCtx->sq;
+  *rankCtx->SqeStation = *sqe;
+  sqWriteArgsPtrs[1] = &rankCtx->SqeStation;
+  sqWriteArgsPtrs[2] = &rankCtx->rank;
+  sqWriteArgsPtrs[3] = &rankCtx->DEV_TRY_ROUND;
+  sqWriteArgsPtrs[4] = &rankCtx->sqWriteRetFlag;
 
-  if (CpuSqFull(sq)) {
-    // not an error; caller keeps trying.
+  struct cudaLaunchParams sqWriteKernelParam;
+  sqWriteKernelParam.func = (void *)sqWriteKernel;
+  sqWriteKernelParam.gridDim = dim3(1);
+  sqWriteKernelParam.blockDim = dim3(32);
+  sqWriteKernelParam.sharedMem = 0;
+  sqWriteKernelParam.stream = rankCtx->sqWriteStream;
+  sqWriteKernelParam.args = sqWriteArgsPtrs;
+  checkRuntime(cudaLaunchKernel(sqWriteKernelParam.func, sqWriteKernelParam.gridDim, sqWriteKernelParam.blockDim, sqWriteKernelParam.args, sqWriteKernelParam.sharedMem, sqWriteKernelParam.stream));
+  checkRuntime(cudaStreamSynchronize(sqWriteKernelParam.stream));
+
+  volatile int *sqWriteRetFlag = rankCtx->sqWriteRetFlag;
+  if (*sqWriteRetFlag == -1) {
     pthread_mutex_unlock(&rankCtx->sqMutex);
     return -1;
   }
-  *RingBufferGetTail(sq) = *sqe;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> write in sqe of coll_id = %d counter=%d @ %llu", pthread_self(), rank, sqe->collId, sqe->counter, RingBufferLogicTail(sq));
-
-  __sync_synchronize();
-
-  sq->tail += 1;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&rankCtx->sqMutex);
 
@@ -638,7 +649,6 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     rankCtx->callbacks[sqe->collId] = callback;
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
   }
-
 
   // 每次收到sqe，都唤醒一下。
   sem_post(&rankCtx->getNewSqeSema);
@@ -653,22 +663,36 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   return 0;
 }
 
-// thread_local static int tempRound = 0;
-static int cqRead(CQ *cq, CQE *target, int rank) {
-  // pthread_mutex_lock(&cq->mutex);
+static int cqRead(CQ *cq, CQE *target, ofcclRankCtx_t rankCtx) {
+  // pthread_mutex_lock(&cqMutex);
+  
+  *rankCtx->cqReadRetFlag = 0;
+  void *cqReadArgsPtrs[5];
+  cqReadArgsPtrs[0] = &rankCtx->cq;
+  cqReadArgsPtrs[1] = &rankCtx->CqeStation;
+  cqReadArgsPtrs[2] = &rankCtx->rank;
+  cqReadArgsPtrs[3] = &rankCtx->DEV_TRY_ROUND;
+  cqReadArgsPtrs[4] = &rankCtx->cqReadRetFlag;
 
-  if (CpuCqEmpty(cq)) {
-    // pthread_mutex_unlock(&cq->mutex);
+  struct cudaLaunchParams cqReadKernelParam;
+  cqReadKernelParam.func = (void *)cqReadKernel;
+  cqReadKernelParam.gridDim = dim3(1);
+  cqReadKernelParam.blockDim = dim3(32);
+  cqReadKernelParam.sharedMem = 0;
+  cqReadKernelParam.stream = rankCtx->cqReadStream;
+  cqReadKernelParam.args = cqReadArgsPtrs;
+  checkRuntime(cudaLaunchKernel(cqReadKernelParam.func, cqReadKernelParam.gridDim, cqReadKernelParam.blockDim, cqReadKernelParam.args, cqReadKernelParam.sharedMem, cqReadKernelParam.stream));
+  checkRuntime(cudaStreamSynchronize(cqReadKernelParam.stream));
+
+  volatile int *cqReadRetFlag = rankCtx->cqReadRetFlag;
+  if (*cqReadRetFlag == -1) {
+    // pthread_mutex_unlock(&cqMutex);
     return -1;
+  } else {
+    *target = *rankCtx->CqeStation;
   }
-  
-  *target = *RingBufferGetHead(cq);
-  
-  __sync_synchronize();
 
-  cq->head += 1;
-
-  // pthread_mutex_unlock(&cq->mutex);
+  // pthread_mutex_unlock(&cqMutex);
 
   return 0;
 }
@@ -691,6 +715,8 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
 
   newOfcclRankCtx->rank = rank;
   newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
+  int64_t DEV_TRY_ROUND = ParseIntegerFromEnv("DEV_TRY_ROUND", 10);
+  newOfcclRankCtx->DEV_TRY_ROUND = DEV_TRY_ROUND;
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy、值的初始化还是放到ofcclPrepareDone里边做
 
@@ -791,6 +817,7 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
 
 void *startPoller(void *args) {
   ofcclRankCtx *rankCtx = ((PollerArgs *)args)->rankCtx;
+  checkRuntime(cudaSetDevice(rankCtx->rank));
 
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, startPoller thread START", pthread_self(), rankCtx->rank);
   
@@ -816,7 +843,7 @@ void *startPoller(void *args) {
     pthread_mutex_unlock(&rankCtx->poller_mutex);
 
     CQE target;
-    if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
+    if (cqRead(rankCtx->cq, &target, rankCtx) == -1) {
       sched_yield();
     } else {
       int collId = target.collId;
@@ -1273,11 +1300,16 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus)));
   checkRuntime(cudaMemcpy(rankCtx->globalBlkStatus, rankCtx->hostBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus), cudaMemcpyHostToDevice)); // 确保第一次进去，myGlobalBlkStatus->hasQuitted == 0
 
+  checkRuntime(cudaMallocHost(&rankCtx->sqWriteRetFlag, sizeof(int)));
+  checkRuntime(cudaMallocHost(&rankCtx->SqeStation, sizeof(SQE)));
+
+  checkRuntime(cudaMallocHost(&rankCtx->cqReadRetFlag, sizeof(int)));
+  checkRuntime(cudaMallocHost(&rankCtx->CqeStation, sizeof(CQE)));
+
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
     checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
   #endif
-
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
 
@@ -1357,6 +1389,12 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   free(rankCtx->hostBlk2CollId2CollCtx);
+  checkRuntime(cudaFreeHost(rankCtx->finallyQuit));
+  checkRuntime(cudaFreeHost(rankCtx->sqWriteRetFlag));
+  checkRuntime(cudaFreeHost(rankCtx->SqeStation));
+  checkRuntime(cudaFreeHost(rankCtx->cqReadRetFlag));
+  checkRuntime(cudaFreeHost(rankCtx->CqeStation));
+  
 
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaFreeHost(rankCtx->barrierCnt));

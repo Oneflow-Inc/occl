@@ -29,11 +29,45 @@ __shared__ BlkStatus blkStatus; // 取消static，放到prim里边打印log。
 static __shared__ BlkCount4CollAlign sharedBlkCount4CollAlign;
 static __shared__ unsigned long long int zeros[2];
 
+__global__ void sqWriteKernel(SQ *sq, SQE *sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag) {
+  if (threadIdx.x == 0) {
+    int tryCnt = 0;
+    while (tryCnt++ < DEV_TRY_ROUND) {
+      if (DevSqFull(sq)) {
+        atomicExch(sqWriteRetFlag, -1);
+        continue;
+      }
+      *DevGetQTail<SQ, SQE>(sq) = *sqe;
+      __threadfence();
+      atomicAdd(&sq->tail, 1);
+      atomicExch(sqWriteRetFlag, 1);
+      break;
+    }
+  }
+}
+
+__global__ void cqReadKernel(CQ *cq, CQE *target, int thrdCudaDev, int DEV_TRY_ROUND, int *cqReadRetFlag) {
+  if (threadIdx.x == 0) {
+    int tryCnt = 0;
+    while (tryCnt++ < DEV_TRY_ROUND) {
+      if (DevCqEmpty(cq)) {
+        atomicExch(cqReadRetFlag, -1);
+        continue;
+      }
+      *target = *DevGetQHead<CQ, CQE>(cq);
+      __threadfence();
+      atomicAdd(&cq->head, 1);
+      atomicExch(cqReadRetFlag, 1);
+      break;
+    }
+  }
+}
+
 static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 
   unsigned long long int currSqFrontier = blkStatus.dynamicBlkStatus.sqReadFrontier;
 
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, enter, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, currSqFrontier), DevLogicSqHead(sq), DevLogicSqTail(sq)); // sharedCollCtx.rank是在loadCtx之后才有效的，在此之前想打印sqRead的情况，需要使用thrdCudaDev，不然会搞出乌龙。
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, enter, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, currSqFrontier), DevLogicQHead(sq), DevLogicQTail(sq)); // sharedCollCtx.rank是在loadCtx之后才有效的，在此之前想打印sqRead的情况，需要使用thrdCudaDev，不然会搞出乌龙。
 
   if (DevSqEmpty(sq, currSqFrontier)) {
     return -1;
@@ -59,7 +93,7 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
       sqHead = atomicCAS(&sq->head, currSqFrontier, currSqFrontier + 1);
     } while (sqHead != currSqFrontier);
 
-    // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update sq->head, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu, sq->head = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier), DevLogicSqHead(sq));
+    // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update sq->head, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu, sq->head = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier), DevLogicQHead(sq));
   }
 
   return 0;
@@ -210,16 +244,16 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     if (bid < blkLimit) {
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
       // if (blkStatus.collStatusAlign.collStatus[newActiveCollId] != 0) { // 应该没有重入的风险。重入指一个正在执行的集合通信又被提起请求。
-      //   OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, DevLogicSqHead(sq), DevLogicSqTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
+      //   OFCCL_LOG(OFCCL_FATAL, "Rank<%d> Blk<%d> Thrd<%d> globalCollCtx4Blk7Coll->executing should be 0! sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, bid, threadIdx.x, DevLogicQHead(sq), DevLogicQTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
       // }
 
       blkStatus.collStatusAlign.collStatus[newActiveCollId] = 1;
       
       #ifdef CQE_DEBUG_RANK_X
-        OFCCL_LOG_RANK_X(OFCCL_CQE, CQE_DEBUG_RANK_X, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicSqHead(sq), DevLogicSqTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
+        OFCCL_LOG_RANK_X(OFCCL_CQE, CQE_DEBUG_RANK_X, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicQHead(sq), DevLogicQTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
       #endif
       #ifdef CQE_DEBUG_ALL_RANK
-        OFCCL_LOG(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicSqHead(sq), DevLogicSqTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
+        OFCCL_LOG(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, read %lluth SQE for coll_id = %d, sq->head = %llu, sq->tail = %llu, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->sqeReadCnt), newActiveCollId, DevLogicQHead(sq), DevLogicQTail(sq), DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier));
       #endif
       
       globalCollCtx4Blk7Coll->staticCollCtx.workElem.sendbuff = target.sendbuff;
@@ -629,4 +663,12 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       return;
     }
   }
+}
+
+__global__ void sqCreateKernel(SQ *sq) {
+  qCreateDev(sq);
+}
+
+__global__ void cqCreateKernel(CQ *cq) {
+  qCreateDev(cq);
 }

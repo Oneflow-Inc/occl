@@ -192,8 +192,11 @@ typedef struct alignas(16) {
 
 extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
 
-template<typename Q>
-extern __global__ void qCreateKernel(Q *q);
+extern __global__ void sqCreateKernel(SQ *sq);
+extern __global__ void cqCreateKernel(CQ *cq);
+
+extern __global__ void sqWriteKernel(SQ *sq, SQE *sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag);
+extern __global__ void cqReadKernel(CQ *cq, CQE *target, int thrdCudaDev, int DEV_TRY_ROUND, int *cqReadRetFlag);
 
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
