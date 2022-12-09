@@ -11,7 +11,7 @@ namespace {
     const int nthreads = args->header.nWarps*WARP_SIZE;
     const int bid = blockIdx.x; // TODO: 可以修复一下args->bid;
     const int nChannels = args->nChannels;
-    // ncclRing *ring = &sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].channel.ring;
+    
     int ringIx = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.ringIndex;
     const ssize_t chunkSize = int(Proto::calcBytePerStep()/sizeof(T) * (Proto::Id == NCCL_PROTO_SIMPLE ? ALLREDUCE_CHUNKSTEPS : 1));
     const int nranks = sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.nRanks;
@@ -196,7 +196,7 @@ namespace {
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
       } else {
         blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = 2;
-      //   OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, runRing success, gridOffset = %lu, size = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, size, currentStep, loopSize);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, runRing success, gridOffset = %lu, size = %lu, currentStep = %d, loopSize = %ld", sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, size, currentStep, loopSize);
       //   __syncwarp(); // ！！！！！！为了打印log加的！！！！
       }
     }

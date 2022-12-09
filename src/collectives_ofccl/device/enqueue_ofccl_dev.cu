@@ -319,7 +319,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
     if (blkStatus.collStatusAlign.collStatus[collId] == -1) {
       // bugfix: 防止一个不需要load的coll，无休止增加下去。
       sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD + BOUNS_SWITCH_4_PROCESSED_COLL;
-      // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId], sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId], sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold);
       *unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
       
       #ifdef SHOW_CNT
@@ -364,10 +364,12 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     __threadfence();
   }
 
-  // bugfix: manipulateCQ7ResetDoneColl的调用时机，是traverseTaskQ外边，又遍历一次taskQ，所以要判断一下。这也是可以带来性能优化的地方。不判断会导致另一个coll从上次save的地方重新load，重新做已经完成的搬运，但是peer rank未必能配合，就会卡住。
+  // 多个slot之后这条失效了，不过可以重置一下。bugfix: manipulateCQ7ResetDoneColl的调用时机，是traverseTaskQ外边，又遍历一次taskQ，所以要判断一下。这也是可以带来性能优化的地方。不判断会导致另一个coll从上次save的地方重新load，重新做已经完成的搬运，但是peer rank未必能配合，就会卡住。
   if (doneCollId == blkStatus.currLoadedCollId) {
     blkStatus.currLoadedCollId = -1;
   }
+  // bugfix: 启用了slot之后，对于完成的coll，要把其占用的slot给invalid掉。
+  sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].staticCollCtx.collId = -1;
 
   blkStatus.collStatusAlign.collStatus[doneCollId] = 0;
 
