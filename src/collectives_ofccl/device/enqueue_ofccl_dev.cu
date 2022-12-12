@@ -297,6 +297,8 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
   bool needSave = !sameLoadedColl && loadedCollProgressed7SaveCtx7Quit;
   bool needLoad = noLoadedColl || !sameLoadedColl;
+
+  OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before run coll_id = %d, numActiveColls=%d, collIdOfThatSlot=%d, loadedCollProgressed7SaveCtx7Quit=%d, needSave=%d, needLoad=%d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.dynamicBlkStatus.numActiveColls, collIdOfThatSlot, loadedCollProgressed7SaveCtx7Quit, needSave, needLoad);
   
   if (needSave) {
     // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
@@ -304,14 +306,14 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
     saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, collIdOfThatSlot);
 
-    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collIdOfThatSlot, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, slice4SimpleGenericOp=%d, offset4SimpleGenericOp=%d, currentStep4RingAllReduce=%d, gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collIdOfThatSlot, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce);
   }
 
   if (needLoad) {
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     turn = loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, turn, BASE_CTX_SWITCH_THRESHOLD);
 
-    OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain=%d, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp=%d, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp=%d, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce=%d, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, loadAgain=%d, slice4SimpleGenericOp=%d, offset4SimpleGenericOp=%d, currentStep4RingAllReduce=%d, gridOffset4RingAllReduce=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RingAllReduce, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RingAllReduce);
   }
 
   if (tid == 0) {
