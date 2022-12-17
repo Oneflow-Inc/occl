@@ -100,12 +100,11 @@ struct ofcclRankCtx {
 
   dim3 daemonKernelGridDim;
   dim3 daemonKernelBlockDim;
-  int queueLength;
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[18];
-  cudaStream_t kernelStream;
+  void *daemonKernelArgsPtrs[18];
+  cudaStream_t daemonKernelStream;
 
   CQE hostCqes[MAX_LENGTH];
   CQE *globalCqes;
@@ -120,8 +119,19 @@ struct ofcclRankCtx {
   CollCtx *hostBlk2CollId2CollCtx;
   CollCtx *globalBlk2CollId2CollCtx;
   
+  int DEV_TRY_ROUND;
+
   SQ *sq;
+  pthread_mutex_t sqMutex;
+  cudaStream_t sqWriteStream;
+  int *sqWriteRetFlag; // 不好volatile，cudaFreeHost不能传int *进去
+  SQE *SqeStation;
+
   CQ *cq;
+  pthread_mutex_t cqMutex;
+  cudaStream_t cqReadStream;
+  int *cqReadRetFlag;
+  CQE *CqeStation;
 
   // for poller thread
   pthread_t poller;
@@ -141,5 +151,41 @@ struct ofcclRankCtx {
 #endif
 };
 
+template<typename Q, typename QE>
+Q *qCreate(ofcclRankCtx *rankCtx) {
+  Q *q;
+  void *qCreatArgPtrs[1];
+  cudaStream_t qCreateStream;
+  struct cudaLaunchParams qCreateKernelParam;
+
+  checkRuntime(cudaStreamCreate(&qCreateStream));
+  if (std::is_same<Q, SQ>::value) {
+    pthread_mutex_init(&rankCtx->sqMutex, nullptr);
+    qCreateKernelParam.func = (void *)sqCreateKernel;
+  } else {
+    qCreateKernelParam.func = (void *)cqCreateKernel;
+  }
+  checkRuntime(cudaMalloc(&q, sizeof(Q)));
+
+  checkRuntime(cudaSetDevice(rankCtx->rank));
+  qCreatArgPtrs[0] = &q;
+
+  qCreateKernelParam.gridDim = dim3(1);
+  qCreateKernelParam.blockDim = dim3(32);
+  qCreateKernelParam.sharedMem = 0;
+  qCreateKernelParam.stream = qCreateStream;
+  qCreateKernelParam.args = qCreatArgPtrs;
+  checkRuntime(cudaLaunchKernel(qCreateKernelParam.func, qCreateKernelParam.gridDim, qCreateKernelParam.blockDim, qCreateKernelParam.args, qCreateKernelParam.sharedMem, qCreateKernelParam.stream));
+  checkRuntime(cudaStreamSynchronize(qCreateKernelParam.stream));
+
+  return q;
+}
+
+template<typename Q>
+void qDestroy(Q *q) {
+  if (q) {
+    checkRuntime(cudaFree(q));
+  }
+}
 
 #endif // End include guard
