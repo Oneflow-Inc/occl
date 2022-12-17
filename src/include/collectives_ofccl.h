@@ -13,7 +13,7 @@
 #define QLen MAX_LENGTH
 #define NUM_SHMEM_SLOT 10
 
-#define SHOW_CNT 1
+// #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
