@@ -284,6 +284,48 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
 }
 #endif
 
+static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
+  // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
+  int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
+  __threadfence(); // cqes在global memory里边，全部block关心。
+
+  // *(blkStatus.collCounters + 0 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
+  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->cqePrepareCnt), doneCollId);
+
+  if (old_counter + 1 == sharedBlkCount4CollAlign.blkCount4Coll[doneCollId]) {
+    atomicExch(&globalCqes[doneCollId].counter, 0);
+
+    #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
+      CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
+      unsigned long long int *cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
+      while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
+      }
+    #else
+      while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, nullptr) == -1) {
+      }
+    #endif
+    // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+    __threadfence();
+  }
+
+  // 多个slot之后这条失效了，不过可以重置一下。bugfix: manipulateCQ7ResetDoneColl的调用时机，是traverseTaskQ外边，又遍历一次taskQ，所以要判断一下。这也是可以带来性能优化的地方。不判断会导致另一个coll从上次save的地方重新load，重新做已经完成的搬运，但是peer rank未必能配合，就会卡住。
+  if (doneCollId == blkStatus.currLoadedCollId) {
+    blkStatus.currLoadedCollId = -1;
+  }
+  // bugfix: 启用了slot之后，对于完成的coll，要把其占用的slot给invalid掉。
+  sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].staticCollCtx.collId = -1;
+
+  blkStatus.collStatusAlign.collStatus[doneCollId] = 0;
+
+  // ResetDoneColl
+  globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
+  globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
+}
+
 static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collId, int turn, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL, int *unprogressedCnt) {
   int tid = threadIdx.x;
   int bid = blockIdx.x;
@@ -338,49 +380,6 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 
   ofcclBarrier(4);
   return turn;
-}
-
-
-static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
-  // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
-  int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
-  __threadfence(); // cqes在global memory里边，全部block关心。
-
-  // *(blkStatus.collCounters + 0 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-
-  // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, prepare %lluth CQE for coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, ++(globalCollCtx4Blk7Coll->cqePrepareCnt), doneCollId);
-
-  if (old_counter + 1 == sharedBlkCount4CollAlign.blkCount4Coll[doneCollId]) {
-    atomicExch(&globalCqes[doneCollId].counter, 0);
-
-    #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
-      CollCtx *globalCollCtx4Blk_0_7Coll = globalBlk2CollId2CollCtx + 0 * MAX_LENGTH + doneCollId;
-      unsigned long long int *cqeWriteCnt = &globalCollCtx4Blk_0_7Coll->cqeWriteCnt;
-      while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, cqeWriteCnt) == -1) {
-      }
-    #else
-      while (cqWrite(cq, globalCqes + doneCollId, thrdCudaDev, nullptr) == -1) {
-      }
-    #endif
-    // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
-    __threadfence();
-  }
-
-  // 多个slot之后这条失效了，不过可以重置一下。bugfix: manipulateCQ7ResetDoneColl的调用时机，是traverseTaskQ外边，又遍历一次taskQ，所以要判断一下。这也是可以带来性能优化的地方。不判断会导致另一个coll从上次save的地方重新load，重新做已经完成的搬运，但是peer rank未必能配合，就会卡住。
-  if (doneCollId == blkStatus.currLoadedCollId) {
-    blkStatus.currLoadedCollId = -1;
-  }
-  // bugfix: 启用了slot之后，对于完成的coll，要把其占用的slot给invalid掉。
-  sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].staticCollCtx.collId = -1;
-
-  blkStatus.collStatusAlign.collStatus[doneCollId] = 0;
-
-  // ResetDoneColl
-  globalCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
-  globalCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
-  globalCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
-  globalCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
-  globalCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
 }
 
 static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2CollCtx, int collCount, CQ *cq, CQE *globalCqes, int turn, int *unprogressedCnt, int64_t BASE_CTX_SWITCH_THRESHOLD, int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
