@@ -56,7 +56,7 @@ inline unsigned long long int CpuLogicCqTail(CQ *cq) {
 
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
 
-extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+extern int sqWrite(SQ *sq, SQE sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
 struct ofcclCommArgs {
   ncclResult_t ret;
@@ -125,7 +125,6 @@ struct ofcclRankCtx {
   pthread_mutex_t sqMutex;
   cudaStream_t sqWriteStream;
   int *sqWriteRetFlag; // 不好volatile，cudaFreeHost不能传int *进去
-  SQE *SqeStation;
 
   CQ *cq;
   pthread_mutex_t cqMutex;

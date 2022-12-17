@@ -615,13 +615,12 @@ static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NU
   }
 };
 
-int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
+int sqWrite(SQ *sq, SQE sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
   pthread_mutex_lock(&rankCtx->sqMutex);
   *rankCtx->sqWriteRetFlag = 0;
   void *sqWriteArgsPtrs[5];
   sqWriteArgsPtrs[0] = &rankCtx->sq;
-  *rankCtx->SqeStation = *sqe;
-  sqWriteArgsPtrs[1] = &rankCtx->SqeStation;
+  sqWriteArgsPtrs[1] = &sqe;
   sqWriteArgsPtrs[2] = &rankCtx->rank;
   sqWriteArgsPtrs[3] = &rankCtx->DEV_TRY_ROUND;
   sqWriteArgsPtrs[4] = &rankCtx->sqWriteRetFlag;
@@ -644,10 +643,10 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
 
   pthread_mutex_unlock(&rankCtx->sqMutex);
 
-  if (sqe->collId != -1) {
+  if (sqe.collId != -1) {
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> set callback for coll_id = %d", pthread_self(), rankCtx->rank, sqe->collId);
-    rankCtx->callbacks[sqe->collId] = callback;
-    rankCtx->callbackArgList[sqe->collId] = callbackArgs;
+    rankCtx->callbacks[sqe.collId] = callback;
+    rankCtx->callbackArgList[sqe.collId] = callbackArgs;
   }
 
   // 每次收到sqe，都唤醒一下。
@@ -1302,7 +1301,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMemcpy(rankCtx->globalBlkStatus, rankCtx->hostBlkStatus, rankCtx->daemonKernelGridDim.x * sizeof(BlkStatus), cudaMemcpyHostToDevice)); // 确保第一次进去，myGlobalBlkStatus->hasQuitted == 0
 
   checkRuntime(cudaMallocHost(&rankCtx->sqWriteRetFlag, sizeof(int)));
-  checkRuntime(cudaMallocHost(&rankCtx->SqeStation, sizeof(SQE)));
 
   checkRuntime(cudaMallocHost(&rankCtx->cqReadRetFlag, sizeof(int)));
   checkRuntime(cudaMallocHost(&rankCtx->CqeStation, sizeof(CQE)));
@@ -1368,7 +1366,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
 
   // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, nullptr, nullptr, true };
-  sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
+  sqWrite(rankCtx->sq, sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
 
   pthread_mutex_lock(&rankCtx->poller_mutex);
   rankCtx->poll_stop = 1;
@@ -1392,7 +1390,6 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   free(rankCtx->hostBlk2CollId2CollCtx);
   checkRuntime(cudaFreeHost(rankCtx->finallyQuit));
   checkRuntime(cudaFreeHost(rankCtx->sqWriteRetFlag));
-  checkRuntime(cudaFreeHost(rankCtx->SqeStation));
   checkRuntime(cudaFreeHost(rankCtx->cqReadRetFlag));
   checkRuntime(cudaFreeHost(rankCtx->CqeStation));
   

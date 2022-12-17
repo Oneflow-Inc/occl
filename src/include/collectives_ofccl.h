@@ -199,7 +199,7 @@ extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCou
 extern __global__ void sqCreateKernel(SQ *sq);
 extern __global__ void cqCreateKernel(CQ *cq);
 
-extern __global__ void sqWriteKernel(SQ *sq, SQE *sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag);
+extern __global__ void sqWriteKernel(SQ *sq, SQE sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag);
 extern __global__ void cqReadKernel(CQ *cq, CQE *target, int thrdCudaDev, int DEV_TRY_ROUND, int *cqReadRetFlag);
 
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****

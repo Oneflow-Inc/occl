@@ -29,7 +29,7 @@ __shared__ BlkStatus blkStatus; // 取消static，放到prim里边打印log。
 static __shared__ BlkCount4CollAlign sharedBlkCount4CollAlign;
 static __shared__ unsigned long long int zeros[2];
 
-__global__ void sqWriteKernel(SQ *sq, SQE *sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag) {
+__global__ void sqWriteKernel(SQ *sq, SQE sqe, int thrdCudaDev, int DEV_TRY_ROUND, int *sqWriteRetFlag) {
   if (threadIdx.x == 0) {
     int tryCnt = 0;
     while (tryCnt++ < DEV_TRY_ROUND) {
@@ -37,7 +37,7 @@ __global__ void sqWriteKernel(SQ *sq, SQE *sqe, int thrdCudaDev, int DEV_TRY_ROU
         atomicExch(sqWriteRetFlag, -1);
         continue;
       }
-      *DevGetQTail<SQ, SQE>(sq) = *sqe;
+      *DevGetQTail<SQ, SQE>(sq) = sqe;
       __threadfence();
       atomicAdd(&sq->tail, 1);
       atomicExch(sqWriteRetFlag, 1);

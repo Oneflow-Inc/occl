@@ -31,7 +31,7 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> ofcclRunAllReduce, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);
 
-  while (sqWrite(rankCtx->sq, &sqe, thrdCudaDev, callback, callbackArgs, rankCtx) == -1) {}
+  while (sqWrite(rankCtx->sq, sqe, thrdCudaDev, callback, callbackArgs, rankCtx) == -1) {}
   
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> insert sqe for coll_id = %d", pthread_self(), thrdCudaDev, collId);
 
