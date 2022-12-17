@@ -11,11 +11,11 @@
 #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
-#define NUM_SHMEM_SLOT 1
+#define NUM_SHMEM_SLOT 10
 
 #define SHOW_CNT 1
 
-#define ARRAY_DEBUG 1
+// #define ARRAY_DEBUG 1
 
 #define NUM_BARRIERS 30
 #define BARCNT_INNER_SIZE 10

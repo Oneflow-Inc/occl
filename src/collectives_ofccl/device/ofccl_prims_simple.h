@@ -165,9 +165,9 @@ class Primitives<
     // if ((flags & (Recv*RolePostRecv))) {
     //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
     // }
-    if ((flags & (Send*RolePostSend))) {
-      OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
-    }
+    // if ((flags & (Send*RolePostSend))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
+    // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
