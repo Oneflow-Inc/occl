@@ -11,8 +11,9 @@
 #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
+#define NUM_SHMEM_SLOT 10
 
-#define SHOW_CNT 1
+// #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
@@ -135,17 +136,18 @@ typedef struct {
 
 typedef struct alignas(16) {
   struct ncclWorkElem workElem; // sizeof(struct ncclWorkElem)=64
+  // 来自channel
+  struct ncclPeer* devPeers;
   // 来自channel.ring
   int ringPrev;
   int ringNext;
   int ringIndex;
-  // 来自channel
-  struct ncclPeer* devPeers;
   // 来自comm(devComm, 不是普通comm)
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
   volatile uint32_t *abortFlag;
-} StaticCollCtx; // sizeof(StaticCollCtx)=112
+  int collId;
+} StaticCollCtx; // sizeof(StaticCollCtx)=
 
 typedef struct alignas(16) {
   // Prims Simple的上下文

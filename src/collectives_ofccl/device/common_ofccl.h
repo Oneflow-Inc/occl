@@ -6,7 +6,7 @@
 #include "devcomm.h"
 #include "op128_ofccl.h"
 
-extern __shared__ CollCtx sharedCollCtx;
+extern __shared__ CollCtx sharedCollCtx[NUM_SHMEM_SLOT];
 extern __shared__ BlkStatus blkStatus;
 
 // ***** 这些文件夹内部用的宏，而且本身不带NCCL关键字的，可以不改名 *****
@@ -50,7 +50,7 @@ struct RunWork {
 // Examples :     AllReduce, RING, LL,    Sum,   uint8
 #define IMPL_COLL_FUNC(func, algo, proto, devredop, type) \
 __device__ void OFCCL_FUNC_NAME(func, algo, proto, devredop, type)() { \
-  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx.staticCollCtx.workElem); \
+  RunWork<ncclFunc##func, type, Func##devredop<type>, NCCL_ALGO_##algo, NCCL_PROTO_##proto>().run(&sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem); \
 }
 
 #define IMPL_COLL4(func, algo, devredop, type, ncclType) \
