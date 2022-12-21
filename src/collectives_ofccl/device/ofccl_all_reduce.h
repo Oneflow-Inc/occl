@@ -23,6 +23,8 @@ namespace {
     #endif
 
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> args->bid=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, args->bid);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Proto::calcBytePerStep()=%d, sizeof(T)=%lu, chunkSize=%ld, loopSize=%ld", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, Proto::calcBytePerStep(), sizeof(T), chunkSize, loopSize);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> ringIx=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, ringIx);
 
     // TODO: minChunkSize 是LL和LL128用的，先省略
 
@@ -51,6 +53,8 @@ namespace {
 
       realChunkSize = int(realChunkSize);
 
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> chunkSize=%ld, loopSize=%ld, realChunkSize=%ld, size=%ld", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, chunkSize, loopSize, realChunkSize, size);
+
       auto calcOffset = [&]__device__(int chunk)->ssize_t {
         if (Proto::Id == NCCL_PROTO_SIMPLE)
           return gridOffset + bid*nranks*realChunkSize + chunk*realChunkSize;
@@ -73,7 +77,7 @@ namespace {
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
         
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.send. [< 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, offset, nelem, chunk);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.send. [< 1] gridOffset=%ld, currentStep=%d, size=%ld, realChunkSize=%ld, chunk=%d, offset=%ld, nelem=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, size, realChunkSize, chunk, offset, nelem);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         prims.send(offset, nelem); // **send** 将 sendbuff 中的数据通过 sendConn 发送给 peer
@@ -97,7 +101,7 @@ namespace {
           offset = calcOffset(chunk);
           nelem = min(realChunkSize, size-offset);
 
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.recvReduceSend. [< nranks - 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, offset, nelem, chunk);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.recvReduceSend. [< nranks - 1] gridOffset=%ld, currentStep=%d, size=%ld, realChunkSize=%ld, chunk=%d, offset=%ld, nelem=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, size, realChunkSize, chunk, offset, nelem);
           // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
           prims.recvReduceSend(offset, nelem); // **recvReduceSend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后通过  sendConn 发送给 peer 
@@ -120,7 +124,7 @@ namespace {
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
 
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvReduceCopySend. [< nranks] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, offset, nelem, chunk);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvReduceCopySend. [< nranks] gridOffset=%ld, currentStep=%d, size=%ld, realChunkSize=%ld, chunk=%d, offset=%ld, nelem=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, size, realChunkSize, chunk, offset, nelem);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         prims.directRecvReduceCopySend(offset, offset, offset, nelem, /*postOp=*/true); // **directRecvReduceCopySend** 通过 recvConn 接收 peer 发送的数据，和 sendbuff 的数据进行 reduce 后 copy 到 recvbuff，并通过 P2P write 写入到 peer 的 recvbuff，direct主要是修饰send，意思要直接写入peer的 recvbuff
@@ -142,7 +146,7 @@ namespace {
           offset = calcOffset(chunk);
           nelem = min(realChunkSize, size-offset);
 
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvCopySend. [< 2 * nranks - 2] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, offset, nelem, chunk);
+          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvCopySend. [< 2 * nranks - 2] gridOffset=%ld, currentStep=%d, size=%ld, realChunkSize=%ld, chunk=%d, offset=%ld, nelem=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, size, realChunkSize, chunk, offset, nelem);
           // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
           prims.directRecvCopySend(offset, offset, nelem); // **directRecvCopySend** 被动操作，数据已经被 peer 直接写入到 ==recvbuff==，copy 也无需发生，并将数据通过 P2P write 写入到 peer 的 recvbuff
@@ -164,7 +168,7 @@ namespace {
         offset = calcOffset(chunk);
         nelem = min(realChunkSize, size-offset);
 
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecv. [< 2 * nranks - 1] gridOffset = %ld, currentStep = %d, offset = %ld, nelem = %d, chunk = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, offset, nelem, chunk);
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecv. [< 2 * nranks - 1] gridOffset=%ld, currentStep=%d, size=%ld, realChunkSize=%ld, chunk=%d, offset=%ld, nelem=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep, size, realChunkSize, chunk, offset, nelem);
         // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
         prims.directRecv(offset, nelem); // **directRecv** 被动操作，数据已经被 peer 直接写入到 recvbuff
