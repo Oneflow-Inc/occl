@@ -8,7 +8,9 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
+// #define DEBUG_COUNT_TIME 1
+
+#define MAX_LENGTH 200LL // 受到0xc000 shmem的限制 1000LL
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define NUM_SHMEM_SLOT 10

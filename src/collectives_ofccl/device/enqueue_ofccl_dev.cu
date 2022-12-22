@@ -443,6 +443,11 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
+
+  #ifdef DEBUG_COUNT_TIME
+    long long int kernelStart = clock64();
+  #endif
+
   int bid = blockIdx.x;
   int tid = threadIdx.x;
 
@@ -548,6 +553,15 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         #ifdef SHOW_CNT
           OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalProgressed7SwithchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt);
         #endif
+
+        #ifdef DEBUG_COUNT_TIME
+          long long int kernelQuit = clock64();
+          long long int cycles;
+          cycles = calcDeltaClock(kernelStart, kernelQuit);
+
+          OFCCL_LOG_THRD_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> quit-start=%lld", thrdCudaDev, bid, tid, cycles);
+        #endif
+
       } else {
         int aciTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
         int aciDoneBytes = 0;

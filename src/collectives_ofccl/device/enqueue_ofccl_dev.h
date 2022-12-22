@@ -26,6 +26,12 @@ typedef struct alignas(16) {
   char blkCount4Coll[MAX_LENGTH];
 } BlkCount4CollAlign;
 
+#ifdef DEBUG_COUNT_TIME
+inline __device__ long long int calcDeltaClock(long long int start, long long int end) {
+  return end > start ? end - start : end + (0xffffffffffffffff - start);
+}
+#endif
+
 inline __device__ bool DevCqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);
   volatile unsigned long long int *tailPtr = &(cq->tail);
