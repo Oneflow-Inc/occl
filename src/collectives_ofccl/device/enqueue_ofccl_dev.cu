@@ -623,7 +623,12 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
           if (tid == 0) {
             for (int i = 0; i < collCount; ++i) {
-              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, deltaClock=%lld-%lld-%lld-%lld-%lld", thrdCudaDev, bid, tid, i, blkStatus.deltaClock[i][0], blkStatus.deltaClock[i][1], blkStatus.deltaClock[i][2], blkStatus.deltaClock[i][3], blkStatus.deltaClock[i][4]);
+              long long int totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.deltaClock[i][j];
+              }
+              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, deltaClock=%lld-%lld-%lld-%lld-%lld", thrdCudaDev, bid, tid, i, blkStatus.deltaClock[i][0], blkStatus.deltaClock[i][1], blkStatus.deltaClock[i][2], blkStatus.deltaClock[i][3], blkStatus.deltaClock[i][4]);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, avg sqe-cqe time=%.2lfus", thrdCudaDev, bid, tid, i, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR);
             }
           }
 

@@ -13,6 +13,7 @@
 #ifdef DEBUG_CLOCK
   #define RECORD_ITER 5
   #define SKIP_WARMUP_ITER 3
+  #define CLOCK2US_FACTOR 1695.0
   #define MAX_LENGTH 53LL // 受到0xc000 shmem的限制
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
