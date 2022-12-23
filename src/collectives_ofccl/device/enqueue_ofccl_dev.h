@@ -26,7 +26,7 @@ typedef struct alignas(16) {
   char blkCount4Coll[MAX_LENGTH];
 } BlkCount4CollAlign;
 
-#ifdef DEBUG_COUNT_TIME
+#ifdef DEBUG_CLOCK
 inline __device__ long long int calcDeltaClock(long long int start, long long int end) {
   return end > start ? end - start : end + (0xffffffffffffffff - start);
 }

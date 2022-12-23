@@ -8,14 +8,23 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-// #define DEBUG_COUNT_TIME 1
+#define DEBUG_CLOCK 1
 
-#define MAX_LENGTH 200LL // 受到0xc000 shmem的限制 1000LL
+#ifdef DEBUG_CLOCK
+  #define RECORD_ITER 5
+  #define SKIP_WARMUP_ITER 3
+  #define CLOCK2US_FACTOR 1695.0
+  #define MAX_LENGTH 52LL // 受到0xc000 shmem的限制
+#else
+  #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
+#endif
+
+
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
 #define NUM_SHMEM_SLOT 10
 
-// #define SHOW_CNT 1
+#define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
@@ -110,6 +119,15 @@ typedef struct alignas(16) {
   #ifdef ARRAY_DEBUG
     unsigned long long int *barrierCnt;
     unsigned long long int *collCounters;
+  #endif
+
+
+  #ifdef DEBUG_CLOCK
+    long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
+    long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
+    long long int deltaClock[MAX_LENGTH][RECORD_ITER];
+    int getSqeIter[MAX_LENGTH];
+    int putCqeIter[MAX_LENGTH];
   #endif
 
 

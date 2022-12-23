@@ -74,7 +74,7 @@ typedef struct {
   int64_t BASE_CTX_SWITCH_THRESHOLD;
   int64_t BOUNS_SWITCH_4_PROCESSED_COLL;
 
-  #ifdef DEBUG_COUNT_TIME
+  #ifdef DEBUG_CLOCK
     std::chrono::system_clock::time_point kernelStart;
     std::chrono::system_clock::time_point kernelQuit;
   #endif

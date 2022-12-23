@@ -114,20 +114,49 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
     blkStatus.quit = 0;
     blkStatus.currLoadedCollId = -1;
     for (int i = 0; i < NUM_SHMEM_SLOT; ++i) {
+      // TODO: 可以并行优化，每次循环的增量是blockDim.x
       sharedCollCtx[i].buffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); // TODO: 目前只考虑simple
       sharedCollCtx[i].staticCollCtx.collId = -1; // 作用类似于设置blkStatus.currLoadedCollId = -1
     }
 
     zeros[0] = zeros[1] = 0llu;
   ONE_THRD_DO_END
+  
+  // 不需要初始化DEBUG_CLOCK里的数组，因为这些数组使用的时候都是直接赋值的。
 
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
   int hasQuitted = myGlobalBlkStatus->hasQuitted; // 每个线程都读。
 
   if (hasQuitted == 0) {
     set16B(tid, &blkStatus.dynamicBlkStatus, &zeros, sizeof(DynamicBlkStatus));
+      
+    #ifdef DEBUG_CLOCK
+      // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
+      ONE_THRD_DO
+        for (int i = 0; i < collCount; ++i) {
+          blkStatus.getSqeIter[i] = 0;
+          blkStatus.putCqeIter[i] = 0;
+        }
+      ONE_THRD_DO_END
+    #endif
+
   } else {
     copy16B(tid, &blkStatus.dynamicBlkStatus, &myGlobalBlkStatus->dynamicBlkStatus, sizeof(DynamicBlkStatus));
+      
+    #ifdef DEBUG_CLOCK
+      // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
+      ONE_THRD_DO
+        for (int i = 0; i < collCount; ++i) {
+          for (int j = 0; j < RECORD_ITER; ++j) {
+            blkStatus.getSqeClock[i][j] = myGlobalBlkStatus->getSqeClock[i][j];
+            blkStatus.putCqeClock[i][j] = myGlobalBlkStatus->putCqeClock[i][j];
+            blkStatus.deltaClock[i][j] = myGlobalBlkStatus->deltaClock[i][j];
+          }
+          blkStatus.getSqeIter[i] = myGlobalBlkStatus->getSqeIter[i];
+          blkStatus.putCqeIter[i] = myGlobalBlkStatus->putCqeIter[i];
+        }
+      ONE_THRD_DO_END
+    #endif
   }
 
   int bcTotalBytes = roundUp(collCount * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
@@ -142,6 +171,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
 
   int aciTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
   int aciDoneBytes = 0;
+  // 这个要不要复制，需要读取numActiveColls，所以必须得上边做完，加一个barrier之后才可以。
   while (aciDoneBytes < aciTotalBytes) {
     int targetBytes = min(nthreads * COPY_ELEM_SIZE, aciTotalBytes - aciDoneBytes);
     copy16B(tid, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + aciDoneBytes, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + aciDoneBytes, targetBytes);
@@ -187,6 +217,20 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
     int newActiveCollId = target.collId;
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[newActiveCollId]; // 需要参与新读到的coll的block才会进行后续操作。
+
+    #ifdef DEBUG_CLOCK
+      int tid = threadIdx.x;
+      if (tid == 0) { // checkSQ7TidyTaskQ 只在tid == 0里调用 T_T||
+        if (blkStatus.getSqeIter[newActiveCollId] >= SKIP_WARMUP_ITER) {
+          int iter = (blkStatus.getSqeIter[newActiveCollId] - SKIP_WARMUP_ITER) % RECORD_ITER;
+          blkStatus.getSqeClock[newActiveCollId][iter] = clock64();
+        }
+        ++blkStatus.getSqeIter[newActiveCollId];
+
+        // int bid = blockIdx.x;
+        // OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, iter=%d, getSqeClock=%lld", thrdCudaDev, bid, tid, newActiveCollId, iter, blkStatus.getSqeClock[newActiveCollId][iter]);
+      }
+    #endif
 
     *unprogressedCnt = 0;
     // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for coll_id = %d, reset *unprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId);
@@ -362,6 +406,22 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       }
     #endif
     // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
+
+    #ifdef DEBUG_CLOCK
+      int tid = threadIdx.x;
+      if (tid == 0) { // manipulateCQ7ResetDoneColl只在tid == 0里调用
+        if (blkStatus.putCqeIter[doneCollId] >= SKIP_WARMUP_ITER) {
+          int iter = (blkStatus.putCqeIter[doneCollId] - SKIP_WARMUP_ITER) % RECORD_ITER;
+          blkStatus.putCqeClock[doneCollId][iter] = clock64();
+          blkStatus.deltaClock[doneCollId][iter] = calcDeltaClock(blkStatus.getSqeClock[doneCollId][iter], blkStatus.putCqeClock[doneCollId][iter]);
+        }
+        ++blkStatus.putCqeIter[doneCollId];
+
+        // int bid = blockIdx.x;
+        // OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, iter=%d, getSqeClock=%lld, putCqeIter=%lld, deltaClock=%lld", thrdCudaDev, bid, tid, doneCollId, iter, blkStatus.getSqeClock[doneCollId][iter], blkStatus.putCqeClock[doneCollId][iter],  blkStatus.deltaClock[doneCollId][iter]);
+      }
+    #endif
+
     __threadfence();
   }
 
@@ -444,9 +504,9 @@ static __device__ int traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2C
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
 __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
 
-  #ifdef DEBUG_COUNT_TIME
-    long long int kernelStart = clock64();
-  #endif
+  // #ifdef DEBUG_CLOCK
+  //   long long int kernelStart = clock64();
+  // #endif
 
   int bid = blockIdx.x;
   int tid = threadIdx.x;
@@ -554,12 +614,24 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalProgressed7SwithchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt);
         #endif
 
-        #ifdef DEBUG_COUNT_TIME
-          long long int kernelQuit = clock64();
-          long long int cycles;
-          cycles = calcDeltaClock(kernelStart, kernelQuit);
+        #ifdef DEBUG_CLOCK
+          // long long int kernelQuit = clock64();
+          // long long int cycles;
+          // cycles = calcDeltaClock(kernelStart, kernelQuit);
 
-          OFCCL_LOG_THRD_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> quit-start=%lld", thrdCudaDev, bid, tid, cycles);
+          // OFCCL_LOG_THRD_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> quit-start=%lld", thrdCudaDev, bid, tid, cycles);
+
+          if (tid == 0) {
+            for (int i = 0; i < collCount; ++i) {
+              long long int totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.deltaClock[i][j];
+              }
+              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, deltaClock=%lld-%lld-%lld-%lld-%lld", thrdCudaDev, bid, tid, i, blkStatus.deltaClock[i][0], blkStatus.deltaClock[i][1], blkStatus.deltaClock[i][2], blkStatus.deltaClock[i][3], blkStatus.deltaClock[i][4]);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, avg sqe-cqe time=%.2lfus", thrdCudaDev, bid, tid, i, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR);
+            }
+          }
+
         #endif
 
       } else {
@@ -573,6 +645,21 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           aciDoneBytes += targetBytes;
         }
         copy16B(tid, &myGlobalBlkStatus->dynamicBlkStatus, &blkStatus.dynamicBlkStatus, sizeof(DynamicBlkStatus));
+
+        #ifdef DEBUG_CLOCK
+          // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
+          ONE_THRD_DO
+            for (int i = 0; i < collCount; ++i) {
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                myGlobalBlkStatus->getSqeClock[i][j] = blkStatus.getSqeClock[i][j];
+                myGlobalBlkStatus->putCqeClock[i][j] = blkStatus.putCqeClock[i][j];
+                myGlobalBlkStatus->deltaClock[i][j] = blkStatus.deltaClock[i][j];
+              }
+              myGlobalBlkStatus->getSqeIter[i] = blkStatus.getSqeIter[i];
+              myGlobalBlkStatus->putCqeIter[i] = blkStatus.putCqeIter[i];
+            }
+          ONE_THRD_DO_END
+        #endif
       }
 
 

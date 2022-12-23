@@ -793,7 +793,7 @@ end:
 
 void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
 
-  // #ifdef DEBUG_COUNT_TIME
+  // #ifdef DEBUG_CLOCK
   //   args->kernelStart = std::chrono::high_resolution_clock::now();
   // #endif
 
@@ -879,7 +879,7 @@ void *startPoller(void *args) {
 void *startKernel7SqObserver(void *args) {
   ofcclRankCtx *rankCtx = ((ObserverThrdArgs *)args)->rankCtx;
 
-  // #ifdef DEBUG_COUNT_TIME
+  // #ifdef DEBUG_CLOCK
   //   ((ObserverThrdArgs *)args)->kernelStart = std::chrono::high_resolution_clock::now();
   // #endif
 
@@ -896,7 +896,7 @@ void *startKernel7SqObserver(void *args) {
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
     if (*rankCtx->finallyQuit) {
-      // #ifdef DEBUG_COUNT_TIME
+      // #ifdef DEBUG_CLOCK
       //   ((ObserverThrdArgs *)args)->kernelQuit = std::chrono::high_resolution_clock::now();
       //   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(((ObserverThrdArgs *)args)->kernelQuit - ((ObserverThrdArgs *)args)->kernelStart).count();
       //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> CPU quit-start=%fus", rankCtx->rank, deltaSec * 1e6);
