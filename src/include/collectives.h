@@ -7,7 +7,7 @@
 #ifndef NCCL_COLLECTIVES_H_
 #define NCCL_COLLECTIVES_H_
 
-#define NCCL_DEBUG_CLOCK 1
+// #define NCCL_DEBUG_CLOCK 1
 
 enum ncclDevRedOp_t {
   ncclDevSum, ncclDevProd, ncclDevMax, ncclDevMin,

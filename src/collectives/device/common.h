@@ -283,7 +283,9 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     long long int kernEnd = clock64();
     long long int afterGetSqeAfterPutCqeDeltaClock = calcDeltaClock(kernStart, kernEnd);
     // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> kernel run %.2lfus, kernStart=%lld, kernEnd=%lld", ncclShmem.comm.rank, blockIdx.x, tid, afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR, kernStart, kernEnd);
-    NCCL_LOG_RANK_0_THRD_0_PURE("%.2lf", afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR);
+    if (blockIdx.x == 0) {
+      NCCL_LOG_RANK_0_THRD_0_PURE("%.2lf", afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR);
+    }
   #endif
 }
 
