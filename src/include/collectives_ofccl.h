@@ -24,7 +24,7 @@
 #define QLen MAX_LENGTH
 #define NUM_SHMEM_SLOT 10
 
-// #define SHOW_CNT 1
+#define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
@@ -129,10 +129,10 @@ typedef struct alignas(16) {
     int getSqeIter[MAX_LENGTH];
     long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
 
-    int beforePutCqeIter[MAX_LENGTH];
+    // int beforePutCqeIter[MAX_LENGTH];
     long long int beforePutCqeClock[MAX_LENGTH][RECORD_ITER];
 
-    int putCqeIter[MAX_LENGTH];
+    // int putCqeIter[MAX_LENGTH];
     long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
 
     long long int beforeAfterGetSqeDeltaClock[MAX_LENGTH][RECORD_ITER];

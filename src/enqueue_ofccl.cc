@@ -1251,6 +1251,11 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
   // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu, sizeof(DynamicBlkStatus)=%lu, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, alignof(DynamicCollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx), sizeof(DynamicBlkStatus), sizeof(StaticCollCtx), sizeof(DynamicCollCtx), alignof(DynamicCollCtx));
+  #ifdef DEBUG_CLOCK
+    if (rankCtx->rank == 0) {
+      OFCCL_LOG(OFCCL_DEBUG_TIME, "nBlocks = %d", rankCtx->daemonKernelGridDim.x);
+    }
+  #endif
   
   rankCtx->sq = sqCreate(rankCtx->queueLength);
   rankCtx->cq = cqCreate(rankCtx->queueLength);
