@@ -12,6 +12,13 @@
 #include "devcomm.h"
 #include "op128.h"
 
+#ifdef NCCL_DEBUG_CLOCK
+  #define CLOCK2US_FACTOR 1695.0
+  inline __device__ long long int calcDeltaClock(long long int start, long long int end) {
+    return end > start ? end - start : end + (0xffffffffffffffff - start);
+  }
+#endif
+
 #if __CUDA_ARCH__ >= 800
 #define COLL_UNROLL 8
 #else
@@ -205,6 +212,10 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
   int nthreads = blockDim.x;
   int bid = blockIdx.x;
 
+  #ifdef NCCL_DEBUG_CLOCK
+    long long int kernStart = clock64();
+  #endif
+
   int turn = copyToShmem(&ncclShmem.comm, comm); // loop
   // get address of channel without incurring indirect load from ncclDevCom::channels
   ncclChannel *channel = &((ncclDevCommAndChannels*)comm)->channels[bid];
@@ -268,6 +279,12 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     if (ncclShmem.work.header.isLast) break;
     __syncthreads();
   }
+  #ifdef NCCL_DEBUG_CLOCK
+    long long int kernEnd = clock64();
+    long long int afterGetSqeAfterPutCqeDeltaClock = calcDeltaClock(kernStart, kernEnd);
+    // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> kernel run %.2lfus, kernStart=%lld, kernEnd=%lld", ncclShmem.comm.rank, blockIdx.x, tid, afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR, kernStart, kernEnd);
+    NCCL_LOG_RANK_0_THRD_0_PURE("%.2lf", afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR);
+  #endif
 }
 
 // Only generate kernels for SUM

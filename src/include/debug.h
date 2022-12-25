@@ -43,6 +43,7 @@
 #define NCCL_LOG_RANK_0_THRD_0(PRE, FMT, args...) do { if (ncclShmem.comm.rank==0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define NCCL_LOG_RANK_0_THRD_100(PRE, FMT, args...) do { if (ncclShmem.comm.rank==0 && threadIdx.x == 100) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define NCCL_LOG_THRD_0(PRE, FMT, args...) do { if (threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define NCCL_LOG_RANK_0_THRD_0_PURE(FMT, args...) do { if (ncclShmem.comm.rank==0 && threadIdx.x == 0) printf(FMT "\t", args); } while(0)
 
 // #define OFCCL_LOG(PRE, FMT, args...) do {} while (0)
 // #define OFCCL_LOG1(PRE, FMT) do {} while (0)

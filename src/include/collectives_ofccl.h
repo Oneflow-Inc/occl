@@ -14,7 +14,7 @@
   #define RECORD_ITER 5
   #define SKIP_WARMUP_ITER 3
   #define CLOCK2US_FACTOR 1695.0
-  #define MAX_LENGTH 52LL // 受到0xc000 shmem的限制
+  #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
 #endif
@@ -24,7 +24,7 @@
 #define QLen MAX_LENGTH
 #define NUM_SHMEM_SLOT 10
 
-#define SHOW_CNT 1
+// #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
@@ -123,11 +123,23 @@ typedef struct alignas(16) {
 
 
   #ifdef DEBUG_CLOCK
-    long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
-    long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
-    long long int deltaClock[MAX_LENGTH][RECORD_ITER];
+    int beforeGetSqeIter[MAX_LENGTH];
+    long long int beforeGetSqeClock[MAX_LENGTH][RECORD_ITER];
+
     int getSqeIter[MAX_LENGTH];
+    long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
+
+    int beforePutCqeIter[MAX_LENGTH];
+    long long int beforePutCqeClock[MAX_LENGTH][RECORD_ITER];
+
     int putCqeIter[MAX_LENGTH];
+    long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
+
+    long long int beforeAfterGetSqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+    // long long int afterGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+    long long int afterGetSqeBeforePutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+    long long int beforeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+    long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
   #endif
 
 
