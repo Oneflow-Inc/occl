@@ -10,21 +10,32 @@
 
 #define DEBUG_CLOCK 1
 
+#define DEBUG_CLOCK_TRAIN 1
+
 #ifdef DEBUG_CLOCK
-  #define RECORD_ITER 5
-  #define SKIP_WARMUP_ITER 3
   #define CLOCK2US_FACTOR 1695.0
-  #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
+
+  #ifdef DEBUG_CLOCK_TRAIN
+    #define RECORD_ITER 4
+    #define SKIP_WARMUP_ITER 0
+    #define MAX_LENGTH 162LL // 受到0xc000 shmem的限制
+    #define NUM_SHMEM_SLOT 1
+  #else
+    #define RECORD_ITER 5
+    #define SKIP_WARMUP_ITER 3
+    #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
+    #define NUM_SHMEM_SLOT 10
+  #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
+  #define NUM_SHMEM_SLOT 10
 #endif
 
 
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
-#define NUM_SHMEM_SLOT 10
 
-#define SHOW_CNT 1
+// #define SHOW_CNT 1
 
 // #define ARRAY_DEBUG 1
 
