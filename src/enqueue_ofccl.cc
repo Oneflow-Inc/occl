@@ -1270,8 +1270,10 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaMalloc(&rankCtx->globalThrdCount4Coll, MAX_LENGTH * sizeof(int)));
   checkRuntime(cudaMemcpy(rankCtx->globalThrdCount4Coll, rankCtx->hostThrdCount4Coll, MAX_LENGTH * sizeof(int), cudaMemcpyHostToDevice));
 
-  // checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
-  // checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
+  #ifdef DEBUG_CLOCK
+    checkRuntime(cudaMalloc(&rankCtx->globalCollIds, MAX_LENGTH * sizeof(short)));
+    checkRuntime(cudaMemcpy(rankCtx->globalCollIds, rankCtx->hostCollIds, MAX_LENGTH * sizeof(short), cudaMemcpyHostToDevice));
+  #endif
 
   // checkRuntime(cudaMalloc(&rankCtx->globalDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem)));
   // checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
@@ -1412,8 +1414,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaFree(rankCtx->globalBlkCount4Coll));
   checkRuntime(cudaFree(rankCtx->globalThrdCount4Coll));
   free(rankCtx->hostBlkStatus);
-  checkRuntime(cudaFree(rankCtx->globalCollIds));
-  checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
+  #ifdef DEBUG_CLOCK
+    checkRuntime(cudaFree(rankCtx->globalCollIds));
+  #endif
+  // checkRuntime(cudaFree(rankCtx->globalDevComm7WorkElems));
   checkRuntime(cudaFree(rankCtx->globalBlk2CollId2CollCtx));
   free(rankCtx->hostBlk2CollId2CollCtx);
 
