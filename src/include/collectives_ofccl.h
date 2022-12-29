@@ -12,6 +12,10 @@
 
 #define DEBUG_CLOCK_TRAIN 1
 
+#define SHOW_CNT 1
+
+// #define ARRAY_DEBUG 1
+
 #ifdef DEBUG_CLOCK
   #define CLOCK2US_FACTOR 1695.0
 
@@ -34,10 +38,6 @@
 
 // 队列长度搞大些，反正目前也不缺这点显存。就搞得和max collCount一样大，那就不会full了。
 #define QLen MAX_LENGTH
-
-// #define SHOW_CNT 1
-
-// #define ARRAY_DEBUG 1
 
 #define NUM_BARRIERS 30
 #define BARCNT_INNER_SIZE 10
@@ -151,6 +151,11 @@ typedef struct alignas(16) {
     long long int afterGetSqeBeforePutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
     long long int beforeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
     long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+
+    #ifdef DEBUG_CLOCK_TRAIN
+      int ctxSwitchCnt[MAX_LENGTH];
+    #endif
+
   #endif
 
 

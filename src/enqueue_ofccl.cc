@@ -1215,7 +1215,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
     if (SHOW_ALL_PREPARED_COLL) {
-      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x=%d, blockDim.x=%d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x = %d, blockDim.x = %d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
       // OFCCL_LOG(OFCCL_INIT, "Rank<%d>, coll_id = %d, comm->buffSizes[NCCL_PROTO_SIMPLE]=%d", rankCtx->rank, collId, comm->buffSizes[NCCL_PROTO_SIMPLE]);
     }
 

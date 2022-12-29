@@ -51,7 +51,8 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 
   // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update counter = %d for coll_id = %d, @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, oldCounter + 1, DevRingBufferGetFrontier(sq, currSqFrontier)->collId, DevRingBufferLogicFrontier(sq, currSqFrontier));
 
-  __threadfence(); // 保证device上的各个block不要乱序看到。
+  // 会被device上其他block看到的都是原子操作了
+  // __threadfence(); // 保证device上的各个block不要乱序看到。
 
   unsigned long long int sqHead;
   if (oldCounter + 1 == gridDim.x) {
@@ -77,13 +78,13 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   // *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = DevRingBufferLogicFrontier(cq, myCqFrontier);
   // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
 
-  __threadfence();
+  // __threadfence();
 
-  DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  // DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
 
-  __threadfence_system();
+  // __threadfence_system();
 
-  // atomicCAS返回地址上的old值，是否修改体现不在返回值上。
   unsigned long long int cqTail;
   do {
     cqTail = atomicCAS(&cq->tail, myCqFrontier, myCqFrontier + 1);
@@ -138,6 +139,17 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
           blkStatus.getSqeIter[i] = 0;
           // blkStatus.beforePutCqeIter[i] = 0;
           // blkStatus.putCqeIter[i] = 0;
+          blkStatus.ctxSwitchCnt[i] = 0;
+          for (int j = 0; j < RECORD_ITER; ++j) {
+            blkStatus.beforeGetSqeClock[i][j] = 0;
+            blkStatus.getSqeClock[i][j] = 0;
+            blkStatus.beforePutCqeClock[i][j] = 0;
+            blkStatus.putCqeClock[i][j] = 0;
+            blkStatus.beforeAfterGetSqeDeltaClock[i][j] = 0;
+            blkStatus.afterGetSqeBeforePutCqeDeltaClock[i][j] = 0;
+            blkStatus.beforeAfterPutCqeDeltaClock[i][j] = 0;
+            blkStatus.beforeGetSqeAfterPutCqeDeltaClock[i][j] = 0;
+          }
         }
       ONE_THRD_DO_END
     #endif
@@ -162,6 +174,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             }
             blkStatus.beforeGetSqeIter[i] = myGlobalBlkStatus->beforeGetSqeIter[i];
             blkStatus.getSqeIter[i] = myGlobalBlkStatus->getSqeIter[i];
+            blkStatus.ctxSwitchCnt[i] = myGlobalBlkStatus->ctxSwitchCnt[i];
             // blkStatus.beforePutCqeIter[i] = myGlobalBlkStatus->beforePutCqeIter[i];
             // blkStatus.putCqeIter[i] = myGlobalBlkStatus->putCqeIter[i];
           }
@@ -398,6 +411,12 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
       sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
       *unprogressedCnt += 1;
     }
+
+    #ifdef DEBUG_CLOCK_TRAIN
+      if (blkStatus.collStatusAlign.collStatus[collId] < 0) {
+        ++blkStatus.ctxSwitchCnt[collId];
+      }
+    #endif
 
     blkStatus.collStatusAlign.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。 
     sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit = 0; // 重置。
@@ -666,18 +685,18 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                   totalDeltaClock += blkStatus.beforeAfterGetSqeDeltaClock[collId][j];
                 }
                 #ifdef DEBUG_CLOCK_TRAIN
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before get sqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeClock[collId][0], blkStatus.beforeGetSqeClock[collId][1], blkStatus.beforeGetSqeClock[collId][2], blkStatus.beforeGetSqeClock[collId][3]);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before get sqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeClock[collId][0], blkStatus.beforeGetSqeClock[collId][1], blkStatus.beforeGetSqeClock[collId][2], blkStatus.beforeGetSqeClock[collId][3]);
                   
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, after get sqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.getSqeClock[collId][0], blkStatus.getSqeClock[collId][1], blkStatus.getSqeClock[collId][2], blkStatus.getSqeClock[collId][3]);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, after get sqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.getSqeClock[collId][0], blkStatus.getSqeClock[collId][1], blkStatus.getSqeClock[collId][2], blkStatus.getSqeClock[collId][3]);
                   
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before put cqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.beforePutCqeClock[collId][0], blkStatus.beforePutCqeClock[collId][1], blkStatus.beforePutCqeClock[collId][2], blkStatus.beforePutCqeClock[collId][3]);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before put cqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.beforePutCqeClock[collId][0], blkStatus.beforePutCqeClock[collId][1], blkStatus.beforePutCqeClock[collId][2], blkStatus.beforePutCqeClock[collId][3]);
                   
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, after put cqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.putCqeClock[collId][0], blkStatus.putCqeClock[collId][1], blkStatus.putCqeClock[collId][2], blkStatus.putCqeClock[collId][3]);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, after put cqe clock = %lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, collId, blkStatus.putCqeClock[collId][0], blkStatus.putCqeClock[collId][1], blkStatus.putCqeClock[collId][2], blkStatus.putCqeClock[collId][3]);
 
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+                  // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
                   OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before after get sqe = %lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeAfterGetSqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][3]/CLOCK2US_FACTOR);
                 #else
                   OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, before after get sqe = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeAfterGetSqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][3]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[collId][4]/CLOCK2US_FACTOR);
@@ -754,11 +773,19 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                   totalDeltaClock += blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][j];
                 }
                 #ifdef DEBUG_CLOCK_TRAIN
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe sqe = %lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][3]/CLOCK2US_FACTOR);
+                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe = %lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][3]/CLOCK2US_FACTOR);
                 #else
-                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe sqe = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][3]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][4]/CLOCK2US_FACTOR);
+                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, collId, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][0]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][1]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][2]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][3]/CLOCK2US_FACTOR, blkStatus.beforeGetSqeAfterPutCqeDeltaClock[collId][4]/CLOCK2US_FACTOR);
                 #endif
                 OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, collId, totalDeltaClock/putCqeCnt_adjust/CLOCK2US_FACTOR, putCqeCnt);
+              }
+            }
+            
+            OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+            for (int i = 0; i < collCount; ++i) {
+              int collId = globalCollIds[i];
+              if (bid < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
+                OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, ctxSwitchCnt = %d", thrdCudaDev, bid, tid, collId, blkStatus.ctxSwitchCnt[i]);
               }
             }
           }
@@ -793,6 +820,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               }
               myGlobalBlkStatus->beforeGetSqeIter[i] = blkStatus.beforeGetSqeIter[i];
               myGlobalBlkStatus->getSqeIter[i] = blkStatus.getSqeIter[i];
+              myGlobalBlkStatus->ctxSwitchCnt[i] = blkStatus.ctxSwitchCnt[i];
               // myGlobalBlkStatus->beforePutCqeIter[i] = blkStatus.beforePutCqeIter[i];
               // myGlobalBlkStatus->putCqeIter[i] = blkStatus.putCqeIter[i];
             }
