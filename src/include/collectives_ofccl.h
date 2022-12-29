@@ -9,9 +9,7 @@
 #include <sys/types.h>
 
 #define DEBUG_CLOCK 1
-
 // #define DEBUG_CLOCK_TRAIN 1
-
 #define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
@@ -20,17 +18,17 @@
 
 #ifdef DEBUG_CLOCK
   #define CLOCK2US_FACTOR 1695.0
+  #define NUM_SHMEM_SLOT 1
 
   #ifdef DEBUG_CLOCK_TRAIN
     #define RECORD_ITER 4
     #define SKIP_WARMUP_ITER 0
     #define MAX_LENGTH 162LL // 受到0xc000 shmem的限制
-    #define NUM_SHMEM_SLOT 1
-  #else
+  #endif
+  #ifdef DEBUG_CLOCK_IO
     #define RECORD_ITER 5
     #define SKIP_WARMUP_ITER 3
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
-    #define NUM_SHMEM_SLOT 1
   #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
@@ -136,29 +134,48 @@ typedef struct alignas(16) {
 
 
   #ifdef DEBUG_CLOCK
-    int beforeGetSqeIter[MAX_LENGTH];
-    long long int beforeGetSqeClock[MAX_LENGTH][RECORD_ITER];
-
-    int getSqeIter[MAX_LENGTH];
-    long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
-
-    // int beforePutCqeIter[MAX_LENGTH];
-    long long int beforePutCqeClock[MAX_LENGTH][RECORD_ITER];
-
-    // int putCqeIter[MAX_LENGTH];
-    long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
-
-    long long int beforeAfterGetSqeDeltaClock[MAX_LENGTH][RECORD_ITER];
-    // long long int afterGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
-    long long int afterGetSqeBeforePutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
-    long long int beforeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
-    long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
 
     #ifdef DEBUG_CLOCK_TRAIN
+      int beforeGetSqeIter[MAX_LENGTH];
+      long long int beforeGetSqeClock[MAX_LENGTH][RECORD_ITER];
+
+      int getSqeIter[MAX_LENGTH];
+      long long int getSqeClock[MAX_LENGTH][RECORD_ITER];
+
+      // int beforePutCqeIter[MAX_LENGTH];
+      long long int beforePutCqeClock[MAX_LENGTH][RECORD_ITER];
+
+      // int putCqeIter[MAX_LENGTH];
+      long long int putCqeClock[MAX_LENGTH][RECORD_ITER];
+
+      long long int beforeAfterGetSqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+      // long long int afterGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+      long long int afterGetSqeBeforePutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+      long long int beforeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+      long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
+
       int ctxSwitchCnt[MAX_LENGTH];
     #endif
 
     #ifdef DEBUG_CLOCK_IO
+      int beforeGetSqeIter;
+      long long int beforeGetSqeClock[RECORD_ITER];
+
+      int getSqeIter;
+      long long int getSqeClock[RECORD_ITER];
+
+      // int beforePutCqeIter;
+      long long int beforePutCqeClock[RECORD_ITER];
+
+      // int putCqeIter;
+      long long int putCqeClock[RECORD_ITER];
+
+      long long int beforeAfterGetSqeDeltaClock[RECORD_ITER];
+      // long long int afterGetSqeAfterPutCqeDeltaClock[RECORD_ITER];
+      long long int afterGetSqeBeforePutCqeDeltaClock[RECORD_ITER];
+      long long int beforeAfterPutCqeDeltaClock[RECORD_ITER];
+      long long int beforeGetSqeAfterPutCqeDeltaClock[RECORD_ITER];
+
       int sqReadCnt;
       int cqWriteCnt;
     #endif
