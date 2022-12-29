@@ -10,7 +10,9 @@
 
 #define DEBUG_CLOCK 1
 
-#define DEBUG_CLOCK_TRAIN 1
+// #define DEBUG_CLOCK_TRAIN 1
+
+#define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
 
@@ -28,7 +30,7 @@
     #define RECORD_ITER 5
     #define SKIP_WARMUP_ITER 3
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
-    #define NUM_SHMEM_SLOT 10
+    #define NUM_SHMEM_SLOT 1
   #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
@@ -154,6 +156,11 @@ typedef struct alignas(16) {
 
     #ifdef DEBUG_CLOCK_TRAIN
       int ctxSwitchCnt[MAX_LENGTH];
+    #endif
+
+    #ifdef DEBUG_CLOCK_IO
+      int sqReadCnt;
+      int cqWriteCnt;
     #endif
 
   #endif

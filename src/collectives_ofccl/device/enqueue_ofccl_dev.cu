@@ -38,6 +38,11 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
   if (DevSqEmpty(sq, currSqFrontier)) {
     return -1;
   }
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      ++blkStatus.sqReadCnt;
+    #endif
+  #endif
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
   *target = *DevRingBufferGetFrontier(sq, currSqFrontier);
   if (target->quit) {
@@ -71,6 +76,12 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
     // not an error; caller keeps trying.
     return -1;
   }
+  
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      ++blkStatus.cqWriteCnt;
+    #endif
+  #endif
 
   unsigned long long int myCqFrontier = atomicAdd(&(cq->frontier), 1); // 占坑，我就往这里写了，用的是old值，新的cq->tail预期是atomicAdd之后的cq->frontier，也就是myCqFrontier + 1。
   // 两个线程同时调用atomicAdd，是严格保证各自返回的。
@@ -139,7 +150,9 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
           blkStatus.getSqeIter[i] = 0;
           // blkStatus.beforePutCqeIter[i] = 0;
           // blkStatus.putCqeIter[i] = 0;
-          blkStatus.ctxSwitchCnt[i] = 0;
+          #ifdef DEBUG_CLOCK_TRAIN
+            blkStatus.ctxSwitchCnt[i] = 0;
+          #endif
           for (int j = 0; j < RECORD_ITER; ++j) {
             blkStatus.beforeGetSqeClock[i][j] = 0;
             blkStatus.getSqeClock[i][j] = 0;
@@ -151,6 +164,10 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             blkStatus.beforeGetSqeAfterPutCqeDeltaClock[i][j] = 0;
           }
         }
+        #ifdef DEBUG_CLOCK_IO
+          blkStatus.sqReadCnt = 0;
+          blkStatus.cqWriteCnt = 0;
+        #endif
       ONE_THRD_DO_END
     #endif
 
@@ -174,10 +191,16 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             }
             blkStatus.beforeGetSqeIter[i] = myGlobalBlkStatus->beforeGetSqeIter[i];
             blkStatus.getSqeIter[i] = myGlobalBlkStatus->getSqeIter[i];
-            blkStatus.ctxSwitchCnt[i] = myGlobalBlkStatus->ctxSwitchCnt[i];
+            #ifdef DEBUG_CLOCK_TRAIN
+              blkStatus.ctxSwitchCnt[i] = myGlobalBlkStatus->ctxSwitchCnt[i];
+            #endif
             // blkStatus.beforePutCqeIter[i] = myGlobalBlkStatus->beforePutCqeIter[i];
             // blkStatus.putCqeIter[i] = myGlobalBlkStatus->putCqeIter[i];
           }
+          #ifdef DEBUG_CLOCK_IO
+            blkStatus.sqReadCnt = myGlobalBlkStatus->sqReadCnt;
+            blkStatus.cqWriteCnt = myGlobalBlkStatus->cqWriteCnt;
+          #endif
         ONE_THRD_DO_END
     #endif
   }
@@ -227,10 +250,10 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
   if (sqRead(sq, &target, thrdCudaDev) == -1) {
     *unprogressedCnt += 1;
-    if (blkStatus.dynamicBlkStatus.numActiveColls > 0) {
+    // if (blkStatus.dynamicBlkStatus.numActiveColls > 0) {
       
-      // 没读到新的，应该不用处理taskQ了，因为每次遍历一次taskQ，都会处理。 
-    }
+    //   // 没读到新的，应该不用处理taskQ了，因为每次遍历一次taskQ，都会处理。 
+    // }
     return;
   } else {
     if (target.quit) {
@@ -780,14 +803,20 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                 OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, beforeSqe TO afterCqe AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, collId, totalDeltaClock/putCqeCnt_adjust/CLOCK2US_FACTOR, putCqeCnt);
               }
             }
-            
-            OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-            for (int i = 0; i < collCount; ++i) {
-              int collId = globalCollIds[i];
-              if (bid < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
-                OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, ctxSwitchCnt = %d", thrdCudaDev, bid, tid, collId, blkStatus.ctxSwitchCnt[i]);
+            #ifdef DEBUG_CLOCK_TRAIN
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              for (int i = 0; i < collCount; ++i) {
+                int collId = globalCollIds[i];
+                if (bid < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
+                  OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, ctxSwitchCnt = %d", thrdCudaDev, bid, tid, collId, blkStatus.ctxSwitchCnt[i]);
+                }
               }
-            }
+            #endif
+
+            #ifdef DEBUG_CLOCK_IO
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>, sqReadCnt = %d, cqWriteCnt = %d", thrdCudaDev, bid, tid, blkStatus.sqReadCnt, blkStatus.cqWriteCnt);
+            #endif
           }
         #endif
 
@@ -820,11 +849,17 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               }
               myGlobalBlkStatus->beforeGetSqeIter[i] = blkStatus.beforeGetSqeIter[i];
               myGlobalBlkStatus->getSqeIter[i] = blkStatus.getSqeIter[i];
-              myGlobalBlkStatus->ctxSwitchCnt[i] = blkStatus.ctxSwitchCnt[i];
               // myGlobalBlkStatus->beforePutCqeIter[i] = blkStatus.beforePutCqeIter[i];
               // myGlobalBlkStatus->putCqeIter[i] = blkStatus.putCqeIter[i];
+              #ifdef DEBUG_CLOCK_TRAIN
+                myGlobalBlkStatus->ctxSwitchCnt[i] = blkStatus.ctxSwitchCnt[i];
+              #endif
             }
           ONE_THRD_DO_END
+          #ifdef DEBUG_CLOCK_IO
+            myGlobalBlkStatus->sqReadCnt = blkStatus.sqReadCnt;
+            myGlobalBlkStatus->cqWriteCnt = blkStatus.cqWriteCnt;
+          #endif
         #endif
       }
 
