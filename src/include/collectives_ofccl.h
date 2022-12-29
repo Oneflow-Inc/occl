@@ -8,9 +8,9 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 // #define DEBUG_CLOCK_TRAIN 1
-#define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
 
