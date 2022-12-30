@@ -171,6 +171,11 @@ typedef struct alignas(16) {
 
       long long int beforePutCqeClock[RECORD_ITER];
 
+      long long int afterAddCqFrontierDeltaClock[RECORD_ITER];
+      long long int afterWriteCqCollIdDeltaClock[RECORD_ITER];
+      long long int afterFenceSystemDeltaClock[RECORD_ITER];
+      long long int afterUpdateCqTailDeltaClock[RECORD_ITER];
+
       long long int putCqeClock[RECORD_ITER];
 
       long long int beforeAfterGetSqeDeltaClock[RECORD_ITER];
