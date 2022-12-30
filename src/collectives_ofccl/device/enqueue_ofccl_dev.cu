@@ -50,8 +50,9 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
   blkStatus.dynamicBlkStatus.sqReadFrontier++; // 这次读到了，那对于当前这个block来说，下一个可读的位置前进一个。
 
   // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update counter = %d for coll_id = %d, @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, oldCounter + 1, DevRingBufferGetFrontier(sq, currSqFrontier)->collId, DevRingBufferLogicFrontier(sq, currSqFrontier));
-
-  __threadfence(); // 保证device上的各个block不要乱序看到。
+  
+  // 会被device上其他block看到的都是原子操作了，所以应该可以去掉fence
+  // __threadfence(); // 保证device上的各个block不要乱序看到。
 
   unsigned long long int sqHead;
   if (oldCounter + 1 == gridDim.x) {
@@ -77,11 +78,12 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   // *(blkStatus.collCounters + 5 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = DevRingBufferLogicFrontier(cq, myCqFrontier);
   // *(blkStatus.collCounters + 6 + cqe->collId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) = cq->tail;
 
-  __threadfence();
+  // __threadfence();
 
-  DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  // DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
 
-  __threadfence_system();
+  // __threadfence_system();
 
   // atomicCAS返回地址上的old值，是否修改体现不在返回值上。
   unsigned long long int cqTail;
