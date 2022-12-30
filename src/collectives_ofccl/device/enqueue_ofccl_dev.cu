@@ -34,19 +34,34 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
   unsigned long long int currSqFrontier = blkStatus.dynamicBlkStatus.sqReadFrontier;
 
   // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, enter, sqReadFrontier = %llu, sq->head=%llu, sq->tail=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, currSqFrontier), DevLogicSqHead(sq), DevLogicSqTail(sq)); // sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].rank是在loadCtx之后才有效的，在此之前想打印sqRead的情况，需要使用thrdCudaDev，不然会搞出乌龙。
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      ++blkStatus.sqReadCnt;
+      long long int localBeforeGetSqeClock = clock64();
+      long long int afterReadSqEmptyClock;
+      long long int afterGetSqFrontierClock;
+      long long int afterAddSqFrontierCounterClock;
+      long long int afterUpdateSqHeadClock;
+    #endif
+  #endif
 
   if (DevSqEmpty(sq, currSqFrontier)) {
     return -1;
   }
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
-      ++blkStatus.sqReadCnt;
 
       if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER) {
         int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER) % RECORD_ITER;
-        blkStatus.beforeGetSqeClock[iter] = clock64(); // 只有真的读到sqe才记录这个值。
+        blkStatus.beforeGetSqeClock[iter] = localBeforeGetSqeClock; // 只有真的读到sqe才记录这个值。
       }
       ++blkStatus.beforeGetSqeIter;
+
+      if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER + 1) {
+        int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+        afterReadSqEmptyClock = clock64();
+        blkStatus.afterReadSqEmptyDeltaClock[iter] = calcDeltaClock(blkStatus.beforeGetSqeClock[iter], afterReadSqEmptyClock);
+      }
     #endif
   #endif
   // 先读过来，然后再判断，最后更新状态：sqe->counter; 以及在恰当的时候commit read
@@ -55,10 +70,28 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
     // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> Get quit", thrdCudaDev, bid, threadIdx.x);
     return 0;
   }
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER + 1) {
+        int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+        afterGetSqFrontierClock = clock64();
+        blkStatus.afterGetSqFrontierDeltaClock[iter] = calcDeltaClock(afterReadSqEmptyClock, afterGetSqFrontierClock);
+      }
+    #endif
+  #endif
 
   int oldCounter = atomicAdd(&(DevRingBufferGetFrontier(sq, currSqFrontier)->counter), 1); // 将自己读了的sqe的counter加1，代表有人读过了，有一个block不需要再读这个sqe了，后来再有人读这个的时候加完了去判断。
 
   blkStatus.dynamicBlkStatus.sqReadFrontier++; // 这次读到了，那对于当前这个block来说，下一个可读的位置前进一个。
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER + 1) {
+        int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+        afterAddSqFrontierCounterClock = clock64();
+        blkStatus.afterAddSqFrontierCounterDeltaClock[iter] = calcDeltaClock(afterGetSqFrontierClock, afterAddSqFrontierCounterClock);
+      }
+    #endif
+  #endif
 
   // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update counter = %d for coll_id = %d, @ %llu", thrdCudaDev, blockIdx.x, threadIdx.x, oldCounter + 1, DevRingBufferGetFrontier(sq, currSqFrontier)->collId, DevRingBufferLogicFrontier(sq, currSqFrontier));
 
@@ -72,6 +105,15 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
     } while (sqHead != currSqFrontier);
 
     // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, update sq->head, blkStatus.dynamicBlkStatus.sqReadFrontier = %llu, sq->head = %llu", thrdCudaDev, blockIdx.x, threadIdx.x, DevRingBufferLogicFrontier(sq, blkStatus.dynamicBlkStatus.sqReadFrontier), DevLogicSqHead(sq));
+    #ifdef DEBUG_CLOCK
+      #ifdef DEBUG_CLOCK_IO
+        if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER + 1) {
+          int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+          afterUpdateSqHeadClock = clock64();
+          blkStatus.afterUpdateSqHeadDeltaClock[iter] = calcDeltaClock(afterAddSqFrontierCounterClock, afterUpdateSqHeadClock);
+        }
+      #endif
+    #endif
   }
 
   return 0;
@@ -100,7 +142,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
   // DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
   atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
 
-  // __threadfence_system();
+  __threadfence_system();
 
   unsigned long long int cqTail;
   do {
@@ -185,6 +227,11 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             blkStatus.afterGetSqeBeforePutCqeDeltaClock[j] = 0;
             blkStatus.beforeAfterPutCqeDeltaClock[j] = 0;
             blkStatus.beforeGetSqeAfterPutCqeDeltaClock[j] = 0;
+
+            blkStatus.afterReadSqEmptyDeltaClock[j] = 0;
+            blkStatus.afterGetSqFrontierDeltaClock[j] = 0;
+            blkStatus.afterAddSqFrontierCounterDeltaClock[j] = 0;
+            blkStatus.afterUpdateSqHeadDeltaClock[j] = 0;
           }
           blkStatus.sqReadCnt = 0;
           blkStatus.cqWriteCnt = 0;
@@ -230,6 +277,11 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
               blkStatus.afterGetSqeBeforePutCqeDeltaClock[j] = myGlobalBlkStatus->afterGetSqeBeforePutCqeDeltaClock[j];
               blkStatus.beforeAfterPutCqeDeltaClock[j] = myGlobalBlkStatus->beforeAfterPutCqeDeltaClock[j];
               blkStatus.beforeGetSqeAfterPutCqeDeltaClock[j] = myGlobalBlkStatus->beforeGetSqeAfterPutCqeDeltaClock[j];
+
+              blkStatus.afterReadSqEmptyDeltaClock[j] = myGlobalBlkStatus->afterReadSqEmptyDeltaClock[j];
+              blkStatus.afterGetSqFrontierDeltaClock[j] = myGlobalBlkStatus->afterGetSqFrontierDeltaClock[j];
+              blkStatus.afterAddSqFrontierCounterDeltaClock[j] = myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j];
+              blkStatus.afterUpdateSqHeadDeltaClock[j] = myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j];
             }
             blkStatus.beforeGetSqeIter = myGlobalBlkStatus->beforeGetSqeIter;
             blkStatus.getSqeIter = myGlobalBlkStatus->getSqeIter;
@@ -276,7 +328,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
   int bid = blockIdx.x;
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_TRAIN
-      int tid = threadIdx.x;
+      // int tid = threadIdx.x;
       long long int beforeGetSqeClock = clock64();
     #endif
   #endif
@@ -833,23 +885,52 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
             #endif
 
             #ifdef DEBUG_CLOCK_IO
-              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
               long long int totalDeltaClock = 0;
+              int commitSqeCnt;
+              int commitSqeCnt_adjust;
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterReadSqEmptyDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, ReadSqEmptyDelta = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterReadSqEmptyDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterReadSqEmptyDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterReadSqEmptyDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterReadSqEmptyDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterReadSqEmptyDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, ReadSqEmptyDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterGetSqFrontierDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, GetSqFrontierDelta = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterGetSqFrontierDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterGetSqFrontierDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterGetSqFrontierDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterGetSqFrontierDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterGetSqFrontierDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, GetSqFrontierDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterAddSqFrontierCounterDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, AddSqFrontierCounterDelta = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterAddSqFrontierCounterDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterAddSqFrontierCounterDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterAddSqFrontierCounterDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterAddSqFrontierCounterDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterAddSqFrontierCounterDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, AddSqFrontierCounterDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              commitSqeCnt = 0;
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterUpdateSqHeadDeltaClock[j];
+                if (blkStatus.afterUpdateSqHeadDeltaClock[j] > 0.0) {
+                  commitSqeCnt++;
+                }
+              }
+              commitSqeCnt_adjust = (commitSqeCnt == 0) ? 1 : commitSqeCnt; // 防止除0的bug。
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, UpdateSqHeadDelta = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterUpdateSqHeadDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterUpdateSqHeadDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterUpdateSqHeadDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterUpdateSqHeadDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterUpdateSqHeadDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, UpdateSqHeadDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/commitSqeCnt_adjust/CLOCK2US_FACTOR, commitSqeCnt);
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
               for (int j = 0; j < RECORD_ITER; ++j) {
                 totalDeltaClock += blkStatus.beforeAfterGetSqeDeltaClock[j];
               }
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before get sqe clock = %lld\t%lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, blkStatus.beforeGetSqeClock[0], blkStatus.beforeGetSqeClock[1], blkStatus.beforeGetSqeClock[2], blkStatus.beforeGetSqeClock[3]);
-              
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, after get sqe clock = %lld\t%lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, blkStatus.getSqeClock[0], blkStatus.getSqeClock[1], blkStatus.getSqeClock[2], blkStatus.getSqeClock[3]);
-              
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before put cqe clock = %lld\t%lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, blkStatus.beforePutCqeClock[0], blkStatus.beforePutCqeClock[1], blkStatus.beforePutCqeClock[2], blkStatus.beforePutCqeClock[3]);
-              
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, after put cqe clock = %lld\t%lld\t%lld\t%lld\t%lld", thrdCudaDev, bid, tid, blkStatus.putCqeClock[0], blkStatus.putCqeClock[1], blkStatus.putCqeClock[2], blkStatus.putCqeClock[3]);
-
-              // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before after get sqe = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.beforeAfterGetSqeDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[4]/CLOCK2US_FACTOR);
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before after get sqe AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
 
@@ -938,6 +1019,12 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                 myGlobalBlkStatus->afterGetSqeBeforePutCqeDeltaClock[j] = blkStatus.afterGetSqeBeforePutCqeDeltaClock[j];
                 myGlobalBlkStatus->beforeAfterPutCqeDeltaClock[j] = blkStatus.beforeAfterPutCqeDeltaClock[j];
                 myGlobalBlkStatus->beforeGetSqeAfterPutCqeDeltaClock[j] = blkStatus.beforeGetSqeAfterPutCqeDeltaClock[j];
+
+
+                myGlobalBlkStatus->afterReadSqEmptyDeltaClock[j] = blkStatus.afterReadSqEmptyDeltaClock[j];
+                myGlobalBlkStatus->afterGetSqFrontierDeltaClock[j] = blkStatus.afterGetSqFrontierDeltaClock[j];
+                myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j] = blkStatus.afterAddSqFrontierCounterDeltaClock[j];
+                myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j] = blkStatus.afterUpdateSqHeadDeltaClock[j];
               }
               myGlobalBlkStatus->beforeGetSqeIter = blkStatus.beforeGetSqeIter;
               myGlobalBlkStatus->getSqeIter = blkStatus.getSqeIter;
