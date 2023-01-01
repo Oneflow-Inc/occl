@@ -683,6 +683,9 @@ static CQ *cqCreate(unsigned long long int length) {
   cq->frontier = 0;
   checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(CQE)));
   // pthread_mutex_init(&cq->mutex, nullptr);
+  for (int i = 0; i < cq->length; ++i) {
+    cq->buffer[i].collId = -1;
+  }
 
   return cq;
 }
@@ -703,6 +706,7 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   }
   
   *target = *RingBufferGetHead(cq);
+  RingBufferGetHead(cq)->collId = -1;
   
   __sync_synchronize();
 

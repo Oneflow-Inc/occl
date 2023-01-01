@@ -164,8 +164,9 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
 
   // __threadfence();
 
-  DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
-  // atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
+  // DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
+  // atomicCAS(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), -1, cqe->collId);
 
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
