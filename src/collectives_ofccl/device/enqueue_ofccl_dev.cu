@@ -120,18 +120,29 @@ static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 }
 
 static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long long int *cqeWriteCnt) {
-  if (DevCqFull(cq)) {
-    // not an error; caller keeps trying.
-    return -1;
-  }
-  
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
       ++blkStatus.cqWriteCnt;
+      long long int afterReadCqFullClock;
       long long int afterAddCqFrontierClock;
       long long int afterWriteCqCollIdClock;
       long long int afterFenceSystemClock;
       long long int afterUpdateCqTailClock;
+    #endif
+  #endif
+
+  if (DevCqFull(cq)) {
+    // not an error; caller keeps trying.
+    return -1;
+  }
+
+  #ifdef DEBUG_CLOCK
+    #ifdef DEBUG_CLOCK_IO
+      if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
+        int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+        afterReadCqFullClock = clock64();
+        blkStatus.afterReadCqFullDeltaClock[iter] = calcDeltaClock(blkStatus.beforePutCqeClock[iter], afterReadCqFullClock);
+      }
     #endif
   #endif
 
@@ -143,7 +154,7 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
       if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
         int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
         afterAddCqFrontierClock = clock64();
-        blkStatus.afterAddCqFrontierDeltaClock[iter] = calcDeltaClock(blkStatus.beforePutCqeClock[iter], afterAddCqFrontierClock);
+        blkStatus.afterAddCqFrontierDeltaClock[iter] = calcDeltaClock(afterReadCqFullClock, afterAddCqFrontierClock);
       }
     #endif
   #endif
@@ -277,6 +288,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             blkStatus.afterAddSqFrontierCounterDeltaClock[j] = 0;
             blkStatus.afterUpdateSqHeadDeltaClock[j] = 0;
 
+            blkStatus.afterReadCqFullDeltaClock[j] = 0;
             blkStatus.afterAddCqFrontierDeltaClock[j] = 0;
             blkStatus.afterWriteCqCollIdDeltaClock[j] = 0;
             blkStatus.afterFenceSystemDeltaClock[j] = 0;
@@ -332,6 +344,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
               blkStatus.afterAddSqFrontierCounterDeltaClock[j] = myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j];
               blkStatus.afterUpdateSqHeadDeltaClock[j] = myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j];
 
+              blkStatus.afterReadCqFullDeltaClock[j] = myGlobalBlkStatus->afterReadCqFullDeltaClock[j];
               blkStatus.afterAddCqFrontierDeltaClock[j] = myGlobalBlkStatus->afterAddCqFrontierDeltaClock[j];
               blkStatus.afterWriteCqCollIdDeltaClock[j] = myGlobalBlkStatus->afterWriteCqCollIdDeltaClock[j];
               blkStatus.afterFenceSystemDeltaClock[j] = myGlobalBlkStatus->afterFenceSystemDeltaClock[j];
@@ -1003,6 +1016,14 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               putCqeCnt_adjust = (putCqeCnt == 0) ? 1 : putCqeCnt; // 防止除0的bug。
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, AfterSqe TO BeforeCqe = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterGetSqeBeforePutCqeDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforePutCqeDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforePutCqeDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforePutCqeDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforePutCqeDeltaClock[4]/CLOCK2US_FACTOR);
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, AfterSqe TO BeforeCqe AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/putCqeCnt_adjust/CLOCK2US_FACTOR, putCqeCnt);
+              
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterReadCqFullDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, afterReadCqFullDelta = %lf\t%lf\t%lf\t%lf\t%lf", thrdCudaDev, bid, tid, blkStatus.afterReadCqFullDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterReadCqFullDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterReadCqFullDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterReadCqFullDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterReadCqFullDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, afterReadCqFullDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/putCqeCnt_adjust/CLOCK2US_FACTOR, putCqeCnt);
               
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
               totalDeltaClock = 0;
