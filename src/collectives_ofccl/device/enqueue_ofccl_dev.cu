@@ -164,8 +164,8 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
 
   // __threadfence();
 
-  // DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
-  atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
+  DevRingBufferGetFrontier(cq, myCqFrontier)->collId = cqe->collId; // 那这里也应该各自写进去了。
+  // atomicExch(&(DevRingBufferGetFrontier(cq, myCqFrontier)->collId), cqe->collId);
 
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
@@ -287,6 +287,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             blkStatus.afterGetSqFrontierDeltaClock[j] = 0;
             blkStatus.afterAddSqFrontierCounterDeltaClock[j] = 0;
             blkStatus.afterUpdateSqHeadDeltaClock[j] = 0;
+            blkStatus.afterRecordBuffDeltaClock[j] = 0;
 
             blkStatus.afterReadCqFullDeltaClock[j] = 0;
             blkStatus.afterAddCqFrontierDeltaClock[j] = 0;
@@ -343,6 +344,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
               blkStatus.afterGetSqFrontierDeltaClock[j] = myGlobalBlkStatus->afterGetSqFrontierDeltaClock[j];
               blkStatus.afterAddSqFrontierCounterDeltaClock[j] = myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j];
               blkStatus.afterUpdateSqHeadDeltaClock[j] = myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j];
+              blkStatus.afterRecordBuffDeltaClock[j] = myGlobalBlkStatus->afterRecordBuffDeltaClock[j];
 
               blkStatus.afterReadCqFullDeltaClock[j] = myGlobalBlkStatus->afterReadCqFullDeltaClock[j];
               blkStatus.afterAddCqFrontierDeltaClock[j] = myGlobalBlkStatus->afterAddCqFrontierDeltaClock[j];
@@ -474,6 +476,16 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       
       globalCollCtx4Blk7Coll->staticCollCtx.workElem.sendbuff = target.sendbuff;
       globalCollCtx4Blk7Coll->staticCollCtx.workElem.recvbuff = target.recvbuff;
+
+      #ifdef DEBUG_CLOCK
+        #ifdef DEBUG_CLOCK_IO
+          if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
+            int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+            long long int afterRecordBuffClock = clock64();
+            blkStatus.afterRecordBuffDeltaClock[iter] = calcDeltaClock(blkStatus.getSqeClock[iter], afterRecordBuffClock);
+          }
+        #endif
+      #endif
 
       // maintain the taskQ here.
       // 新加入的集合通信放在末位，最后执行。如果新加入的集合通信存在于当前的blkStatus.activeCollIds里边，也不必强行放到末位。
@@ -1001,6 +1013,15 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before after get sqe = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.beforeAfterGetSqeDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.beforeAfterGetSqeDeltaClock[4]/CLOCK2US_FACTOR);
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, before after get sqe AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
 
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterRecordBuffDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, RecordBuffDelta = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.afterRecordBuffDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, RecordBuffDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+
+
               int putCqeCnt;
               int putCqeCnt_adjust;
 
@@ -1131,6 +1152,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                 myGlobalBlkStatus->afterGetSqFrontierDeltaClock[j] = blkStatus.afterGetSqFrontierDeltaClock[j];
                 myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j] = blkStatus.afterAddSqFrontierCounterDeltaClock[j];
                 myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j] = blkStatus.afterUpdateSqHeadDeltaClock[j];
+                myGlobalBlkStatus->afterRecordBuffDeltaClock[j] = blkStatus.afterRecordBuffDeltaClock[j];
 
                 myGlobalBlkStatus->afterAddCqFrontierDeltaClock[j] = blkStatus.afterAddCqFrontierDeltaClock[j];
                 myGlobalBlkStatus->afterWriteCqCollIdDeltaClock[j] = blkStatus.afterWriteCqCollIdDeltaClock[j];

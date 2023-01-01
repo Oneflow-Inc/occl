@@ -9,8 +9,8 @@
 #include <sys/types.h>
 
 #define DEBUG_CLOCK 1
-#define DEBUG_CLOCK_TRAIN 1
-// #define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_TRAIN 1
+#define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
 
@@ -165,6 +165,7 @@ typedef struct alignas(16) {
       long long int afterGetSqFrontierDeltaClock[RECORD_ITER];
       long long int afterAddSqFrontierCounterDeltaClock[RECORD_ITER];
       long long int afterUpdateSqHeadDeltaClock[RECORD_ITER];
+      long long int afterRecordBuffDeltaClock[RECORD_ITER];
 
       int getSqeIter;
       long long int getSqeClock[RECORD_ITER];
