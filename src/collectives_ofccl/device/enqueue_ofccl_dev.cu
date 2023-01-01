@@ -178,7 +178,9 @@ static __device__ int cqWrite(CQ *cq, CQE *cqe, int thrdCudaDev, unsigned long l
     #endif
   #endif
 
-  __threadfence_system();
+  #ifndef SKIP_FENCE_SYS
+    __threadfence_system();
+  #endif
 
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
