@@ -8,7 +8,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-// #define SKIP_FENCE_SYS 1
+#define SKIP_CHECK_CQ_FULL 1
+// #define HOST_CQ_TAIL 1
 
 #define DEBUG_CLOCK 1
 
@@ -83,11 +84,10 @@ typedef struct {
 } CQE;
 
 typedef struct {
-  CQE *buffer;
+  unsigned long long int *buffer;
   unsigned long long int length;
   unsigned long long int head;
-  unsigned long long int tail;
-  unsigned long long int frontier;
+  unsigned long long int *tail;
   pthread_mutex_t mutex;
 } CQ;
 
@@ -176,10 +176,8 @@ typedef struct alignas(16) {
       long long int beforePutCqeClock[RECORD_ITER];
 
       long long int afterReadCqFullDeltaClock[RECORD_ITER];
-      long long int afterAddCqFrontierDeltaClock[RECORD_ITER];
-      long long int afterWriteCqCollIdDeltaClock[RECORD_ITER];
-      long long int afterFenceSystemDeltaClock[RECORD_ITER];
-      long long int afterUpdateCqTailDeltaClock[RECORD_ITER];
+      long long int afterAddCqTailDeltaClock[RECORD_ITER];
+      long long int afterWriteBitCqeDeltaClock[RECORD_ITER];
 
       long long int putCqeClock[RECORD_ITER];
 

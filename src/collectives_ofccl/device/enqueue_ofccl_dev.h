@@ -35,12 +35,8 @@ inline __device__ long long int calcDeltaClock(long long int start, long long in
 inline __device__ bool DevCqFull(CQ *cq) { // cq->head 由CPU维护。
   volatile unsigned long long int *headPtr = &(cq->head);
 
-  // volatile unsigned long long int *tailPtr = &(cq->tail);
-  // // return *headPtr % cq->length == (*tailPtr + gridDim.x) % cq->length;
-  // return *tailPtr + gridDim.x - *headPtr == cq->length; // 防止全部block同时更新cq->frontier，破坏cq->head处的没有被读取的cqe。// 不再使用取模计算，直接用相同语义的加减计算
-  
-  // cq->tail 由各个block通过atomicCAS维护，应该可以直接读。
-  return cq->tail + gridDim.x - *headPtr == cq->length;
+  // return *headPtr % cq->length == (*cq->tail + gridDim.x) % cq->length;
+  return *cq->tail + gridDim.x - *headPtr == cq->length;// 防止全部block同时更新cq->frontier，破坏cq->head处的没有被读取的cqe。// 不再使用取模计算，直接用相同语义的加减计算
 }
 
 inline __device__ bool DevSqEmpty(SQ *sq, unsigned long long int currSqFrontier) {

@@ -39,19 +39,9 @@ inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
   return sq->tail + 1 - *headPtr == sq->length;
 }
 
-inline bool CpuCqEmpty(CQ *cq) { // cq->tail由GPU更新
-  volatile unsigned long long int *tailPtr = &(cq->tail);
-  return *tailPtr == cq->head;
-}
-
 inline unsigned long long int CpuLogicSqHead(SQ *sq) {
   volatile unsigned long long int *headPtr = &(sq->head);
   return *headPtr % sq->length;
-}
-
-inline unsigned long long int CpuLogicCqTail(CQ *cq) {
-  volatile unsigned long long int *tailPtr = &(cq->tail);
-  return *tailPtr % cq->length;
 }
 
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);

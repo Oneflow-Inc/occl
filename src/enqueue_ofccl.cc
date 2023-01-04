@@ -679,42 +679,49 @@ static CQ *cqCreate(unsigned long long int length) {
   checkRuntime(cudaMallocHost(&cq, sizeof(CQ)));
   cq->length = length + 1;
   cq->head = 0;
-  cq->tail = 0;
-  cq->frontier = 0;
-  checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(CQE)));
-  // pthread_mutex_init(&cq->mutex, nullptr);
-  for (int i = 0; i < cq->length; ++i) {
-    cq->buffer[i].collId = -1;
-  }
 
+  #ifdef HOST_CQ_TAIL
+    checkRuntime(cudaMallocHost(&cq->tail, sizeof(unsigned long long int)));
+    *cq->tail = 0;
+  #else
+    checkRuntime(cudaMalloc(&cq->tail, sizeof(unsigned long long int)));
+    checkRuntime(cudaMemcpy(cq->tail, &cq->head, sizeof(unsigned long long int), cudaMemcpyHostToDevice)); // cq->tail置零。
+  #endif
+  checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(unsigned long long int)));
+
+  for (int i = 0; i < cq->length; ++i) {
+    cq->buffer[i] = 0xffffffffffffffff; // 主要是把每个cq buffer的元素的高32位设为invalid，防止错误地和某个head匹配到。比如head=0的时候。
+  }
+ 
   return cq;
 }
 
 static void cqDestroy(CQ *cq) {
   if (cq) {
     checkRuntime(cudaFreeHost(cq->buffer));
+    #ifdef HOST_CQ_TAIL
+      checkRuntime(cudaFreeHost(cq->tail));
+    #else
+      checkRuntime(cudaFree(cq->tail));
+    #endif
+
     checkRuntime(cudaFreeHost(cq));
   }
 }
 // thread_local static int tempRound = 0;
 static int cqRead(CQ *cq, CQE *target, int rank) {
   // pthread_mutex_lock(&cq->mutex);
-
-  if (CpuCqEmpty(cq)) {
-    // pthread_mutex_unlock(&cq->mutex);
-    return -1;
+  unsigned long long int receive = *RingBufferGetHead(cq); // CPU是接收端，希望head处读到的64bit上的flag和head可以匹配。
+  unsigned long long int flag_from_receive = 0x00000000ffffffff & (receive >> 32); // 高32位是flag，flag是tail的低32位。
+  if ((flag_from_receive ^ (0x00000000ffffffff & cq->head)) == 0) {
+    target->collId = int(0x00000000ffffffff & receive); // 低32位是coll_id
+    cq->head += 1;
+    return 0;
   }
-  
-  *target = *RingBufferGetHead(cq);
-  RingBufferGetHead(cq)->collId = -1;
-  
-  __sync_synchronize();
-
-  cq->head += 1;
+  // __sync_synchronize();
 
   // pthread_mutex_unlock(&cq->mutex);
-
-  return 0;
+  return -1;
 }
 
 void *ofcclAsyncThreadPreconnect(void* args_) {
