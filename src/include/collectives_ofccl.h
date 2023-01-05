@@ -11,9 +11,9 @@
 #define SKIP_CHECK_CQ_FULL 1
 // #define HOST_CQ_TAIL 1
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
-#define DEBUG_CLOCK_TRAIN 1
+// #define DEBUG_CLOCK_TRAIN 1
 // #define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1

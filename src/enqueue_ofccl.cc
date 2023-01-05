@@ -710,14 +710,27 @@ static void cqDestroy(CQ *cq) {
 }
 // thread_local static int tempRound = 0;
 static int cqRead(CQ *cq, CQE *target, int rank) {
-  // pthread_mutex_lock(&cq->mutex);
-  unsigned long long int receive = *RingBufferGetHead(cq); // CPU是接收端，希望head处读到的64bit上的flag和head可以匹配。
-  unsigned long long int flag_from_receive = 0x00000000ffffffff & (receive >> 32); // 高32位是flag，flag是tail的低32位。
-  if ((flag_from_receive ^ (0x00000000ffffffff & cq->head)) == 0) {
-    target->collId = int(0x00000000ffffffff & receive); // 低32位是coll_id
-    cq->head += 1;
+
+  // for (cq->readSlot %= cq->length; cq->readSlot < cq->length; ++cq->readSlot) {
+
+  // 纯粹的单坑
+  volatile unsigned long long int *cqSlot = cq->buffer;
+  if (*cqSlot != 0xffffffffffffffff) {
+    target->collId = int(0x00000000ffffffff & *cqSlot); // 低32位是coll_id
+    *cqSlot = 0xffffffffffffffff;
     return 0;
   }
+
+  // }
+
+  // // pthread_mutex_lock(&cq->mutex);
+  // unsigned long long int receive = *RingBufferGetHead(cq); // CPU是接收端，希望head处读到的64bit上的flag和head可以匹配。
+  // unsigned long long int flag_from_receive = 0x00000000ffffffff & (receive >> 32); // 高32位是flag，flag是tail的低32位。
+  // if ((flag_from_receive ^ (0x00000000ffffffff & cq->head)) == 0) {
+  //   target->collId = int(0x00000000ffffffff & receive); // 低32位是coll_id
+  //   cq->head += 1;
+  //   return 0;
+  // }
   // __sync_synchronize();
 
   // pthread_mutex_unlock(&cq->mutex);

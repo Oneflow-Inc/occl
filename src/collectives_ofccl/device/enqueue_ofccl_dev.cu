@@ -123,64 +123,15 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   #ifdef DEBUG_CLOCK
     #ifdef DEBUG_CLOCK_IO
       ++blkStatus.cqWriteCnt;
-      long long int afterReadCqFullClock;
-      long long int afterAddCqTailClock;
-      long long int afterWriteBitCqeClock;
     #endif
   #endif
 
-  #ifndef SKIP_CHECK_CQ_FULL
-    if (DevCqFull(cq)) {
-      // not an error; caller keeps trying.
-      return -1;
-    }
-  #endif
+  int oldSlot = atomicCAS(cq->buffer, 0xffffffffffffffff, (unsigned long long int)doneCollId);
+  if (oldSlot == 0xffffffffffffffff) {
+    return 0;
+  }
 
-  #ifdef DEBUG_CLOCK
-    #ifdef DEBUG_CLOCK_IO
-      if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
-        int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
-        afterReadCqFullClock = clock64();
-        blkStatus.afterReadCqFullDeltaClock[iter] = calcDeltaClock(blkStatus.beforePutCqeClock[iter], afterReadCqFullClock);
-      }
-    #endif
-  #endif
-
-  unsigned long long int oldTail = atomicAdd(cq->tail, 1);
-  // 两个线程同时调用atomicAdd，是严格保证各自返回的。
-
-  #ifdef DEBUG_CLOCK
-    #ifdef DEBUG_CLOCK_IO
-      if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
-        int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
-        afterAddCqTailClock = clock64();
-        blkStatus.afterAddCqTailDeltaClock[iter] = calcDeltaClock(afterReadCqFullClock, afterAddCqTailClock);
-      }
-    #endif
-  #endif
-
-  unsigned long long int bitCqe = 0;
-  bitCqe |= (0x00000000ffffffff & doneCollId); // 低32位设为coll_id
-  bitCqe |= (0xffffffff00000000 & (oldTail << 32)); // 高32位设为tail的低32位
-  atomicExch(DevRingBufferGetFrontier(cq, oldTail), bitCqe);
-
-  #ifdef DEBUG_CLOCK
-    #ifdef DEBUG_CLOCK_IO
-      if (blkStatus.getSqeIter >= SKIP_WARMUP_ITER + 1) {
-        int iter = (blkStatus.getSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
-        afterWriteBitCqeClock = clock64();
-        blkStatus.afterWriteBitCqeDeltaClock[iter] = calcDeltaClock(afterAddCqTailClock, afterWriteBitCqeClock);
-      }
-    #endif
-  #endif
-
-  #ifdef CQE_DEBUG_RANK_X
-    OFCCL_LOG_RANK_X(OFCCL_CQE, CQE_DEBUG_RANK_X, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for coll_id = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), doneCollId, DevRingBufferLogicFrontier(cq, oldTail));
-  #endif
-  #ifdef CQE_DEBUG_ALL_RANK
-    OFCCL_LOG(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, put %lluth CQE for coll_id = %d @ %llu and update cq->tail", thrdCudaDev, blockIdx.x, threadIdx.x, ++(*cqeWriteCnt), doneCollId, DevRingBufferLogicFrontier(cq, oldTail));
-  #endif
-  return 0;
+  return -1;
 }
 
 static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, int turn) {
