@@ -677,20 +677,11 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
 static CQ *cqCreate(unsigned long long int length) {
   CQ *cq = nullptr;
   checkRuntime(cudaMallocHost(&cq, sizeof(CQ)));
-  cq->length = length + 1;
-  cq->head = 0;
+  cq->readSlot = 0;
+  checkRuntime(cudaMallocHost(&(cq->buffer), NUM_CQ_SLOT * sizeof(int)));
 
-  #ifdef HOST_CQ_TAIL
-    checkRuntime(cudaMallocHost(&cq->tail, sizeof(unsigned long long int)));
-    *cq->tail = 0;
-  #else
-    checkRuntime(cudaMalloc(&cq->tail, sizeof(unsigned long long int)));
-    checkRuntime(cudaMemcpy(cq->tail, &cq->head, sizeof(unsigned long long int), cudaMemcpyHostToDevice)); // cq->tail置零。
-  #endif
-  checkRuntime(cudaMallocHost(&(cq->buffer), cq->length * sizeof(unsigned long long int)));
-
-  for (int i = 0; i < cq->length; ++i) {
-    cq->buffer[i] = 0xffffffffffffffff; // 主要是把每个cq buffer的元素的高32位设为invalid，防止错误地和某个head匹配到。比如head=0的时候。
+  for (int i = 0; i < NUM_CQ_SLOT; ++i) {
+    *(cq->buffer + i) = -1;
   }
  
   return cq;
@@ -699,27 +690,24 @@ static CQ *cqCreate(unsigned long long int length) {
 static void cqDestroy(CQ *cq) {
   if (cq) {
     checkRuntime(cudaFreeHost(cq->buffer));
-    #ifdef HOST_CQ_TAIL
-      checkRuntime(cudaFreeHost(cq->tail));
-    #else
-      checkRuntime(cudaFree(cq->tail));
-    #endif
-
     checkRuntime(cudaFreeHost(cq));
   }
 }
 // thread_local static int tempRound = 0;
 static int cqRead(CQ *cq, CQE *target, int rank) {
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rank);
   // pthread_mutex_lock(&cq->mutex);
-  unsigned long long int receive = *RingBufferGetHead(cq); // CPU是接收端，希望head处读到的64bit上的flag和head可以匹配。
-  unsigned long long int flag_from_receive = 0x00000000ffffffff & (receive >> 32); // 高32位是flag，flag是tail的低32位。
-  if ((flag_from_receive ^ (0x00000000ffffffff & cq->head)) == 0) {
-    target->collId = int(0x00000000ffffffff & receive); // 低32位是coll_id
-    cq->head += 1;
-    return 0;
+  
+  for (cq->readSlot %= NUM_CQ_SLOT; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
+    volatile int *cqSlot = cq->buffer + cq->readSlot;
+    // OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, *cqSlot = %d, cqSlot @ %p", rank, cq->readSlot, *cqSlot, cqSlot);
+    if (*cqSlot != -1) {
+      target->collId = *cqSlot;
+      *cqSlot = -1; // 读完就重置。
+      return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
+    }
   }
   // __sync_synchronize();
-
   // pthread_mutex_unlock(&cq->mutex);
   return -1;
 }
@@ -864,9 +852,11 @@ void *startPoller(void *args) {
   }
 
   while (true) {
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> poller while(true)", pthread_self(), rankCtx->rank);
     pthread_mutex_lock(&rankCtx->poller_mutex);
     if (rankCtx->poll_stop == 1) {
       pthread_mutex_unlock(&rankCtx->poller_mutex);
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> poller quit", pthread_self(), rankCtx->rank);
       // TODO: 保证poller退出之前，cq已经空了。（应该没必要）
       break;
     }
