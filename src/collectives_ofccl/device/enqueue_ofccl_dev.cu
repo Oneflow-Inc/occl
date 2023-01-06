@@ -129,6 +129,7 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
 
   for (cqWriteSlot %= NUM_CQ_SLOT; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
     int oldSlot = atomicCAS(cq->buffer + cqWriteSlot, -1, doneCollId);
+    OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = %d, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, doneCollId);
     if (oldSlot == -1) {
       return 0;
     }

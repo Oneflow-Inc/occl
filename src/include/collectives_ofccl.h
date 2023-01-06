@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define NUM_CQ_SLOT 8
+#define NUM_CQ_SLOT 1
 
 #define DEBUG_CLOCK 1
 

@@ -700,8 +700,10 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   
   for (cq->readSlot %= NUM_CQ_SLOT; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
     volatile int *cqSlot = cq->buffer + cq->readSlot;
-    // OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, *cqSlot = %d, cqSlot @ %p", rank, cq->readSlot, *cqSlot, cqSlot);
     if (*cqSlot != -1) {
+      if (rank == 0) {
+        OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlot = %d", getpid(), getppid(), rank, cq->readSlot, *cqSlot);
+      }
       target->collId = *cqSlot;
       *cqSlot = -1; // 读完就重置。
       return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
