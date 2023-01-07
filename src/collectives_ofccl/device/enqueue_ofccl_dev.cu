@@ -127,9 +127,16 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
     #endif
   #endif
 
-  for (cqWriteSlot %= NUM_CQ_SLOT; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
+  cqWriteSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在写失败的时候，一直反复循环，而不是返回。其实是不好的。
+  for (; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
+    // atomicCAS 不支持volatile指针
     int oldSlot = atomicCAS(cq->buffer + cqWriteSlot, -1, doneCollId);
-    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = %d, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, doneCollId);
+    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = %d, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, doneCollId);
+
+    #ifdef FOR_ONEFLOW_NS
+      __nanosleep(FOR_ONEFLOW_NS);
+    #endif
+
     if (oldSlot == -1) {
       return 0;
     }

@@ -9,6 +9,7 @@
 #include <sys/types.h>
 
 #define NUM_CQ_SLOT 1
+#define FOR_ONEFLOW_NS 80000
 
 #define DEBUG_CLOCK 1
 

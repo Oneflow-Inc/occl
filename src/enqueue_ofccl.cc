@@ -698,17 +698,33 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rank);
   // pthread_mutex_lock(&cq->mutex);
   
-  for (cq->readSlot %= NUM_CQ_SLOT; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
-    volatile int *cqSlot = cq->buffer + cq->readSlot;
-    if (*cqSlot != -1) {
+  cq->readSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在读失败的时候，一直反复循环，而不是返回。其实是不好的。
+  for (; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
+    volatile int *cqSlotPtr = cq->buffer + cq->readSlot;
+    int cqSlot = *cqSlotPtr;
+    __sync_synchronize();
+    if (cqSlot != -1) { // 指针只读一次。
+      *cqSlotPtr = -1; // 读完就重置。
       // if (rank == 0) {
-      //   OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlot = %d", getpid(), getppid(), rank, cq->readSlot, *cqSlot);
+        // OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlotPtr = %d", getpid(), getppid(), rank, cq->readSlot, cqSlot);
       // }
-      target->collId = *cqSlot;
-      *cqSlot = -1; // 读完就重置。
+      target->collId = cqSlot;
       return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
     }
   }
+
+  // 纯粹的单坑：
+  // volatile int *cqSlotPtr = cq->buffer;
+  // int cqSlot = *cqSlotPtr;
+  // if (cqSlot != -1) {
+  //   *cqSlotPtr = -1; // 读完就重置。
+  //   if (rank == 0) {
+  //     OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlotPtr = %d", getpid(), getppid(), rank, cq->readSlot, cqSlot);
+  //   }
+  //   target->collId = cqSlot;
+  //   return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
+  // }
+
   // __sync_synchronize();
   // pthread_mutex_unlock(&cq->mutex);
   return -1;
