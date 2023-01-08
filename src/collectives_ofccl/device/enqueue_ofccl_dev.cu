@@ -128,26 +128,22 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   #endif
 
   cqWriteSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在写失败的时候，一直反复循环，而不是返回。其实是不好的。
+  unsigned long long int cqSlot = 0llu;
+  cqSlot |= doneCollId;
+  cqSlot |= BLOCK_CNT_MASK & ((unsigned long long int)(blkStatus.dynamicBlkStatus.cqCnt[doneCollId]) << COLL_ID_BIT);
+  cqSlot |= (unsigned long long int)blockIdx.x << (BLOCK_CNT_BIT + COLL_ID_BIT);
   for (; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
-    // atomicCAS 不支持volatile指针
-    int oldSlot = atomicCAS_system(cq->buffer + cqWriteSlot, -1, doneCollId);
-    // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = %d, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, doneCollId);
+    
+    unsigned long long int oldSlot = atomicCAS_system(cq->buffer + cqWriteSlot, INVALID_CQ_SLOT_MASK, cqSlot);
+    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
 
-    #ifdef FOR_ONEFLOW_NS
-      __nanosleep(FOR_ONEFLOW_NS);
-    #endif
-    // __threadfence_system();
-
-    if (oldSlot == -1) {
+    if (oldSlot == INVALID_CQ_SLOT_MASK) {
+      ++blkStatus.dynamicBlkStatus.cqCnt[doneCollId]; // 写成功才更新。
       return 0;
     }
   }
 
   // 纯粹的单坑：
-  // int oldSlot = atomicCAS(cq->buffer, -1, doneCollId);
-  // if (oldSlot == -1) {
-  //   return 0;
-  // }
 
   return -1;
 }

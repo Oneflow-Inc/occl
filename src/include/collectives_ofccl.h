@@ -9,7 +9,14 @@
 #include <sys/types.h>
 
 #define NUM_CQ_SLOT 1
-#define FOR_ONEFLOW_NS 80000
+#define RESERVED_GRID_DIM 256
+#define INVALID_CQ_SLOT_MASK  0xffffffffffffffff
+#define BLOCK_IDX_MASK        0xff00000000000000
+#define BLOCK_IDX_BIT         8
+#define BLOCK_CNT_MASK        0x00ffffff00000000
+#define BLOCK_CNT_BIT         24
+#define COLL_ID_MASK          0x00000000ffffffff
+#define COLL_ID_BIT           32
 
 #define DEBUG_CLOCK 1
 
@@ -84,8 +91,9 @@ typedef struct {
 } CQE;
 
 typedef struct {
-  int *buffer;
+  unsigned long long int *buffer;
   int readSlot;
+  unsigned int blockCollCnt[RESERVED_GRID_DIM][MAX_LENGTH];
   pthread_mutex_t mutex;
 } CQ;
 
@@ -109,6 +117,7 @@ typedef struct alignas(16) {
     unsigned long long int totalProgressed7SwithchCnt;
     unsigned long long int totalUnprogressedQuitCnt;
   #endif
+  unsigned int cqCnt[MAX_LENGTH];
   int numActiveColls;
 
 } DynamicBlkStatus;
