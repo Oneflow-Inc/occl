@@ -678,10 +678,15 @@ static CQ *cqCreate(unsigned long long int length) {
   CQ *cq = nullptr;
   checkRuntime(cudaMallocHost(&cq, sizeof(CQ)));
   cq->readSlot = 0;
-  checkRuntime(cudaMallocHost(&(cq->buffer), NUM_CQ_SLOT * sizeof(int)));
+  checkRuntime(cudaMallocHost(&(cq->buffer), NUM_CQ_SLOT * sizeof(unsigned long long int)));
 
   for (int i = 0; i < NUM_CQ_SLOT; ++i) {
-    *(cq->buffer + i) = -1;
+    *(cq->buffer + i) = INVALID_CQ_SLOT_MASK;
+  }
+  for (int blockIdx = 0; blockIdx < RESERVED_GRID_DIM; ++blockIdx) {
+    for (int collId = 0; collId < MAX_LENGTH; ++collId) {
+      cq->blockCollCnt[blockIdx][collId] = 0;
+    }
   }
  
   return cq;
@@ -700,30 +705,29 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   
   cq->readSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在读失败的时候，一直反复循环，而不是返回。其实是不好的。
   for (; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
-    volatile int *cqSlotPtr = cq->buffer + cq->readSlot;
-    int cqSlot = *cqSlotPtr;
-    __sync_synchronize();
-    if (cqSlot != -1) { // 指针只读一次。
-      *cqSlotPtr = -1; // 读完就重置。
+    volatile unsigned long long int *cqSlotPtr = cq->buffer + cq->readSlot;
+    unsigned long long int cqSlot = *cqSlotPtr;
+    if (cqSlot != INVALID_CQ_SLOT_MASK) { // 指针只读一次。
+      *cqSlotPtr = INVALID_CQ_SLOT_MASK; // TODO: 读完就重置。考虑一下时机，是发现不是ffff就重置，还是发现满足预期才重置。发现满足预期才重置有机会消除多次读到同一个？好像不对。应该是需要无条件重置。
+
+      // TODO: 判断cqSlot的值是否合法。
+      unsigned int blockIdx = (unsigned int )((cqSlot & BLOCK_IDX_MASK) >> (BLOCK_CNT_BIT + COLL_ID_BIT));
+      unsigned int blockCnt = (unsigned int )((cqSlot & BLOCK_CNT_MASK) >> COLL_ID_BIT);
+      int collId = int(cqSlot & COLL_ID_MASK);
+
       // if (rank == 0) {
-        // OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlotPtr = %d", getpid(), getppid(), rank, cq->readSlot, cqSlot);
+      //   OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
       // }
-      target->collId = cqSlot;
-      return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
+      if (blockCnt == cq->blockCollCnt[blockIdx][collId]) {
+        target->collId = cqSlot;
+        ++cq->blockCollCnt[blockIdx][collId];
+        return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
+      }
+      // 和预期不一致，判定失败，但是不急着返回-1，遍历完再返回吧。
     }
   }
 
   // 纯粹的单坑：
-  // volatile int *cqSlotPtr = cq->buffer;
-  // int cqSlot = *cqSlotPtr;
-  // if (cqSlot != -1) {
-  //   *cqSlotPtr = -1; // 读完就重置。
-  //   if (rank == 0) {
-  //     OFCCL_LOG(OFCCL, "<%d>-<%d> Rank<%d> cq->readSlot = %d, *cqSlotPtr = %d", getpid(), getppid(), rank, cq->readSlot, cqSlot);
-  //   }
-  //   target->collId = cqSlot;
-  //   return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
-  // }
 
   // __sync_synchronize();
   // pthread_mutex_unlock(&cq->mutex);
