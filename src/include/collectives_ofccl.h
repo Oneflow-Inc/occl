@@ -93,7 +93,7 @@ typedef struct {
 typedef struct {
   unsigned long long int *buffer;
   int readSlot;
-  unsigned int blockCollCnt[RESERVED_GRID_DIM][MAX_LENGTH];
+  unsigned int blockCollCnt[RESERVED_GRID_DIM][MAX_LENGTH]; // 静态分布也就1M，所以就这样吧。
   pthread_mutex_t mutex;
 } CQ;
 
