@@ -211,6 +211,15 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
   int hasQuitted = myGlobalBlkStatus->hasQuitted; // 每个线程都读。
 
+  // 第一次启动之前，rankCtx->hostBlkStatus是calloc的，然后复制到globalMem上，所以blkStatus.collStatusAlign.collStatus应该是全0，但是之后的启动可能导致collStatus数组是混乱的，还是重置一下。
+  int csTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
+  int csDoneBytes = 0;
+  while (csDoneBytes < csTotalBytes) {
+    int targetBytes = min(nthreads * COPY_ELEM_SIZE, csTotalBytes - csDoneBytes);
+    set16B(tid, (char *)(blkStatus.collStatusAlign.collStatus) + csDoneBytes, &zeros, targetBytes);
+    csDoneBytes += targetBytes;
+  }
+
   if (hasQuitted == 0) {
     set16B(tid, &blkStatus.dynamicBlkStatus, &zeros, sizeof(DynamicBlkStatus));
       
