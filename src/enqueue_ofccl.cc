@@ -660,7 +660,8 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   __sync_synchronize();
 
   sq->tail += 1;
-  OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
+  // OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
+  OFCCL_LOG(OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -725,7 +726,8 @@ static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
       unsigned int blockCnt = (unsigned int )((cqSlot & BLOCK_CNT_MASK) >> COLL_ID_BIT);
       int collId = int(cqSlot & COLL_ID_MASK);
 
-      OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
+      // OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
+      OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
       if (blockCnt == cq->blockCollCnt[blockIdx][collId]) {
         target->collId = cqSlot;
         ++cq->blockCollCnt[blockIdx][collId];

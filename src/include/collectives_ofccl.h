@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define NUM_CQ_SLOT 1
+#define NUM_CQ_SLOT 8
 #define RESERVED_GRID_DIM 256
 #define INVALID_CQ_SLOT_MASK  0xffffffffffffffff
 #define BLOCK_IDX_MASK        0xff00000000000000
