@@ -34,6 +34,14 @@
 
 #define RingBufferLogicTail(B) ((B)->tail % (B)->length)
 
+#define OFCCL_CPU_LOG(rankCtx, PRE, FMT, args...) \
+  do { \
+    if (rankCtx->debugFp == nullptr) { \
+      rankCtx->debugFp = fopen(rankCtx->debugtFile, "w+"); \
+    } \
+    fprintf(rankCtx->debugFp, "[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args);\
+  } while(0)
+
 inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
   volatile unsigned long long int *headPtr = &(sq->head);
   return sq->tail + 1 - *headPtr == sq->length;
@@ -76,6 +84,8 @@ typedef struct {
 // TODO: 不是线程安全的。
 struct ofcclRankCtx {
   int rank;
+  char debugtFile[100];
+  FILE *debugFp;
 
   int *finallyQuit; // 只有一个int，最后收到quit sqe的时候，由0号block设置。因为startKernel7SqObserver线程里是在cudaStreamQuery返回cudaSuccess，表明kernel运行完退出，才会去查finallyQuit，这时候如果发现finallyQuit=1，那么可以有很大信心认为所有block都是最终退出了。
 

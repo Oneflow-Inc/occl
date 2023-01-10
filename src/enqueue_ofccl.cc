@@ -30,6 +30,7 @@
 #include <sched.h>
 #include <algorithm> // max
 #include <semaphore.h>
+#include <string>
 
 namespace {
 
@@ -52,6 +53,15 @@ static int64_t ParseIntegerFromEnv(const std::string& env_var, int64_t default_v
     return value;
   } else {
     return default_value;
+  }
+}
+
+static std::string GetStringFromEnv(const std::string& env_var, const std::string& default_value) {
+  const char* env_p = std::getenv(env_var.c_str());
+  if (env_p == nullptr) {
+    return default_value;
+  } else {
+    return env_p;
   }
 }
 
@@ -645,17 +655,17 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     return -1;
   }
   *RingBufferGetTail(sq) = *sqe;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> write in sqe of coll_id = %d counter=%d @ %llu", pthread_self(), rank, sqe->collId, sqe->counter, RingBufferLogicTail(sq));
+  // OFCCL_LOG(OFCCL, "Rank<%d> write in sqe of coll_id = %d counter=%d @ %llu", rank, sqe->collId, sqe->counter, RingBufferLogicTail(sq));
 
   __sync_synchronize();
 
   sq->tail += 1;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
+  OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
   if (sqe->collId != -1) {
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> set callback for coll_id = %d", pthread_self(), rankCtx->rank, sqe->collId);
+    // OFCCL_LOG(OFCCL, "Rank<%d> set callback for coll_id = %d", rankCtx->rank, sqe->collId);
     rankCtx->callbacks[sqe->collId] = callback;
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
   }
@@ -699,8 +709,8 @@ static void cqDestroy(CQ *cq) {
   }
 }
 // thread_local static int tempRound = 0;
-static int cqRead(CQ *cq, CQE *target, int rank) {
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rank);
+static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rankCtx->rank);
   // pthread_mutex_lock(&cq->mutex);
   
   cq->readSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在读失败的时候，一直反复循环，而不是返回。其实是不好的。
@@ -715,9 +725,7 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
       unsigned int blockCnt = (unsigned int )((cqSlot & BLOCK_CNT_MASK) >> COLL_ID_BIT);
       int collId = int(cqSlot & COLL_ID_MASK);
 
-      // if (rank == 0) {
-        // OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
-      // }
+      OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
       if (blockCnt == cq->blockCollCnt[blockIdx][collId]) {
         target->collId = cqSlot;
         ++cq->blockCollCnt[blockIdx][collId];
@@ -753,6 +761,7 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   newOfcclRankCtx->rank = rank;
   newOfcclRankCtx->queueLength = QLen;
   newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
+  newOfcclRankCtx->debugFp = nullptr;
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy、值的初始化还是放到ofcclPrepareDone里边做
 
@@ -885,7 +894,7 @@ void *startPoller(void *args) {
     pthread_mutex_unlock(&rankCtx->poller_mutex);
 
     CQE target;
-    if (cqRead(rankCtx->cq, &target, rankCtx->rank) == -1) {
+    if (cqRead(rankCtx->cq, &target, rankCtx) == -1) {
       sched_yield();
     } else {
       int collId = target.collId;
@@ -1156,6 +1165,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
   int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
+
+  std::string DEBUG_FILE = GetStringFromEnv("CPU_DEBUG_FILE", "/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_") + std::to_string(rankCtx->rank) + ".log";
+  strcpy(rankCtx->debugtFile, DEBUG_FILE.c_str());
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
