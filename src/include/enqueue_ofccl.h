@@ -40,6 +40,7 @@
       rankCtx->debugFp = fopen(rankCtx->debugtFile, "w+"); \
     } \
     fprintf(rankCtx->debugFp, "[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args);\
+    fflush(rankCtx->debugFp); \
   } while(0)
 
 inline bool CpuSqFull(SQ *sq) { // sq->head由GPU更新。
