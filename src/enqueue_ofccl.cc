@@ -1166,7 +1166,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
   int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
 
-  std::string DEBUG_FILE = GetStringFromEnv("CPU_DEBUG_FILE", "/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_") + std::to_string(rankCtx->rank) + ".log";
+  std::string DEBUG_FILE = GetStringFromEnv("DEBUG_FILE", "/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_") + std::to_string(rankCtx->rank) + ".log";
   strcpy(rankCtx->debugtFile, DEBUG_FILE.c_str());
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
