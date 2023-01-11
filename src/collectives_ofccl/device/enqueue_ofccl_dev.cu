@@ -1059,6 +1059,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         #endif
 
       } else {
+        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> unprogressedCnt = %d", thrdCudaDev, bid, tid, unprogressedCnt);
         int aciTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
         int aciDoneBytes = 0;
         BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;

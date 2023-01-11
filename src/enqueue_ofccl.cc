@@ -650,7 +650,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
   __sync_synchronize();
 
   sq->tail += 1;
-  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> commit write for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> write & commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", pthread_self(), rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -715,6 +715,7 @@ static int cqRead(CQ *cq, CQE *target, int rank) {
   unsigned long long int flag_from_receive = 0x00000000ffffffff & (receive >> 32); // 高32位是flag，flag是tail的低32位。
   if ((flag_from_receive ^ (0x00000000ffffffff & cq->head)) == 0) {
     target->collId = int(0x00000000ffffffff & receive); // 低32位是coll_id
+    // OFCCL_LOG(OFCCL, "Rank<%d> get cqe for coll_id = %d @ head = %llu", rank, target->collId, cq->head);
     cq->head += 1;
     return 0;
   }
@@ -1226,7 +1227,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->blockDim4Coll[collId] = params->blockDim;
     
     if (SHOW_ALL_PREPARED_COLL) {
-      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x = %d, blockDim.x = %d, nBytes = %lu", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes);
+      OFCCL_LOG(OFCCL_INIT, "<%lu> Rank<%d>, coll_id = %d, gridDim.x = %d, blockDim.x = %d, nBytes = %lu, dataType = %d", pthread_self(), rankCtx->rank, collId, params->gridDim.x, params->blockDim.x, comm->asyncOps->nBytes, comm->asyncOps->datatype);
       // OFCCL_LOG(OFCCL_INIT, "Rank<%d>, coll_id = %d, comm->buffSizes[NCCL_PROTO_SIMPLE]=%d", rankCtx->rank, collId, comm->buffSizes[NCCL_PROTO_SIMPLE]);
     }
 
