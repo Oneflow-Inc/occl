@@ -25,7 +25,7 @@
   #define NUM_SHMEM_SLOT 1
 
   #ifdef DEBUG_CLOCK_TRAIN
-    #define RECORD_ITER 4
+    #define RECORD_ITER 3
     #define SKIP_WARMUP_ITER 0
     #define MAX_LENGTH 162LL // 受到0xc000 shmem的限制
   #endif
@@ -157,7 +157,9 @@ typedef struct alignas(16) {
       long long int beforeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
       long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
 
-      int ctxSwitchCnt[MAX_LENGTH];
+      int collQuitCnt[MAX_LENGTH];
+      int loadCnt[MAX_LENGTH];
+      int saveCnt[MAX_LENGTH];
     #endif
 
     #ifdef DEBUG_CLOCK_IO
