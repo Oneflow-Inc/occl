@@ -642,6 +642,7 @@ static SQ *sqCreate(unsigned long long int length) {
 static void sqDestroy(SQ *sq) {
   if (sq) {
     checkRuntime(cudaFreeHost(sq->buffer));
+    pthread_mutex_destroy(&sq->mutex);
     checkRuntime(cudaFreeHost(sq));
   }
 }
@@ -669,12 +670,13 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     // OFCCL_LOG(OFCCL, "Rank<%d> set callback for coll_id = %d", rankCtx->rank, sqe->collId);
     rankCtx->callbacks[sqe->collId] = callback;
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
+    // 每次收到不是quit的sqe，都唤醒一下。
+    pthread_mutex_lock(&rankCtx->observer_mutex);
+    ++rankCtx->remainingSqeCnt;
+    pthread_cond_signal(&rankCtx->hasRemainingSqeCv);
+    pthread_mutex_unlock(&rankCtx->observer_mutex);
   }
 
-
-  // 每次收到sqe，都唤醒一下。
-  sem_post(&rankCtx->getNewSqeSema);
-  
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
   if (rankCtx->poll_start == 0) {
     pthread_mutex_lock(&rankCtx->poller_mutex);
@@ -764,6 +766,8 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   newOfcclRankCtx->queueLength = QLen;
   newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
   newOfcclRankCtx->debugFp = nullptr;
+
+  newOfcclRankCtx->CHECK_REMAINING_SQE_INTERVAL = int(ParseIntegerFromEnv("CHECK_REMAINING_SQE_INTERVAL", 10000));
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy、值的初始化还是放到ofcclPrepareDone里边做
 
@@ -884,6 +888,8 @@ void *startPoller(void *args) {
     sched_yield();
   }
 
+  int cnt = 0;
+
   while (true) {
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> poller while(true)", pthread_self(), rankCtx->rank);
     pthread_mutex_lock(&rankCtx->poller_mutex);
@@ -895,6 +901,15 @@ void *startPoller(void *args) {
     }
     pthread_mutex_unlock(&rankCtx->poller_mutex);
 
+    if (cnt++ == rankCtx->CHECK_REMAINING_SQE_INTERVAL) {
+      pthread_mutex_lock(&rankCtx->observer_mutex);
+      if (rankCtx->remainingSqeCnt > 0) {
+        pthread_cond_signal(&rankCtx->hasRemainingSqeCv);
+      }
+      pthread_mutex_unlock(&rankCtx->observer_mutex);
+      cnt = 0;
+    }
+
     CQE target;
     if (cqRead(rankCtx->cq, &target, rankCtx) == -1) {
       sched_yield();
@@ -903,6 +918,9 @@ void *startPoller(void *args) {
       // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, invoke callback, args @ %p", pthread_self(), rankCtx->rank, collId, rankCtx->callbackArgList[collId]);
       // *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
+      pthread_mutex_lock(&rankCtx->observer_mutex);
+      --rankCtx->remainingSqeCnt;
+      pthread_mutex_unlock(&rankCtx->observer_mutex);
     }
   }
 
@@ -919,13 +937,10 @@ void *startKernel7SqObserver(void *args) {
 
   while (true) {
     pthread_mutex_lock(&rankCtx->observer_mutex);
-    int noMoreSqes = rankCtx->noMoreSqes;
-    pthread_mutex_unlock(&rankCtx->observer_mutex);
-    if (!noMoreSqes) { // 发出quitSqe的时候，主线程的sqWrite仍然会sem_post，但是observer已经没有必要等了，接下来只需要等待kernel最终退出就好了。不过实际大多数情况是，observer已经阻塞在sem_wait了，下一次再循环过来不会再阻塞而已。
-      sem_wait(&rankCtx->getNewSqeSema);
-      // 这个函数返回，说明等来了一个新的sqe写入。
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, new sqe come, sq->head = %llu, sq->tail = %llu", pthread_self(), rankCtx->rank, CpuLogicSqHead(rankCtx->sq), RingBufferLogicTail(rankCtx->sq));
+    if (!rankCtx->noMoreSqes) {
+      pthread_cond_wait(&rankCtx->hasRemainingSqeCv, &rankCtx->observer_mutex);
     }
+    pthread_mutex_unlock(&rankCtx->observer_mutex);
 
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
@@ -1380,8 +1395,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   checkRuntime(cudaDeviceSynchronize());
 
   rankCtx->noMoreSqes = 0;
+  rankCtx->remainingSqeCnt = 0;
   pthread_mutex_init(&rankCtx->observer_mutex, nullptr);
-  sem_init(&rankCtx->getNewSqeSema, 0, 0);
+  pthread_cond_init(&rankCtx->hasRemainingSqeCv, nullptr);
 
   pthread_mutex_init(&rankCtx->poller_mutex, nullptr);
   rankCtx->pollerArgs = { rankCtx };
@@ -1439,9 +1455,12 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   rankCtx->poll_stop = 1;
   pthread_mutex_unlock(&rankCtx->poller_mutex);
   pthread_join(rankCtx->poller, nullptr);
+  pthread_mutex_destroy(&rankCtx->poller_mutex);
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
 
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
+  pthread_cond_destroy(&rankCtx->hasRemainingSqeCv);
+  pthread_mutex_destroy(&rankCtx->observer_mutex);
 
   #ifdef ARRAY_DEBUG
     pthread_join(rankCtx->barrierCntPrinter, nullptr);
