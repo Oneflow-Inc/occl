@@ -207,8 +207,9 @@ typedef struct alignas(16) {
 
 
   /* ****** daemonKernel每次启动需要重置 ****** */
-  int quit;
   int currLoadedCollId;
+  char quit;
+  char finallyQuit;
 } BlkStatus;
 
 typedef struct {

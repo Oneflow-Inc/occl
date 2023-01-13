@@ -161,6 +161,7 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
     #endif
 
     blkStatus.quit = 0;
+    blkStatus.finallyQuit = 0;
     blkStatus.currLoadedCollId = -1;
     for (int i = 0; i < NUM_SHMEM_SLOT; ++i) {
       // TODO: 可以并行优化，每次循环的增量是blockDim.x
@@ -351,6 +352,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
   } else {
     if (target.quit) {
       blkStatus.quit = 1; // TODO: 从鲁棒性的角度来说，这里应该有机制保证看到这个quit sqe的时候，taskQ里的所有sqe也应该都处理完，才能退出。（不过目前可以先不管，可以由用户程序间接保证）；一个简单的保证方法是，加一个check。
+      blkStatus.finallyQuit = 1;
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read quit SQE", thrdCudaDev, blockIdx.x, threadIdx.x);
       // if (bid == 0) {
         *finallyQuit = 1; // TODO: 为了最后每个block都保证打印统计信息，挺不优雅的
@@ -808,7 +810,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
     if (blkStatus.quit == 1) {
 
-      if (*finallyQuit == 1) { // TODO: 还是不要在这里读host mem
+      if (blkStatus.finallyQuit == 1) { // TODO: 还是不要在这里读host mem
         #ifdef SHOW_CNT
           OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalProgressed7SwithchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt);
         #endif
