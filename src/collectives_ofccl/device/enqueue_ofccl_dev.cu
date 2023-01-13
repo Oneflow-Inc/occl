@@ -351,6 +351,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
   } else {
     if (target.quit) {
       blkStatus.quit = 1; // TODO: 从鲁棒性的角度来说，这里应该有机制保证看到这个quit sqe的时候，taskQ里的所有sqe也应该都处理完，才能退出。（不过目前可以先不管，可以由用户程序间接保证）；一个简单的保证方法是，加一个check。
+      // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, read quit SQE", thrdCudaDev, blockIdx.x, threadIdx.x);
       // if (bid == 0) {
         *finallyQuit = 1; // TODO: 为了最后每个block都保证打印统计信息，挺不优雅的
       // }
@@ -807,7 +808,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
     if (blkStatus.quit == 1) {
 
-      if (*finallyQuit == 1) {
+      if (*finallyQuit == 1) { // TODO: 还是不要在这里读host mem
         #ifdef SHOW_CNT
           OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalProgressed7SwithchCnt=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt);
         #endif
@@ -1006,8 +1007,6 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         }
         copy16B(tid, &myGlobalBlkStatus->dynamicBlkStatus, &blkStatus.dynamicBlkStatus, sizeof(DynamicBlkStatus));
 
-
-
         #ifdef DEBUG_CLOCK
           // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
           ONE_THRD_DO
@@ -1061,7 +1060,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         #endif
       }
 
-      // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits", thrdCudaDev, blockIdx.x, tid);
+      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits", thrdCudaDev, blockIdx.x, tid);
       #ifdef ARRAY_DEBUG
         if (tid == 0) {
           *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;

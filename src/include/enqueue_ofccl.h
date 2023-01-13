@@ -91,7 +91,9 @@ struct ofcclRankCtx {
   int *finallyQuit; // 只有一个int，最后收到quit sqe的时候，由0号block设置。因为startKernel7SqObserver线程里是在cudaStreamQuery返回cudaSuccess，表明kernel运行完退出，才会去查finallyQuit，这时候如果发现finallyQuit=1，那么可以有很大信心认为所有block都是最终退出了。
 
   pthread_cond_t hasRemainingSqeCv;
-  int noMoreSqes;
+  #ifdef ARRAY_DEBUG
+    int noMoreSqes;
+  #endif
   int remainingSqeCnt; // #sqe - #cqe
   int CHECK_REMAINING_SQE_INTERVAL;
   pthread_mutex_t observer_mutex;

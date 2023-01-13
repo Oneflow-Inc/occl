@@ -670,12 +670,13 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     // OFCCL_LOG(OFCCL, "Rank<%d> set callback for coll_id = %d", rankCtx->rank, sqe->collId);
     rankCtx->callbacks[sqe->collId] = callback;
     rankCtx->callbackArgList[sqe->collId] = callbackArgs;
-    // 每次收到不是quit的sqe，都唤醒一下。
-    pthread_mutex_lock(&rankCtx->observer_mutex);
-    ++rankCtx->remainingSqeCnt;
-    pthread_cond_signal(&rankCtx->hasRemainingSqeCv);
-    pthread_mutex_unlock(&rankCtx->observer_mutex);
   }
+
+  // 每收到一个sqe，增加cnt，唤醒。
+  pthread_mutex_lock(&rankCtx->observer_mutex);
+  ++rankCtx->remainingSqeCnt;
+  pthread_cond_signal(&rankCtx->hasRemainingSqeCv);
+  pthread_mutex_unlock(&rankCtx->observer_mutex);
 
   // 即便我们一个正常sqe都不插，直接插quit，poller线程也能正常工作。
   if (rankCtx->poll_start == 0) {
@@ -937,13 +938,12 @@ void *startKernel7SqObserver(void *args) {
 
   while (true) {
     pthread_mutex_lock(&rankCtx->observer_mutex);
-    if (!rankCtx->noMoreSqes) {
-      pthread_cond_wait(&rankCtx->hasRemainingSqeCv, &rankCtx->observer_mutex);
-    }
+    pthread_cond_wait(&rankCtx->hasRemainingSqeCv, &rankCtx->observer_mutex);
     pthread_mutex_unlock(&rankCtx->observer_mutex);
 
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, before wait stream", pthread_self(), rankCtx->rank);
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
-    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit);
+    // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d, rankCtx->remainingSqeCnt = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit, rankCtx->remainingSqeCnt);
     if (*rankCtx->finallyQuit) {
       // #ifdef DEBUG_CLOCK
       //   ((ObserverThrdArgs *)args)->kernelQuit = std::chrono::high_resolution_clock::now();
@@ -1389,12 +1389,12 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #ifdef ARRAY_DEBUG
     checkRuntime(cudaMallocHost(&rankCtx->barrierCnt, rankCtx->daemonKernelGridDim.x * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE * sizeof(unsigned long long int)));
     checkRuntime(cudaMallocHost(&rankCtx->collCounters, rankCtx->daemonKernelGridDim.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE * sizeof(unsigned long long int)));
+    rankCtx->noMoreSqes = 0;
   #endif
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
 
-  rankCtx->noMoreSqes = 0;
   rankCtx->remainingSqeCnt = 0;
   pthread_mutex_init(&rankCtx->observer_mutex, nullptr);
   pthread_cond_init(&rankCtx->hasRemainingSqeCv, nullptr);
@@ -1443,13 +1443,20 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // OFCCL_LOG1(OFCCL, "Enter ofcclDestroy");
   ncclResult_t ret = ncclSuccess;
 
-  pthread_mutex_lock(&rankCtx->observer_mutex);
-  rankCtx->noMoreSqes = 1;
-  pthread_mutex_unlock(&rankCtx->observer_mutex);
+  #ifdef ARRAY_DEBUG
+    pthread_mutex_lock(&rankCtx->observer_mutex);
+    rankCtx->noMoreSqes = 1;
+    pthread_mutex_unlock(&rankCtx->observer_mutex);
+  #endif
 
   // 目前选择在client手动调用ofcclDestroy的时候，发送最终的quit
   SQE sqe = { -1, 0, nullptr, nullptr, true };
   sqWrite(rankCtx->sq, &sqe, rankCtx->rank, nullptr, nullptr, rankCtx);
+  // OFCCL_LOG(OFCCL, "Rank<%d>, send quit sqe", rankCtx->rank);
+  
+  pthread_join(rankCtx->kernel7SqObserver, nullptr);
+  pthread_cond_destroy(&rankCtx->hasRemainingSqeCv);
+  pthread_mutex_destroy(&rankCtx->observer_mutex);
 
   pthread_mutex_lock(&rankCtx->poller_mutex);
   rankCtx->poll_stop = 1;
@@ -1457,10 +1464,6 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   pthread_join(rankCtx->poller, nullptr);
   pthread_mutex_destroy(&rankCtx->poller_mutex);
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, pthread_join startPoller thread", pthread_self(), rankCtx->rank);
-
-  pthread_join(rankCtx->kernel7SqObserver, nullptr);
-  pthread_cond_destroy(&rankCtx->hasRemainingSqeCv);
-  pthread_mutex_destroy(&rankCtx->observer_mutex);
 
   #ifdef ARRAY_DEBUG
     pthread_join(rankCtx->barrierCntPrinter, nullptr);
