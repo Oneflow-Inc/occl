@@ -661,7 +661,7 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
 
   sq->tail += 1;
   // OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
-  OFCCL_LOG(OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
+  // OFCCL_LOG(OFCCL, "Rank<%d> write and commit sqe for coll_id = %d, sqHead=%llu, new sqTail is %llu", rank, sqe->collId, CpuLogicSqHead(sq), RingBufferLogicTail(sq));
 
   pthread_mutex_unlock(&sq->mutex);
 
@@ -709,7 +709,7 @@ static void cqDestroy(CQ *cq) {
     checkRuntime(cudaFreeHost(cq));
   }
 }
-// thread_local static int tempRound = 0;
+
 static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rankCtx->rank);
   // pthread_mutex_lock(&cq->mutex);
@@ -719,15 +719,15 @@ static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
     volatile unsigned long long int *cqSlotPtr = cq->buffer + cq->readSlot;
     unsigned long long int cqSlot = *cqSlotPtr;
     if (cqSlot != INVALID_CQ_SLOT_MASK) { // 指针只读一次。
-      *cqSlotPtr = INVALID_CQ_SLOT_MASK; // TODO: 读完就重置。考虑一下时机，是发现不是ffff就重置，还是发现满足预期才重置。发现满足预期才重置有机会消除多次读到同一个？好像不对。应该是需要无条件重置。
+      *cqSlotPtr = INVALID_CQ_SLOT_MASK;
 
-      // TODO: 判断cqSlot的值是否合法。
+      // 判断cqSlot的值是否合法。
       unsigned int blockIdx = (unsigned int )((cqSlot & BLOCK_IDX_MASK) >> (BLOCK_CNT_BIT + COLL_ID_BIT));
       unsigned int blockCnt = (unsigned int )((cqSlot & BLOCK_CNT_MASK) >> COLL_ID_BIT);
       int collId = int(cqSlot & COLL_ID_MASK);
 
       // OFCCL_CPU_LOG(rankCtx, OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
-      OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
+      // OFCCL_LOG(OFCCL, "Rank<%d> cq->readSlot = %d, blockIdx = %u, blockCnt = %u, coll_id = %d, expected cnt = %u", rankCtx->rank, cq->readSlot, blockIdx, blockCnt, collId, cq->blockCollCnt[blockIdx][collId]);
       if (blockCnt == cq->blockCollCnt[blockIdx][collId]) {
         target->collId = cqSlot;
         ++cq->blockCollCnt[blockIdx][collId];
@@ -900,7 +900,7 @@ void *startPoller(void *args) {
       sched_yield();
     } else {
       int collId = target.collId;
-      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, will invoke callback", pthread_self(), rankCtx->rank, collId);
+      // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> get cqe for coll_id = %d, invoke callback, args @ %p", pthread_self(), rankCtx->rank, collId, rankCtx->callbackArgList[collId]);
       // *(rankCtx->collCounters + 2 + collId * COLL_COUNTER_INNER_SIZE + 0 * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
       rankCtx->callbacks[collId](collId, rankCtx->callbackArgList[collId]);
     }
