@@ -116,6 +116,13 @@ class Primitives<
       atomicOr(&sharedCollCtx[currUsedSlotId].progressed, (((flags & RoleWaitRecv) != 0) || ((!Recv) && ((flags & RoleWaitSend) != 0))));
       // 若RoleWaitRecv线程wait成功，那可以设置；若RoleWaitSend线程wait成功，只有在不需要recv的时候才可以设置；并且一旦设成1，就不再清零了。
 
+      // if ((flags & (Recv*RoleWaitRecv))) {
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, progressed = %d, Send = %d, Recv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, sharedCollCtx[currUsedSlotId].progressed, Send, Recv);
+      // }
+      // if ((flags & (Send*RoleWaitSend))) {
+      //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, progressed = %d, Send = %d, Recv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, sharedCollCtx[currUsedSlotId].progressed, Send, Recv);
+      // }
+
       if (isSendNotRecv && (flags & SizesFifoEnabled)) // proxy 相关，不用考虑
         connSizesFifoPtr[step%NCCL_STEPS] = nelts*sizeof(T);
 
@@ -649,30 +656,63 @@ class Primitives<
     if (flags & (RoleInput|RoleOutput))
       userBuff += delta;
   }
-
-  // TODO: 目前先只写和ringAllreduce相关的: send, recvReduceSend, directRecvReduceCopySend, directRecvCopySend, directRecv
   
   // static constexpr int Input=0, Output=1;
   __device__ __forceinline__ void send(intptr_t inpIx, int eltN) {
     genericOp<0, 0, 0, 1, Input, -1>(inpIx, -1, -1, eltN, false);
   }
+  __device__ __forceinline__ void sendFromOutput(intptr_t outIx, int eltN) {
+    genericOp<0, 0, 0, 1, Output, -1>(outIx, -1, -1, eltN, false);
+  }
+  __device__ __forceinline__ void directSend(intptr_t inpIx, intptr_t remoteOutIx, int eltN) {
+    genericOp<0, 1, 0, 1, Input, -1>(inpIx, -1, remoteOutIx, eltN, false);
+  }
+  __device__ __forceinline__ void directSendFromOutput(intptr_t outIx, intptr_t remoteOutIx, int eltN) {
+    genericOp<0, 1, 0, 1, Output, -1>(outIx, -1, remoteOutIx, eltN, false);
+  }
+
+  __device__ __forceinline__ void recv(intptr_t outIx, int eltN, bool postOp=false) {
+    genericOp<0, 0, 1, 0, -1, Output>(-1, outIx, -1, eltN, postOp);
+  }
+  __device__ __forceinline__ void directRecv(intptr_t outIx, int eltN) {
+    genericOp<1, 0, 1, 0, -1, Output>(-1, outIx, -1, eltN, /*postOp=*/false);
+  }
+
+  __device__ __forceinline__ void copySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
+    genericOp<0, 0, 0, 1, Input, Output>(inpIx, outIx, -1, eltN, postOp);
+  }
+  __device__ __forceinline__ void directCopySend(intptr_t inpIx, intptr_t outIx, intptr_t remoteOutIx, int eltN, bool postOp=false) {
+    genericOp<0, 1, 0, 1, Input, Output>(inpIx, outIx, remoteOutIx, eltN, postOp);
+  }
+
+  __device__ __forceinline__ void recvCopySend(intptr_t outIx, int eltN, bool postOp=false) {
+    genericOp<0, 0, 1, 1, -1, Output>(-1, outIx, -1, eltN, postOp);
+  }
+  __device__ __forceinline__ void directRecvCopySend(intptr_t outIx, intptr_t remoteOutIx, int eltN) {
+    genericOp<1, 1, 1, 1, -1, Output>(-1, outIx, remoteOutIx, eltN, false);
+  }
+  __device__ __forceinline__ void recvCopyDirectSend(intptr_t outIx, intptr_t remoteOutIx, int eltN, bool postOp=false) {
+    genericOp<0, 1, 1, 1, -1, Output>(-1, outIx, remoteOutIx, eltN, postOp);
+  }
+
+  __device__ __forceinline__ void recvReduceCopy(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
+    genericOp<0, 0, 1, 0, Input, Output>(inpIx, outIx, -1, eltN, postOp);
+  }
 
   __device__ __forceinline__ void recvReduceSend(intptr_t inpIx, int eltN, bool postOp=false) {
     genericOp<0, 0, 1, 1, Input, -1>(inpIx, -1, -1, eltN, postOp);
   }
+  __device__ __forceinline__ void directRecvReduceSend(intptr_t inpIx, intptr_t remoteInpIx, int eltN, bool postOp=false) {
+    genericOp<1, 0, 1, 1, Input, -1>(inpIx, -1, remoteInpIx, eltN, postOp);
+  }
 
+  __device__ __forceinline__ void recvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp=false) {
+    genericOp<0, 0, 1, 1, Input, Output>(inpIx, outIx, -1, eltN, postOp);
+  }
   __device__ __forceinline__ void directRecvReduceCopySend(intptr_t inpIx, intptr_t outIx, intptr_t remoteOutIx, int eltN, bool postOp=false) {
     // Direct is only for the send part
     // 在这个操作中契合了俊丞写的 directRecv是被动操作。
     genericOp<0, 1, 1, 1, Input, Output>(inpIx, outIx, remoteOutIx, eltN, postOp);
-  }
-
-  __device__ __forceinline__ void directRecvCopySend(intptr_t outIx, intptr_t remoteOutIx, int eltN) {
-    genericOp<1, 1, 1, 1, -1, Output>(-1, outIx, remoteOutIx, eltN, false);
-  }
-
-  __device__ __forceinline__ void directRecv(intptr_t outIx, int eltN) {
-    genericOp<1, 0, 1, 0, -1, Output>(-1, outIx, -1, eltN, /*postOp=*/false);
   }
 
 };

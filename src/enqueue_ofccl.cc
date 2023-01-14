@@ -1125,14 +1125,9 @@ void *startBarrierCntPrinter(void *args) {
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalProgressed7SwithchCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " unprogressedCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalUnprogressedQuitCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 38 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
     }
-
-    for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
-      file << "Rank " << rankCtx->rank << " Block " << bid << " totalUnprogressedQuitCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 66 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << std::endl;
-    }
-
 
     // for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
     //   file << "Rank " << rankCtx->rank << " Block " << bid << " TaskQ: [ ";
@@ -1361,6 +1356,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
         hostCollCtx4Blk7Coll->staticCollCtx.ringPrev = channel->ring.prev;
         hostCollCtx4Blk7Coll->staticCollCtx.ringNext = channel->ring.next;
         hostCollCtx4Blk7Coll->staticCollCtx.ringIndex = channel->ring.index;
+        hostCollCtx4Blk7Coll->staticCollCtx.ringRanks = channel->ring.devUserRanks;
         hostCollCtx4Blk7Coll->staticCollCtx.devPeers = channel->devPeers; // 直接赋值指针
         hostCollCtx4Blk7Coll->staticCollCtx.collId = collId;
         #if defined(CQE_DEBUG_RANK_X) || defined(CQE_DEBUG_ALL_RANK)
@@ -1371,8 +1367,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
         hostCollCtx4Blk7Coll->dynamicCollCtx.loadAgain = 0;
         hostCollCtx4Blk7Coll->dynamicCollCtx.slice4SimpleGenericOp = 0;
         hostCollCtx4Blk7Coll->dynamicCollCtx.offset4SimpleGenericOp = 0;
-        hostCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RingAllReduce = 0;
-        hostCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RingAllReduce = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.currentStep4RunRing = 0;
+        hostCollCtx4Blk7Coll->dynamicCollCtx.gridOffset4RunRing = 0;
       }
     }
   }

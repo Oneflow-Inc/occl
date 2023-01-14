@@ -643,11 +643,11 @@ class Primitives<
   }
 
   __device__ __forceinline__ void
-  scatter(intptr_t inpIx, int totalElem, int peerElem, int skip, int shift) {
+  scatter(intptr_t inpIx, int totalElem, int peerElem, int skip, int shift) { // collnet里使用
     ScatterGatherOp<0, 0, 0, 1>(inpIx, -1, totalElem, peerElem, skip, shift, /*postOp=*/false);
   }
   __device__ __forceinline__ void
-  directScatter(intptr_t inpIx, int totalElem, int peerElem, int skip, int shift) {
+  directScatter(intptr_t inpIx, int totalElem, int peerElem, int skip, int shift) { // collnet里使用
     ScatterGatherOp<0, 1, 0, 1>(inpIx, -1, totalElem, peerElem, skip, shift, /*postOp=*/false);
   }
 
@@ -656,7 +656,7 @@ class Primitives<
     ScatterGatherOp<0, 0, 1, 0>(-1, outIx, totalElem, peerElem, skip, shift, postOp);
   }
   __device__ __forceinline__ void
-  directGather(intptr_t outIx, int totalElem, int peerElem, int skip, int shift) {
+  directGather(intptr_t outIx, int totalElem, int peerElem, int skip, int shift) {  // collnet里使用
     ScatterGatherOp<1, 0, 1, 0>(-1, outIx, totalElem, peerElem, skip, shift, /*postOp=*/false);
   }
 };

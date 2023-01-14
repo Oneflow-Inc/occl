@@ -348,6 +348,12 @@ ncclResult_t  ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
 ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
+ncclResult_t  ofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+
+ncclResult_t  ofcclRunAllGather(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunAllGather(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+
 /*
  * Send
  *

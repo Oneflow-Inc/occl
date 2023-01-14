@@ -228,6 +228,7 @@ typedef struct alignas(16) {
   int ringPrev;
   int ringNext;
   int ringIndex;
+  int *ringRanks;
   // 来自comm(devComm, 不是普通comm)
   int rank; // 原来来自于comm.rank，还是放在collCtx而不是blkStatus里，因为在不同的集合通信中，一个设备的rank可能会变，不应该静态保存。
   int nRanks;
@@ -241,8 +242,8 @@ typedef struct alignas(16) {
   int slice4SimpleGenericOp;
   int offset4SimpleGenericOp;
   // Ring AllReduce的上下文
-  int currentStep4RingAllReduce;
-  ssize_t gridOffset4RingAllReduce;
+  int currentStep4RunRing;
+  ssize_t gridOffset4RunRing;
 
 } DynamicCollCtx; // sizeof(DynamicCollCtx)=32
 

@@ -9,7 +9,7 @@ namespace {
   __device__ __forceinline__ void runRing(ncclWorkElem *args) {
     const int tid = threadIdx.x;
     const int nthreads = args->header.nWarps*WARP_SIZE;
-    const int bid = blockIdx.x; // TODO: 可以修复一下args->bid;
+    const int bid = blockIdx.x;
     const int nChannels = args->nChannels;
     const int currUsedSlotId = blkStatus.currLoadedCollId % NUM_SHMEM_SLOT;
     
@@ -32,7 +32,7 @@ namespace {
     Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
       (tid, nthreads, &sharedCollCtx[currUsedSlotId].staticCollCtx.ringPrev, &sharedCollCtx[currUsedSlotId].staticCollCtx.ringNext, args->sendbuff, args->recvbuff, args->redOpArg);
     
-    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> create prims, gridOffset=%ld, size = %ld, currentStep = %d, maxStep = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RingAllReduce, size, sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RingAllReduce, 2 * nranks - 1);
+    // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> create prims, gridOffset=%ld, size = %ld, currentStep = %d, maxStep = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RunRing, size, sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RunRing, 2 * nranks - 1);
     // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
     ssize_t offset = 0;
@@ -41,7 +41,7 @@ namespace {
     int currentStep = 0;
     ssize_t gridOffset = 0;
 
-    for (gridOffset = sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RingAllReduce; gridOffset < size; gridOffset += loopSize) {
+    for (gridOffset = sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RunRing; gridOffset < size; gridOffset += loopSize) {
       
       // 初步恢复执行后，这段计算realChunkSize的逻辑还是保留吧
       ssize_t realChunkSize;
@@ -66,8 +66,8 @@ namespace {
       };
 
       // 这里不能直接赋值，因为这是在循环里，在恢复的上下文中的gridOffset对应的循环中，需要恢复，否则直接用0初始化。
-      if (gridOffset == sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RingAllReduce) {
-        currentStep = sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RingAllReduce;
+      if (gridOffset == sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RunRing) {
+        currentStep = sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RunRing;
       } else {
         currentStep = 0;
       }
@@ -190,8 +190,8 @@ namespace {
       if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
         blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = -2;
         // 说明是跑到一半要退出了，保存上下文
-        sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RingAllReduce = currentStep;
-        sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RingAllReduce = gridOffset;
+        sharedCollCtx[currUsedSlotId].dynamicCollCtx.currentStep4RunRing = currentStep;
+        sharedCollCtx[currUsedSlotId].dynamicCollCtx.gridOffset4RunRing = gridOffset;
 
         if (sharedCollCtx[currUsedSlotId].progressed == 1) { // 不需要在下边完成的情况下判断是否progress。
           blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = -1;
