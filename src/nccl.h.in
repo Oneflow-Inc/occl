@@ -333,6 +333,12 @@ ncclResult_t pncclReduceScatter(const void* sendbuff, void* recvbuff,
     size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
     cudaStream_t stream);
 
+ncclResult_t  ofcclPrepareReduceScatter(size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareReduceScatter(size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+
+ncclResult_t  ofcclRunReduceScatter(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunReduceScatter(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+
 /*
  * All-Gather
  *

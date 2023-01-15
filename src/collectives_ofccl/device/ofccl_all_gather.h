@@ -119,7 +119,6 @@ namespace {
         blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = 2;
       }
     }
-
   }
 }
 
