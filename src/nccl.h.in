@@ -250,6 +250,12 @@ ncclResult_t  ncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncc
 ncclResult_t pncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
     ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream);
 
+ncclResult_t  ofcclPrepareReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareReduce(size_t count, ncclDataType_t datatype, ncclRedOp_t op, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+
+ncclResult_t  ofcclRunReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunReduce(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+
 /*
  * (deprecated) Broadcast (in-place)
  *
