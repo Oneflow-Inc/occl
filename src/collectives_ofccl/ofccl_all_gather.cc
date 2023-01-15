@@ -4,11 +4,11 @@
 #include "nccl.h"
 #include <pthread.h>
 
-NCCL_API(ncclResult_t, ofcclPrepareAllGather, size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
-ncclResult_t ofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
+NCCL_API(ncclResult_t, ofcclPrepareAllGather, size_t sendcount, ncclDataType_t datatype, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t ofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx) {
   NVTX3_FUNC_RANGE_IN(ofccl_domain);
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
-    nullptr, nullptr, sendcount, datatype, op, 0, comm, nullptr, /* Args */
+    nullptr, nullptr, sendcount, datatype, ncclSum, 0, comm, nullptr, /* Args */
     ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS };
   return ofcclPrepareCollComm(&info, collId, rankCtx);
   

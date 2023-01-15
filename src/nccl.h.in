@@ -270,6 +270,12 @@ ncclResult_t  ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int r
 ncclResult_t pncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root,
     ncclComm_t comm, cudaStream_t stream);
 
+ncclResult_t  ofcclPrepareBcast(size_t count, ncclDataType_t datatype, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareBcast(size_t count, ncclDataType_t datatype, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+
+ncclResult_t  ofcclRunBcast(void* buff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunBcast(void* buff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+
 /*
  * Broadcast
  *
@@ -284,6 +290,11 @@ ncclResult_t  ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, 
 ncclResult_t pncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
     ncclComm_t comm, cudaStream_t stream);
 
+ncclResult_t  ofcclPrepareBroadcast(size_t count, ncclDataType_t datatype, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareBroadcast(size_t count, ncclDataType_t datatype, int root, ncclComm* comm, int collId, ofcclRankCtx_t rankCtx);
+
+ncclResult_t  ofcclRunBroadcast(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclRunBroadcast(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 /*
  * All-Reduce
  *
@@ -360,8 +371,8 @@ ncclResult_t  ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
 ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream);
 
-ncclResult_t  ofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
-ncclResult_t pofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t  ofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
+ncclResult_t pofcclPrepareAllGather(size_t sendcount, ncclDataType_t datatype, ncclComm_t comm, int collId, ofcclRankCtx_t rankCtx);
 
 ncclResult_t  ofcclRunAllGather(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 ncclResult_t pofcclRunAllGather(const void* sendbuff, void* recvbuff, int collId, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
