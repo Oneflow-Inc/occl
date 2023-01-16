@@ -20,8 +20,8 @@
 
 #define DEBUG_CLOCK 1
 
-#define DEBUG_CLOCK_TRAIN 1
-// #define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_TRAIN 1
+#define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
 
@@ -43,7 +43,7 @@
   #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
-  #define NUM_SHMEM_SLOT 10
+  #define NUM_SHMEM_SLOT 5
 #endif
 
 
