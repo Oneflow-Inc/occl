@@ -1487,6 +1487,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
 
   // ***** seems do not need to transverse ofcclCommList *****
   rankCtx->collCount = 0;
+  free(rankCtx);
   return ret;
 }
 

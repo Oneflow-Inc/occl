@@ -18,10 +18,10 @@
 #define COLL_ID_MASK          0x00000000ffffffff
 #define COLL_ID_BIT           32
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
-#define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_IO 1
 
 #define SHOW_CNT 1
 
@@ -42,8 +42,8 @@
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
   #endif
 #else
-  #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
-  #define NUM_SHMEM_SLOT 5
+  #define MAX_LENGTH 5000LL // 受到0xc000 shmem的限制
+  #define NUM_SHMEM_SLOT 1
 #endif
 
 
