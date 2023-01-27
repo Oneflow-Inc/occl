@@ -42,7 +42,7 @@
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
   #endif
 #else
-  #define MAX_LENGTH 5000LL // 受到0xc000 shmem的限制
+  #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
   #define NUM_SHMEM_SLOT 1
 #endif
 
@@ -115,6 +115,7 @@ typedef struct alignas(16) {
     unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
     unsigned long long int totalCtxLoadCnt;
     unsigned long long int totalProgressed7SwithchCnt;
+    unsigned long long int totalUnprogressed7SwitchCnt;
     unsigned long long int totalUnprogressedQuitCnt;
   #endif
   unsigned int cqCnt[MAX_LENGTH];
