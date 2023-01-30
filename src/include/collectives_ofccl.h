@@ -18,10 +18,11 @@
 #define COLL_ID_MASK          0x00000000ffffffff
 #define COLL_ID_BIT           32
 
-// #define DEBUG_CLOCK 1
+#define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
 // #define DEBUG_CLOCK_IO 1
+#define DEBUG_CLOCK_3D 1
 
 #define SHOW_CNT 1
 
@@ -40,6 +41,12 @@
     #define RECORD_ITER 5
     #define SKIP_WARMUP_ITER 3
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
+  #endif
+  #ifdef DEBUG_CLOCK_3D
+    #define SKIP_WARMUP_ITER 0
+    #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
+    #define NUM_SHMEM_SLOT 1
+    #define RESNET_COLL_CNT 161
   #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
@@ -166,6 +173,15 @@ typedef struct alignas(16) {
       long long int beforeGetSqeAfterPutCqeDeltaClock[MAX_LENGTH][RECORD_ITER];
 
       int ctxSwitchCnt[MAX_LENGTH];
+    #endif
+
+    #ifdef DEBUG_CLOCK_3D
+      int progressed7SwitchCnt[MAX_LENGTH];
+      int unprogressed7SwitchCnt[MAX_LENGTH];
+      int progressed7SwitchCntIterDelta[MAX_LENGTH];
+      int unprogressed7SwitchCntIterDelta[MAX_LENGTH];
+      int iterCqeCnt;
+      int iterNum;
     #endif
 
     #ifdef DEBUG_CLOCK_IO

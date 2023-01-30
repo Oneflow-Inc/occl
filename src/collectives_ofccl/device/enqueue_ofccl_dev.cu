@@ -30,6 +30,18 @@ static __shared__ BlkCount4CollAlign sharedBlkCount4CollAlign;
 static __shared__ unsigned long long int zeros[2];
 static __shared__ int cqWriteSlot;
 
+#ifdef DEBUG_CLOCK_3D
+static __device__ int collCnt4Blk_2CradResnet() {
+  if (blockIdx.x == 0) {
+    return 161;
+  } else if (blockIdx.x == 1) {
+    return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+  } else {
+    return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+  }
+}
+#endif
+
 static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 
   unsigned long long int currSqFrontier = blkStatus.dynamicBlkStatus.sqReadFrontier;
@@ -213,6 +225,18 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
             }
           }
         #endif
+
+        #ifdef DEBUG_CLOCK_3D
+          for (int i = 0; i < collCount; ++i) {
+            int collId = globalCollIds[i];
+            blkStatus.progressed7SwitchCnt[collId] = 0;
+            blkStatus.unprogressed7SwitchCnt[collId] = 0;
+            blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
+            blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;
+          }
+          blkStatus.iterCqeCnt = 0;
+          blkStatus.iterNum = 0;
+        #endif
           
         #ifdef DEBUG_CLOCK_IO
           blkStatus.beforeGetSqeIter = 0;
@@ -268,6 +292,18 @@ static __device__ int blockInit(int thrdCudaDev, int collCount, char *globalBlkC
               // blkStatus.beforePutCqeIter[collId] = myGlobalBlkStatus->beforePutCqeIter[collId];
               // blkStatus.putCqeIter[collId] = myGlobalBlkStatus->putCqeIter[collId];
             }
+          #endif
+
+          #ifdef DEBUG_CLOCK_3D
+            for (int i = 0; i < collCount; ++i) {
+              int collId = globalCollIds[i];
+              blkStatus.progressed7SwitchCnt[collId] = myGlobalBlkStatus->progressed7SwitchCnt[collId];
+              blkStatus.unprogressed7SwitchCnt[collId] = myGlobalBlkStatus->unprogressed7SwitchCnt[collId];
+              blkStatus.progressed7SwitchCntIterDelta[collId] = myGlobalBlkStatus->progressed7SwitchCntIterDelta[collId];
+              blkStatus.unprogressed7SwitchCntIterDelta[collId] = myGlobalBlkStatus->unprogressed7SwitchCntIterDelta[collId];
+            }
+            blkStatus.iterCqeCnt = myGlobalBlkStatus->iterCqeCnt;
+            blkStatus.iterNum = myGlobalBlkStatus->iterNum;
           #endif
           #ifdef DEBUG_CLOCK_IO
             for (int j = 0; j < RECORD_ITER; ++j) {
@@ -534,7 +570,7 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
   if (tid == 0) {
     blkStatus.currLoadedCollId = collId; // 这个变量只起一个传递信息的作用了，不再标记shmem是否valid
     if (blkStatus.collStatusAlign.collStatus[collId] == -1) {
-      // bugfix: 防止一个不需要load的coll，无休止增加下去。
+      // bugfix: 防止一个不需要load的coll的ctxSwitchThreshold无休止增加下去。
       sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD + BOUNS_SWITCH_4_PROCESSED_COLL;
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId], sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold);
       *unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
@@ -542,11 +578,19 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
       #ifdef SHOW_CNT
         blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt++;
       #endif
+      #ifdef DEBUG_CLOCK_3D
+        blkStatus.progressed7SwitchCnt[collId]++;
+        blkStatus.progressed7SwitchCntIterDelta[collId]++;
+      #endif
     } else if (blkStatus.collStatusAlign.collStatus[collId] == -2) {
       sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD;
       *unprogressedCnt += 1;
       #ifdef SHOW_CNT
         blkStatus.dynamicBlkStatus.totalUnprogressed7SwitchCnt++;
+      #endif
+      #ifdef DEBUG_CLOCK_3D
+        blkStatus.unprogressed7SwitchCnt[collId]++;
+        blkStatus.unprogressed7SwitchCntIterDelta[collId]++;
       #endif
     }
 
@@ -565,6 +609,25 @@ static __device__ int maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk2
 }
 
 static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
+
+  // 放在这里，让每个完成了coll的block都打印自己的情况，而不是只有最终写cqe的那个block才报告。
+  #ifdef DEBUG_CLOCK_3D
+    blkStatus.iterCqeCnt++;
+    if (blkStatus.iterCqeCnt % collCnt4Blk_2CradResnet() == 0) {
+      // 完成了一个iter所需的集合通信，打印到目前为止的总的switch数，以及这个iter的switch数，并且清零iterCqeCnt和这个iter的switch的数。
+      ++blkStatus.iterNum;
+      blkStatus.iterCqeCnt = 0;
+      for (int i = 0; i < RESNET_COLL_CNT; ++i) {
+        int collId = i; // 之后有需要再传globalCollIds参数
+        if (blockIdx.x < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
+          OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d, progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
+          blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
+          blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;
+        }
+      }
+    }
+  #endif
+  
   // 协调所有blk，发现所有blk都完成，最后一个blk发送CQE
   int old_counter = atomicAdd(&(globalCqes[doneCollId].counter), 1);
   __threadfence(); // cqes在global memory里边，全部block关心。
@@ -1037,6 +1100,17 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                 
                 myGlobalBlkStatus->ctxSwitchCnt[collId] = blkStatus.ctxSwitchCnt[collId];
               }
+            #endif
+            #ifdef DEBUG_CLOCK_3D
+              for (int i = 0; i < collCount; ++i) {
+                int collId = globalCollIds[i];
+                myGlobalBlkStatus->progressed7SwitchCnt[collId] = blkStatus.progressed7SwitchCnt[collId];
+                myGlobalBlkStatus->unprogressed7SwitchCnt[collId] = blkStatus.unprogressed7SwitchCnt[collId];
+                myGlobalBlkStatus->progressed7SwitchCntIterDelta[collId] = blkStatus.progressed7SwitchCntIterDelta[collId];
+                myGlobalBlkStatus->unprogressed7SwitchCntIterDelta[collId] = blkStatus.unprogressed7SwitchCntIterDelta[collId];
+              }
+              myGlobalBlkStatus->iterCqeCnt = blkStatus.iterCqeCnt;
+              myGlobalBlkStatus->iterNum = blkStatus.iterNum;
             #endif
             #ifdef DEBUG_CLOCK_IO
               for (int j = 0; j < RECORD_ITER; ++j) {
