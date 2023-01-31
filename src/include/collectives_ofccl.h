@@ -182,6 +182,10 @@ typedef struct alignas(16) {
       int unprogressed7SwitchCntIterDelta[MAX_LENGTH];
       int iterCqeCnt;
       int iterNum;
+      int iterSqeCnt;
+      int iterSqNum;
+      int collIdInSqe[RESNET_COLL_CNT];
+      int taskQLenAfterGetSqe[RESNET_COLL_CNT];
     #endif
 
     #ifdef DEBUG_CLOCK_IO
