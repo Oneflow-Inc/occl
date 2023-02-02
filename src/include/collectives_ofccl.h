@@ -187,6 +187,9 @@ typedef struct alignas(16) {
       int collIdInSqe[RESNET_COLL_CNT];
       int taskQLenAfterGetSqe[RESNET_COLL_CNT];
       int collId4Cq[RESNET_COLL_CNT];
+
+      int totalSqeCnt;
+      int totalCqeCnt;
     #endif
 
     #ifdef DEBUG_CLOCK_IO
