@@ -30,18 +30,6 @@ static __shared__ BlkCount4CollAlign sharedBlkCount4CollAlign;
 static __shared__ unsigned long long int zeros[2];
 static __shared__ int cqWriteSlot;
 
-#ifdef DEBUG_CLOCK_3D
-static __device__ int collCnt4Blk_2CardResnet() {
-  if (blockIdx.x == 0) {
-    return 161;
-  } else if (blockIdx.x == 1) {
-    return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
-  } else {
-    return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
-  }
-}
-#endif
-
 static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 
   unsigned long long int currSqFrontier = blkStatus.dynamicBlkStatus.sqReadFrontier;
@@ -236,6 +224,7 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
             // 这两个数组的下标就代表index，而不是collId。
             blkStatus.collIdInSqe[i] = 0;
             blkStatus.taskQLenAfterGetSqe[i] = 0;
+            blkStatus.collId4Cq[i] = 0;
           }
           blkStatus.iterCqeCnt = 0;
           blkStatus.iterSqeCnt = 0;
@@ -309,6 +298,7 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
               
               blkStatus.collIdInSqe[i] = myGlobalBlkStatus->collIdInSqe[i];
               blkStatus.taskQLenAfterGetSqe[i] = myGlobalBlkStatus->taskQLenAfterGetSqe[i];
+              blkStatus.collId4Cq[i] = myGlobalBlkStatus->collId4Cq[i];
             }
             blkStatus.iterCqeCnt = myGlobalBlkStatus->iterCqeCnt;
             blkStatus.iterSqeCnt = myGlobalBlkStatus->iterSqeCnt;
@@ -484,7 +474,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
           blkStatus.activeCollIdsAlign.activeCollIds[new_numActiveColls++] = collIdInTaskQ;
         }
       }
-      if (!newActiveCollId_in_taskQ) { // TODO: 一个需要的调整是，newActiveCollId无论如何都应该放在最后，不过这个目前应该没啥影响，是个务虚的原则就好。
+      if (!newActiveCollId_in_taskQ) { // TODO: newActiveCollId应该放在队头
         blkStatus.activeCollIdsAlign.activeCollIds[new_numActiveColls++] = newActiveCollId;
       }
 
@@ -628,7 +618,6 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
 
   // 放在这里，让每个完成了coll的block都打印自己的情况，而不是只有最终写cqe的那个block才报告。
   #ifdef DEBUG_CLOCK_3D
-    ++blkStatus.iterCqeCnt;
     int collCnt4Blk = collCnt4Blk_2CardResnet();
     if (blkStatus.iterCqeCnt % collCnt4Blk == 0) {
       // 完成了一个iter所需的集合通信，打印到目前为止的总的switch数，以及这个iter的switch数，并且清零iterCqeCnt和这个iter的switch的数。
@@ -641,7 +630,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       }
       blkStatus.iterSqeCnt = 0;
       for (int i = 0; i < RESNET_COLL_CNT; ++i) {
-        int collId = i; // 之后有需要再传globalCollIds参数，对于resnet，只是乱序，没有空洞，所以这样做是完全可以的。
+        int collId = blkStatus.collId4Cq[i]; // 之后有需要再传globalCollIds参数，对于resnet，只是乱序，没有空洞，所以这样做是完全可以的。
         if (blockIdx.x < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
           OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
           blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
@@ -758,20 +747,14 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
   int i = 0;
   for (; i < blkStatus.dynamicBlkStatus.numActiveColls; i++) {
 
-    // 下边这三个量是不变的。
     int collId = blkStatus.activeCollIdsAlign.activeCollIds[i];
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[collId];
 
-    // *(blkStatus.barrierCnt + 0 + 10 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-    // *(blkStatus.barrierCnt + 2 + 10 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = collId;
-
     // 这里不需要再判断blkStatus.collStatus[collId]了，因为这一次循环里只会遍历taskQ一次，出去之后就更新taskQ了。
-    if (bid < blkLimit) { // blk天然分化，保留这个条件 // TODO: 如果节省if判断对性能有提升，可以改变处理方法，让所有block处理所有的集合通信。不过好像也省不了。。。总得判断。
+    if (bid < blkLimit) { // blk天然分化，保留这个条件
 
       // ***** 先准备好sharedCollCtx，全部线程都参与 *****
       maintainSharedCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collId, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL, unprogressedCnt);
-
-      // *(blkStatus.barrierCnt + 0 + 15 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
 
       // ***** 然后调用ofcclFunc *****
       int wid = threadIdx.x / WARP_SIZE;
@@ -779,14 +762,15 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
         ofcclFuncs[sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
       }
 
-      // *(blkStatus.barrierCnt + 1 + 15 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-
-      // *(blkStatus.barrierCnt + 0 + 13 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      #ifdef DEBUG_CLOCK_3D
+        if (threadIdx.x == 0) {
+          if (blkStatus.collStatusAlign.collStatus[collId] == 2) {
+            blkStatus.collId4Cq[blkStatus.iterCqeCnt++] = collId;
+          }
+        }
+      #endif
       ofcclBarrier(3); // 跑完一个集合通信，同步一下。
-      // *(blkStatus.barrierCnt + 1 + 13 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     }
-
-    // *(blkStatus.barrierCnt + 1 + 10 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
   }
   #if defined(ARRAY_DEBUG)
     *(blkStatus.barrierCnt + 2 + 11 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -1133,6 +1117,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               
                 myGlobalBlkStatus->collIdInSqe[i] = blkStatus.collIdInSqe[i];
                 myGlobalBlkStatus->taskQLenAfterGetSqe[i] = blkStatus.taskQLenAfterGetSqe[i];
+                myGlobalBlkStatus->collId4Cq[i] = blkStatus.collId4Cq[i];
               }
               myGlobalBlkStatus->iterCqeCnt = blkStatus.iterCqeCnt;
               myGlobalBlkStatus->iterSqeCnt = blkStatus.iterSqeCnt;

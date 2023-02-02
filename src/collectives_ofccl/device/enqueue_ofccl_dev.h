@@ -46,3 +46,15 @@ inline __device__ unsigned long long int DevLogicSqHead(SQ *sq) {
   volatile unsigned long long int *headPtr = &(sq->head);
   return *headPtr % sq->length;
 }
+
+#ifdef DEBUG_CLOCK_3D
+inline __device__ int collCnt4Blk_2CardResnet() {
+  if (blockIdx.x == 0) {
+    return 161;
+  } else if (blockIdx.x == 1) {
+    return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+  } else {
+    return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+  }
+}
+#endif
