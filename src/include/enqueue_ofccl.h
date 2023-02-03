@@ -114,7 +114,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[18];
+  void *argsptrs[22];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -145,10 +145,17 @@ struct ofcclRankCtx {
 
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
-#ifdef ARRAY_DEBUG
-  pthread_t barrierCntPrinter;
-  BarrierCntPrinterArgs barrierCntPrinterArgs;
-#endif
+
+  #ifdef ARRAY_DEBUG
+    pthread_t barrierCntPrinter;
+    BarrierCntPrinterArgs barrierCntPrinterArgs;
+  #endif
+
+  #ifdef DEBUG_CLOCK_3D
+    int *taskQLen4RankBlkIterColl;
+    int *unprogressed7SwitchCnt4RankBlkIterColl;
+    int *progressed7SwitchCnt4RankBlkIterColl;
+  #endif
 };
 
 

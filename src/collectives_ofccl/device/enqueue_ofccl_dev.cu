@@ -148,7 +148,7 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   return -1;
 }
 
-static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters) {
+static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, int *taskQLen4RankBlkIterColl, int *unprogressed7SwitchCnt4RankBlkIterColl, int *progressed7SwitchCnt4RankBlkIterColl) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
   int nthreads = blockDim.x;
@@ -171,6 +171,12 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
 
     zeros[0] = zeros[1] = 0llu;
     cqWriteSlot = 0;
+    #ifdef DEBUG_CLOCK_3D
+      blkStatus.taskQLen4RankBlkIterColl = taskQLen4RankBlkIterColl;
+      blkStatus.unprogressed7SwitchCnt4RankBlkIterColl = unprogressed7SwitchCnt4RankBlkIterColl;
+      blkStatus.progressed7SwitchCnt4RankBlkIterColl = progressed7SwitchCnt4RankBlkIterColl;
+      blkStatus.numColl = collCount;
+    #endif
   ONE_THRD_DO_END
   
   // 不需要初始化DEBUG_CLOCK里的数组，因为这些数组使用的时候都是直接赋值的。
@@ -629,32 +635,37 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     int collCnt4Blk = collCnt4Blk_2CardResnet();
     if (blkStatus.iterCqeCnt % collCnt4Blk == 0) {
       // 完成了一个iter所需的集合通信，打印到目前为止的总的switch数，以及这个iter的switch数，并且清零iterCqeCnt和这个iter的switch的数。
-      ++blkStatus.iterNum;
       for (int i = 0; i < collCnt4Blk; ++i) {
         int sqeCollId = blkStatus.collIdInSqe[i];
         int taskQLen = blkStatus.taskQLenAfterGetSqe[i];
-        // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, after get sqe for coll_id = %d (%d), taskQLen = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, sqeCollId, sharedBlkCount4CollAlign.blkCount4Coll[sqeCollId], taskQLen);
-        if (thrdCudaDev == 1) {
-          OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, after get sqe for coll_id = %d (%d), taskQLen = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, sqeCollId, sharedBlkCount4CollAlign.blkCount4Coll[sqeCollId], taskQLen);
-        }
+        // if (thrdCudaDev == 1) {
+        //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, after get sqe for coll_id = %d (%d), taskQLen = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, sqeCollId, sharedBlkCount4CollAlign.blkCount4Coll[sqeCollId], taskQLen);
+        // }
+        int rank = thrdCudaDev, blk = blockIdx.x, iter = blkStatus.iterNum, blkCnt = gridDim.x, numColl = blkStatus.numColl;
+        int *ptr = getSlot(blkStatus.taskQLen4RankBlkIterColl, rank, blk, iter, sqeCollId, blkCnt, NUM_ITER, numColl);
+        *ptr = taskQLen;
+
         // 数组元素不用置零，反正下次再用也是赋值。
       }
       // if (thrdCudaDev == 1) {
       //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, totalSqeCnt = %d, totalCqeCnt = %d, iterSqeCnt = %d, iterCqeCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, blkStatus.totalSqeCnt, blkStatus.totalCqeCnt, blkStatus.iterSqeCnt, blkStatus.iterCqeCnt);
       // }
       blkStatus.iterSqeCnt = 0;
-      // for (int i = 0; i < RESNET_COLL_CNT; ++i) {
-      //   int collId = blkStatus.collId4Cq[i]; // 之后有需要再传globalCollIds参数，对于resnet，只是乱序，没有空洞，所以这样做是完全可以的。
-      //   if (blockIdx.x < sharedBlkCount4CollAlign.blkCount4Coll[collId]) {
-      //     // OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
-      //     if (thrdCudaDev == 1) {
-      //       OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
-      //     }
-      //     blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
-      //     blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;
-      //   }
-      // }
+      for (int i = 0; i < collCnt4Blk; ++i) {
+        int collId = blkStatus.collId4Cq[i];
+        // if (thrdCudaDev == 1) {
+        //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
+        // }
+        int rank = thrdCudaDev, blk = blockIdx.x, iter = blkStatus.iterNum, blkCnt = gridDim.x, numColl = blkStatus.numColl;
+        int *ptr = getSlot(blkStatus.unprogressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, collId, blkCnt, NUM_ITER, numColl);
+        *ptr = blkStatus.unprogressed7SwitchCntIterDelta[collId];
+        ptr = getSlot(blkStatus.progressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, collId, blkCnt, NUM_ITER, numColl);
+        *ptr = blkStatus.progressed7SwitchCntIterDelta[collId];
+        blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;  
+        blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
+      }
       blkStatus.iterCqeCnt = 0;
+      ++blkStatus.iterNum;
     }
   #endif
   
@@ -799,7 +810,7 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
 }
 
 // TODO: 考虑在按需启停的场景下，会多次启动，执行上会不会有什么变化。
-__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL) {
+__global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL, int *taskQLen4RankBlkIterColl, int *unprogressed7SwitchCnt4RankBlkIterColl, int *progressed7SwitchCnt4RankBlkIterColl) {
 
   int bid = blockIdx.x;
   int tid = threadIdx.x;
@@ -810,7 +821,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
   // int tempRound = 0;
 
-  blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters);
+  blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters, taskQLen4RankBlkIterColl, unprogressed7SwitchCnt4RankBlkIterColl, progressed7SwitchCnt4RankBlkIterColl);
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
