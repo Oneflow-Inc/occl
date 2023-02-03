@@ -114,7 +114,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[22];
+  void *argsptrs[18];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];

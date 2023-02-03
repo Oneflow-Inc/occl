@@ -860,9 +860,10 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[17] = &args->BOUNS_SWITCH_4_PROCESSED_COLL;
 
   #ifdef DEBUG_CLOCK_3D
-    rankCtx->argsptrs[18] = &rankCtx->taskQLen4RankBlkIterColl;
-    rankCtx->argsptrs[19] = &rankCtx->unprogressed7SwitchCnt4RankBlkIterColl;
-    rankCtx->argsptrs[20] = &rankCtx->progressed7SwitchCnt4RankBlkIterColl;
+    cudaMemcpyToSymbol(&taskQLen4RankBlkIterColl, &rankCtx->taskQLen4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&unprogressed7SwitchCnt4RankBlkIterColl, &rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&progressed7SwitchCnt4RankBlkIterColl, &rankCtx->progressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&numColl, &rankCtx->collCount, sizeof(int));
   #endif
 
   struct cudaLaunchParams daemonKernelParam;

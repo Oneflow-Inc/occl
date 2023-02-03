@@ -49,6 +49,13 @@
     #define RESNET_COLL_CNT 161
     #define NUM_ITER 20
 
+    #ifdef DEBUG_CLOCK_3D
+      extern __constant__ int *taskQLen4RankBlkIterColl;
+      extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
+      extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+      extern __constant__ int numColl;
+    #endif
+
     inline __host__ __device__ int *getSlot(int *ptr, int rank, int blk, int iter, int coll_id, int blkCnt, int numIter, int collCnt) {
       return ptr + coll_id + iter * collCnt + blk * numIter * collCnt + rank * blkCnt * numIter * collCnt;
     }
@@ -195,11 +202,6 @@ typedef struct alignas(16) {
 
       int totalSqeCnt;
       int totalCqeCnt;
-      
-      int *taskQLen4RankBlkIterColl;
-      int *unprogressed7SwitchCnt4RankBlkIterColl;
-      int *progressed7SwitchCnt4RankBlkIterColl;
-      int numColl;
     #endif
 
     #ifdef DEBUG_CLOCK_IO
@@ -315,7 +317,7 @@ typedef struct alignas(16) {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL, int *taskQLen4RankBlkIterColl, int *unprogressed7SwitchCnt4RankBlkIterColl, int *progressed7SwitchCnt4RankBlkIterColl);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****
