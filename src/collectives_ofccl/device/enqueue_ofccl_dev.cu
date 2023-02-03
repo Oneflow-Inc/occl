@@ -34,6 +34,8 @@ static __shared__ int cqWriteSlot;
 __constant__ int *taskQLen4RankBlkIterColl;
 __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
 __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+__constant__ int *collIdInSqe4RankBlkIterColl;
+__constant__ int *collId4Cq4RankBlkIterColl;
 __constant__ int numColl;
 #endif
 
@@ -639,11 +641,15 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       for (int i = 0; i < collCnt4Blk; ++i) {
         int sqeCollId = blkStatus.collIdInSqe[i];
         int taskQLen = blkStatus.taskQLenAfterGetSqe[i];
-        // if (thrdCudaDev == 1) {
-        //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, after get sqe for coll_id = %d (%d), taskQLen = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, sqeCollId, sharedBlkCount4CollAlign.blkCount4Coll[sqeCollId], taskQLen);
-        // }
-        int rank = thrdCudaDev, blk = blockIdx.x, iter = blkStatus.iterNum, blkCnt = gridDim.x;
-        *getSlot(taskQLen4RankBlkIterColl, rank, blk, iter, sqeCollId, blkCnt, NUM_ITER, numColl) = taskQLen;
+        #ifdef DEBUG_CLOCK_3D_HOST
+          int blk = blockIdx.x, iter = blkStatus.iterNum;
+          *getSlot(taskQLen4RankBlkIterColl, blk, iter, sqeCollId, NUM_ITER, numColl) = taskQLen;
+          *getSlot(collIdInSqe4RankBlkIterColl, blk, iter, i, NUM_ITER, numColl) = sqeCollId;
+        #else
+          if (thrdCudaDev == 1) {
+            OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> in %dth iter, after get sqe for coll_id = %d (%d), taskQLen = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, sqeCollId, sharedBlkCount4CollAlign.blkCount4Coll[sqeCollId], taskQLen);
+          }
+        #endif
 
         // 数组元素不用置零，反正下次再用也是赋值。
       }
@@ -653,14 +659,18 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       blkStatus.iterSqeCnt = 0;
       for (int i = 0; i < collCnt4Blk; ++i) {
         int collId = blkStatus.collId4Cq[i];
-        // if (thrdCudaDev == 1) {
-        //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
-        // }
-        int rank = thrdCudaDev, blk = blockIdx.x, iter = blkStatus.iterNum, blkCnt = gridDim.x;
-        *getSlot(unprogressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, collId, blkCnt, NUM_ITER, numColl) = blkStatus.unprogressed7SwitchCntIterDelta[collId];
-        *getSlot(progressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, collId, blkCnt, NUM_ITER, numColl) = blkStatus.progressed7SwitchCntIterDelta[collId];
-        blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;  
-        blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
+        #ifdef DEBUG_CLOCK_3D_HOST
+          int blk = blockIdx.x, iter = blkStatus.iterNum;
+          *getSlot(unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.unprogressed7SwitchCntIterDelta[collId];
+          *getSlot(progressed7SwitchCnt4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.progressed7SwitchCntIterDelta[collId];
+          *getSlot(collId4Cq4RankBlkIterColl, blk, iter, i, NUM_ITER, numColl) = collId;
+          blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;  
+          blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
+        #else
+          if (thrdCudaDev == 1) {
+            OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
+          }
+        #endif
       }
       blkStatus.iterCqeCnt = 0;
       ++blkStatus.iterNum;

@@ -23,6 +23,7 @@
 // #define DEBUG_CLOCK_TRAIN 1
 // #define DEBUG_CLOCK_IO 1
 #define DEBUG_CLOCK_3D 1
+#define DEBUG_CLOCK_3D_HOST 1
 
 #define SHOW_CNT 1
 
@@ -53,11 +54,22 @@
       extern __constant__ int *taskQLen4RankBlkIterColl;
       extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
       extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+      extern __constant__ int *collIdInSqe4RankBlkIterColl;
+      extern __constant__ int *collId4Cq4RankBlkIterColl;
       extern __constant__ int numColl;
     #endif
 
-    inline __host__ __device__ int *getSlot(int *ptr, int rank, int blk, int iter, int coll_id, int blkCnt, int numIter, int collCnt) {
-      return ptr + coll_id + iter * collCnt + blk * numIter * collCnt + rank * blkCnt * numIter * collCnt;
+    inline __host__ __device__ int *getSlot(int *ptr, int blk, int iter, int coll_id, int numIter, int collCnt) {
+      return ptr + coll_id + iter * collCnt + blk * numIter * collCnt;
+    }
+    inline int collCnt4Blk_2CardResnet(int blk) {
+      if (blk == 0) {
+        return 161;
+      } else if (blk == 1) {
+        return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+      } else {
+        return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+      }
     }
   #endif
 #else

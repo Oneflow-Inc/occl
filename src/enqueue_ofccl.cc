@@ -864,6 +864,8 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
     cudaMemcpyToSymbol(&unprogressed7SwitchCnt4RankBlkIterColl, &rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&progressed7SwitchCnt4RankBlkIterColl, &rankCtx->progressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&numColl, &rankCtx->collCount, sizeof(int));
+    cudaMemcpyToSymbol(&collIdInSqe4RankBlkIterColl, &rankCtx->collIdInSqe4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&collId4Cq4RankBlkIterColl, &rankCtx->collId4Cq4RankBlkIterColl, sizeof(int *));
   #endif
 
   struct cudaLaunchParams daemonKernelParam;
@@ -1181,7 +1183,6 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   strcpy(rankCtx->debugtFile, DEBUG_FILE.c_str());
 
   #ifdef DEBUG_CLOCK_3D
-    int num_rank;
     int num_block;
     int num_coll;
   #endif
@@ -1395,12 +1396,13 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #endif
 
   #ifdef DEBUG_CLOCK_3D
-    num_rank = ParseIntegerFromEnv("DEVICE_NUM_PER_NODE", 8);
     num_block = rankCtx->daemonKernelGridDim.x;
     num_coll = rankCtx->collCount;
-    checkRuntime(cudaMallocHost(&rankCtx->taskQLen4RankBlkIterColl, num_rank * num_block * NUM_ITER * num_coll * sizeof(int)));
-    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCnt4RankBlkIterColl, num_rank * num_block * NUM_ITER * num_coll * sizeof(int)));
-    checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, num_rank * num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->taskQLen4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->collIdInSqe4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->collId4Cq4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
   #endif
 
   // make sure Memcpy to globalBlkCount4Coll finish
@@ -1470,16 +1472,22 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   pthread_mutex_destroy(&rankCtx->observer_mutex);
 
   #ifdef DEBUG_CLOCK_3D
-    int num_rank = ParseIntegerFromEnv("DEVICE_NUM_PER_NODE", 8);
     int num_block = rankCtx->daemonKernelGridDim.x;
     int num_coll = rankCtx->collCount;
-    for (int rank = 0; rank < num_rank; ++rank) {
+    std::ofstream clean(rankCtx->debugtFile, std::ios_base::out);
+    clean << "";
+    clean.close();
+    std::ofstream file(rankCtx->debugtFile, std::ios_base::app);
+
+    for (int iter = 0; iter < NUM_ITER; ++iter) {
+      file << "=================== " << iter << "th iter ===================" << std::endl;
       for (int blk = 0; blk < num_block; ++blk) {
-        for (int iter = 0; iter < NUM_ITER; ++iter) {
-          for (int coll_id = 0; coll_id < num_coll; ++coll_id) {
-            OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> in %dth iter, coll_id = %d (%d), after get sqe, taskQLen = %d, after done, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCntIterDelta = %d", rank, blk, iter, coll_id, rankCtx->hostBlkCount4Coll[coll_id], *getSlot(rankCtx->taskQLen4RankBlkIterColl, rank, blk, iter, coll_id, num_block, NUM_ITER, num_coll), *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, coll_id, num_block, NUM_ITER, num_coll), *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, rank, blk, iter, coll_id, num_block, NUM_ITER, num_coll));
-          }
+        int collCnt4Blk = collCnt4Blk_2CardResnet(blk);
+        for (int i = 0; i < collCnt4Blk; ++i) {
+          int coll_id = *getSlot(rankCtx->collIdInSqe4RankBlkIterColl, blk, iter, i, NUM_ITER, num_coll);
+          file << "Rank<" << rankCtx->rank << "> Blk<" << blk << "> in " << iter << "th iter, coll_id = " << coll_id << " (" << int(rankCtx->hostBlkCount4Coll[coll_id]) << "), after get sqe, taskQLen = " << *getSlot(rankCtx->taskQLen4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", after done, unprogressed7SwitchCntIterDelta = " << *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", progressed7SwitchCntIterDelta = " << *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << std::endl;
         }
+        file << std::endl;
       }
     }
     checkRuntime(cudaFreeHost(rankCtx->taskQLen4RankBlkIterColl));
