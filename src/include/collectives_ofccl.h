@@ -164,6 +164,10 @@ typedef struct alignas(16) {
 } ActiveCollIdsAlign;
 
 typedef struct alignas(16) {
+  char collTryCnt[MAX_LENGTH];
+} CollTryCntAlign;
+
+typedef struct alignas(16) {
   /* ****** 根据hasQuitted的值，决定重置还是从globalMem里读 ****** */
   DynamicBlkStatus dynamicBlkStatus;
 
@@ -249,6 +253,7 @@ typedef struct alignas(16) {
   // 这样的好处是以16B复制的时候，没有越界风险
   CollStatusAlign collStatusAlign;
   ActiveCollIdsAlign activeCollIdsAlign;
+  CollTryCntAlign collTryCntAllign;
 
 
   /* ****** 固定从globalMem里读 ****** */
@@ -256,6 +261,7 @@ typedef struct alignas(16) {
 
 
   /* ****** daemonKernel每次启动需要重置 ****** */
+  int willingnessToGetSqe;
   int currLoadedCollId;
   char quit;
   char finallyQuit;
@@ -329,7 +335,7 @@ typedef struct alignas(16) {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t NUM_TRY_TASKQ_HEAD);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

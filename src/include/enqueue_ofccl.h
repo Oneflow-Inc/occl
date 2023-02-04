@@ -71,7 +71,7 @@ typedef struct {
   int64_t TRAVERSE_TIMES;
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
-  int64_t BOUNS_SWITCH_4_PROCESSED_COLL;
+  int64_t NUM_TRY_TASKQ_HEAD;
 
   #ifdef DEBUG_CLOCK
     std::chrono::system_clock::time_point kernelStart;
