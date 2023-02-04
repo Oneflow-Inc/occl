@@ -18,12 +18,12 @@
 #define COLL_ID_MASK          0x00000000ffffffff
 #define COLL_ID_BIT           32
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
 // #define DEBUG_CLOCK_IO 1
-#define DEBUG_CLOCK_3D 1
-#define DEBUG_CLOCK_3D_HOST 1
+// #define DEBUG_CLOCK_3D 1
+// #define DEBUG_CLOCK_3D_HOST 1
 
 #define SHOW_CNT 1
 

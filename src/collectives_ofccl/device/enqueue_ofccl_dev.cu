@@ -788,7 +788,8 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[collId];
 
     if (bid < blkLimit) { // blk天然分化，保留这个条件
-      for (int tryCnt = 0; tryCnt < NUM_TRY_TASKQ_HEAD; ++tryCnt) {
+      int try_cnt = (i == 0) ? NUM_TRY_TASKQ_HEAD : 1; // 只有队头循环多次。
+      for (int tryCnt = 0; tryCnt < try_cnt; ++tryCnt) {
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
         maintainSharedCollCtx(thrdCudaDev, globalBlk2CollId2CollCtx, collId, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, unprogressedCnt);
