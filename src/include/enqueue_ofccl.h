@@ -72,6 +72,7 @@ typedef struct {
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
   int64_t NUM_TRY_TASKQ_HEAD;
+  int64_t NUM_ITER_ENV;
 
   #ifdef DEBUG_CLOCK
     std::chrono::system_clock::time_point kernelStart;
@@ -114,7 +115,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[18];
+  void *argsptrs[19];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
