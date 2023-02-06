@@ -50,25 +50,31 @@
     #define RESNET_COLL_CNT 161
     #define NUM_ITER 20
 
-    #ifdef DEBUG_CLOCK_3D
-      extern __constant__ int *taskQLen4RankBlkIterColl;
-      extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
-      extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
-      extern __constant__ int *collIdInSqe4RankBlkIterColl;
-      extern __constant__ int *collId4Cq4RankBlkIterColl;
-      extern __constant__ int numColl;
-    #endif
+    extern __constant__ int *taskQLen4RankBlkIterColl;
+    extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
+    extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+    extern __constant__ int *collIdInSqe4RankBlkIterColl;
+    extern __constant__ int *collId4Cq4RankBlkIterColl;
+    extern __constant__ int numColl;
 
     inline __host__ __device__ int *getSlot(int *ptr, int blk, int iter, int coll_id, int numIter, int collCnt) {
       return ptr + coll_id + iter * collCnt + blk * numIter * collCnt;
     }
-    inline int collCnt4Blk_2CardResnet(int blk) {
+    inline int getCollCnt4Blk(int blk) {
+      // 2card resnet
+      // if (blk == 0) {
+      //   return 161;
+      // } else if (blk == 1) {
+      //   return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+      // } else {
+      //   return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+      // }
+
+      // 8card vit
       if (blk == 0) {
-        return 161;
-      } else if (blk == 1) {
-        return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+        return 85;
       } else {
-        return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+        return 84;
       }
     }
   #endif

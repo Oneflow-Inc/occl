@@ -48,13 +48,21 @@ inline __device__ unsigned long long int DevLogicSqHead(SQ *sq) {
 }
 
 #ifdef DEBUG_CLOCK_3D
-inline __device__ int collCnt4Blk_2CardResnet() {
+inline __device__ int getCollCnt4Blk() {
+  // 2card resnet
+  // if (blockIdx.x == 0) {
+  //   return 161;
+  // } else if (blockIdx.x == 1) {
+  //   return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+  // } else {
+  //   return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+  // }
+
+  // 8card vit
   if (blockIdx.x == 0) {
-    return 161;
-  } else if (blockIdx.x == 1) {
-    return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+    return 85;
   } else {
-    return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+    return 84;
   }
 }
 #endif

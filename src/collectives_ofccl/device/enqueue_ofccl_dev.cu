@@ -645,7 +645,7 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
     ++blkStatus.iterCqeCnt;
     ++blkStatus.totalCqeCnt;
     blkStatus.collId4Cq[blkStatus.iterCqeCnt] = doneCollId;
-    int collCnt4Blk = collCnt4Blk_2CardResnet();
+    int collCnt4Blk = getCollCnt4Blk();
     if (blkStatus.iterCqeCnt % collCnt4Blk == 0) {
       // 完成了一个iter所需的集合通信，打印到目前为止的总的switch数，以及这个iter的switch数，并且清零iterCqeCnt和这个iter的switch的数。
       for (int i = 0; i < collCnt4Blk; ++i) {

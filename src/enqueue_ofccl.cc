@@ -1486,7 +1486,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
     for (int iter = 0; iter < NUM_ITER; ++iter) {
       file << "=================== " << iter << "th iter ===================" << std::endl;
       for (int blk = 0; blk < num_block; ++blk) {
-        int collCnt4Blk = collCnt4Blk_2CardResnet(blk);
+        int collCnt4Blk = getCollCnt4Blk(blk);
         for (int i = 0; i < collCnt4Blk; ++i) {
           int coll_id = *getSlot(rankCtx->collIdInSqe4RankBlkIterColl, blk, iter, i, NUM_ITER, num_coll);
           file << "Rank<" << rankCtx->rank << "> Blk<" << blk << "> in " << iter << "th iter, coll_id = " << coll_id << " (" << int(rankCtx->hostBlkCount4Coll[coll_id]) << "), after get sqe, taskQLen = " << *getSlot(rankCtx->taskQLen4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", after done, unprogressed7SwitchCntIterDelta = " << *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", progressed7SwitchCntIterDelta = " << *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << std::endl;
