@@ -865,6 +865,8 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
     cudaMemcpyToSymbol(&taskQLen4RankBlkIterColl, &rankCtx->taskQLen4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&unprogressed7SwitchCnt4RankBlkIterColl, &rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&progressed7SwitchCnt4RankBlkIterColl, &rankCtx->progressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&unprogressed7SwitchCntTotal4RankBlkIterColl, &rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&progressed7SwitchCntTotal4RankBlkIterColl, &rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&numColl, &rankCtx->collCount, sizeof(int));
     cudaMemcpyToSymbol(&collIdInSqe4RankBlkIterColl, &rankCtx->collIdInSqe4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&collId4Cq4RankBlkIterColl, &rankCtx->collId4Cq4RankBlkIterColl, sizeof(int *));
@@ -1125,7 +1127,7 @@ void *startBarrierCntPrinter(void *args) {
     for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
       file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSaveCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalCtxLoadCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalProgressed7SwithchCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalProgressed7SwitchCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " unprogressedCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalUnprogressedQuitCnt=" << 
@@ -1401,11 +1403,14 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #ifdef DEBUG_CLOCK_3D
     num_block = rankCtx->daemonKernelGridDim.x;
     num_coll = rankCtx->collCount;
+    OFCCL_LOG(OFCCL, "num_block = %d, NUM_ITER = %d, num_coll = %d", num_block, NUM_ITER, num_coll);
     checkRuntime(cudaMallocHost(&rankCtx->taskQLen4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
-    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
     checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
     checkRuntime(cudaMallocHost(&rankCtx->collIdInSqe4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
     checkRuntime(cudaMallocHost(&rankCtx->collId4Cq4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
   #endif
 
   // make sure Memcpy to globalBlkCount4Coll finish
@@ -1489,7 +1494,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
         int collCnt4Blk = getCollCnt4Blk(blk);
         for (int i = 0; i < collCnt4Blk; ++i) {
           int coll_id = *getSlot(rankCtx->collIdInSqe4RankBlkIterColl, blk, iter, i, NUM_ITER, num_coll);
-          file << "Rank<" << rankCtx->rank << "> Blk<" << blk << "> in " << iter << "th iter, coll_id = " << coll_id << " (" << int(rankCtx->hostBlkCount4Coll[coll_id]) << "), after get sqe, taskQLen = " << *getSlot(rankCtx->taskQLen4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", after done, unprogressed7SwitchCntIterDelta = " << *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", progressed7SwitchCntIterDelta = " << *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << std::endl;
+          file << "Rank<" << rankCtx->rank << "> Blk<" << blk << "> in " << iter << "th iter, coll_id = " << coll_id << " (" << int(rankCtx->hostBlkCount4Coll[coll_id]) << "), after get sqe, taskQLen = " << *getSlot(rankCtx->taskQLen4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", after done, unprogressed7SwitchCntIterDelta = " << *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", total unprogressed7SwitchCnt = " << *getSlot(rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", progressed7SwitchCntIterDelta = " << *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", total progressed7SwitchCnt = " << *getSlot(rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << std::endl;
         }
         file << std::endl;
       }
@@ -1497,6 +1502,8 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
     checkRuntime(cudaFreeHost(rankCtx->taskQLen4RankBlkIterColl));
     checkRuntime(cudaFreeHost(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl));
     checkRuntime(cudaFreeHost(rankCtx->progressed7SwitchCnt4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->progressed7SwitchCntTotal4RankBlkIterColl));
   #endif
 
   pthread_mutex_lock(&rankCtx->poller_mutex);

@@ -36,6 +36,8 @@ __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
 __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
 __constant__ int *collIdInSqe4RankBlkIterColl;
 __constant__ int *collId4Cq4RankBlkIterColl;
+__constant__ int *unprogressed7SwitchCntTotal4RankBlkIterColl;
+__constant__ int *progressed7SwitchCntTotal4RankBlkIterColl;
 __constant__ int numColl;
 #endif
 
@@ -607,7 +609,7 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
       *unprogressedCnt = 0; // 这表明有coll前进了，只不过没跑完。
       
       #ifdef SHOW_CNT
-        blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt++;
+        blkStatus.dynamicBlkStatus.totalProgressed7SwitchCnt++;
       #endif
       #ifdef DEBUG_CLOCK_3D
         blkStatus.progressed7SwitchCnt[collId]++;
@@ -673,14 +675,16 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
           int blk = blockIdx.x, iter = blkStatus.iterNum;
           *getSlot(unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.unprogressed7SwitchCntIterDelta[collId];
           *getSlot(progressed7SwitchCnt4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.progressed7SwitchCntIterDelta[collId];
+          *getSlot(unprogressed7SwitchCntTotal4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.unprogressed7SwitchCnt[collId];
+          *getSlot(progressed7SwitchCntTotal4RankBlkIterColl, blk, iter, collId, NUM_ITER, numColl) = blkStatus.progressed7SwitchCnt[collId];
           *getSlot(collId4Cq4RankBlkIterColl, blk, iter, i, NUM_ITER, numColl) = collId;
-          blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;  
-          blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
         #else
           if (thrdCudaDev == 1) {
             OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> done %dth iter, coll_id = %d (%d), progressed7SwitchCntIterDelta = %d, unprogressed7SwitchCntIterDelta = %d, progressed7SwitchCnt = %d, unprogressed7SwitchCnt = %d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.iterNum, collId, sharedBlkCount4CollAlign.blkCount4Coll[collId], blkStatus.progressed7SwitchCntIterDelta[collId], blkStatus.unprogressed7SwitchCntIterDelta[collId], blkStatus.progressed7SwitchCnt[collId], blkStatus.unprogressed7SwitchCnt[collId]);
           }
         #endif
+        blkStatus.unprogressed7SwitchCntIterDelta[collId] = 0;  
+        blkStatus.progressed7SwitchCntIterDelta[collId] = 0;
       }
       blkStatus.iterCqeCnt = 0;
       ++blkStatus.iterNum;
@@ -934,7 +938,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (tid == 0) {
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.totalCtxSaveCnt;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.totalCtxLoadCnt;
-        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt;
+        *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.totalProgressed7SwitchCnt;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.numActiveColls;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = unprogressedCnt;
         *(blkStatus.barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 38 * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt;
@@ -950,7 +954,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
       if (blkStatus.finallyQuit == 1) { // TODO: 还是不要在这里读host mem
         #ifdef SHOW_CNT
-          OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu (avg totalCtxSaveCnt: %llu), totalCtxLoadCnt=%llu (avg totalCtxLoadCnt: %llu), totalProgressed7SwithchCnt=%llu (avg totalProgressed7SwithchCnt: %llu), totalUnprogressed7SwitchCnt=%llu (avg totalUnprogressed7SwitchCnt: %llu), totalUnprogressedQuitCnt=%llu (avg totalUnprogressedQuitCnt: %llu)", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxSaveCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwithchCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalUnprogressed7SwitchCnt, blkStatus.dynamicBlkStatus.totalUnprogressed7SwitchCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt / NUM_ITER_ENV);
+          OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu (avg totalCtxSaveCnt: %llu), totalCtxLoadCnt=%llu (avg totalCtxLoadCnt: %llu), totalProgressed7SwitchCnt=%llu (avg totalProgressed7SwitchCnt: %llu), totalUnprogressed7SwitchCnt=%llu (avg totalUnprogressed7SwitchCnt: %llu), totalUnprogressedQuitCnt=%llu (avg totalUnprogressedQuitCnt: %llu)", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxSaveCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalProgressed7SwitchCnt, blkStatus.dynamicBlkStatus.totalProgressed7SwitchCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalUnprogressed7SwitchCnt, blkStatus.dynamicBlkStatus.totalUnprogressed7SwitchCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt / NUM_ITER_ENV);
         #endif
 
         #ifdef DEBUG_CLOCK

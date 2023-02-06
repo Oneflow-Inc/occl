@@ -53,6 +53,8 @@
     extern __constant__ int *taskQLen4RankBlkIterColl;
     extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
     extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+    extern __constant__ int *unprogressed7SwitchCntTotal4RankBlkIterColl;
+    extern __constant__ int *progressed7SwitchCntTotal4RankBlkIterColl;
     extern __constant__ int *collIdInSqe4RankBlkIterColl;
     extern __constant__ int *collId4Cq4RankBlkIterColl;
     extern __constant__ int numColl;
@@ -151,7 +153,7 @@ typedef struct alignas(16) {
   #ifdef SHOW_CNT
     unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
     unsigned long long int totalCtxLoadCnt;
-    unsigned long long int totalProgressed7SwithchCnt;
+    unsigned long long int totalProgressed7SwitchCnt;
     unsigned long long int totalUnprogressed7SwitchCnt;
     unsigned long long int totalUnprogressedQuitCnt;
   #endif

@@ -156,6 +156,8 @@ struct ofcclRankCtx {
     int *taskQLen4RankBlkIterColl;
     int *unprogressed7SwitchCnt4RankBlkIterColl;
     int *progressed7SwitchCnt4RankBlkIterColl;
+    int *unprogressed7SwitchCntTotal4RankBlkIterColl;
+    int *progressed7SwitchCntTotal4RankBlkIterColl;
     int *collIdInSqe4RankBlkIterColl;
     int *collId4Cq4RankBlkIterColl;
   #endif

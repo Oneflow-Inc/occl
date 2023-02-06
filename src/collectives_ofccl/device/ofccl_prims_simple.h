@@ -1,6 +1,7 @@
 #include "collectives_ofccl.h"
 #include "common_ofccl.h"
 #include "debug.h"
+#include <cstdint>
 
 //                                       NCCL_STEPS(8)/2=4     NCCL_STEPS/4=2         2
 // ringAllreduce里边，Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>;
@@ -93,7 +94,9 @@ class Primitives<
         connStepCache = *connStepPtr;
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
-        if (ctxSwitchCounter++ >= sharedCollCtx[currUsedSlotId].ctxSwitchThreshold) {
+        // TODO: 这里的逻辑还需要细化，传输开始之后我们希望等待和传输数据大小匹配的时间；如果只是单纯写成功，还不意味这传输开始。
+        int64_t switchThreshold = (sharedCollCtx[currUsedSlotId].progressed == 1) ? 10000 : sharedCollCtx[currUsedSlotId].ctxSwitchThreshold;
+        if (ctxSwitchCounter++ >= switchThreshold) {
           sharedCollCtx[currUsedSlotId].saveCtx7Quit = 1;
           sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain = 1;
 
