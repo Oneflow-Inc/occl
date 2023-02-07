@@ -18,11 +18,12 @@
 #define COLL_ID_MASK          0x00000000ffffffff
 #define COLL_ID_BIT           32
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
 // #define DEBUG_CLOCK_IO 1
-#define DEBUG_CLOCK_3D 1
+// #define DEBUG_CLOCK_3D 1
+// #define DEBUG_CLOCK_3D_HOST 1
 
 #define SHOW_CNT 1
 
@@ -47,6 +48,37 @@
     #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
     #define NUM_SHMEM_SLOT 1
     #define RESNET_COLL_CNT 161
+    #define NUM_ITER 20
+
+    extern __constant__ int *taskQLen4RankBlkIterColl;
+    extern __constant__ int *unprogressed7SwitchCnt4RankBlkIterColl;
+    extern __constant__ int *progressed7SwitchCnt4RankBlkIterColl;
+    extern __constant__ int *unprogressed7SwitchCntTotal4RankBlkIterColl;
+    extern __constant__ int *progressed7SwitchCntTotal4RankBlkIterColl;
+    extern __constant__ int *collIdInSqe4RankBlkIterColl;
+    extern __constant__ int *collId4Cq4RankBlkIterColl;
+    extern __constant__ int numColl;
+
+    inline __host__ __device__ int *getSlot(int *ptr, int blk, int iter, int coll_id, int numIter, int collCnt) {
+      return ptr + coll_id + iter * collCnt + blk * numIter * collCnt;
+    }
+    inline int getCollCnt4Blk(int blk) {
+      // 2card resnet
+      // if (blk == 0) {
+      //   return 161;
+      // } else if (blk == 1) {
+      //   return 52; // 1号block参加52个coll，包括需要2个block的coll和需要4个block的coll
+      // } else {
+      //   return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
+      // }
+
+      // 8card vit
+      if (blk == 0) {
+        return 85;
+      } else {
+        return 84;
+      }
+    }
   #endif
 #else
   #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
@@ -121,7 +153,7 @@ typedef struct alignas(16) {
   #ifdef SHOW_CNT
     unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
     unsigned long long int totalCtxLoadCnt;
-    unsigned long long int totalProgressed7SwithchCnt;
+    unsigned long long int totalProgressed7SwitchCnt;
     unsigned long long int totalUnprogressed7SwitchCnt;
     unsigned long long int totalUnprogressedQuitCnt;
   #endif
@@ -138,6 +170,10 @@ typedef struct alignas(16) {
 typedef struct alignas(16) {
   short activeCollIds[MAX_LENGTH];
 } ActiveCollIdsAlign;
+
+typedef struct alignas(16) {
+  char collTryCnt[MAX_LENGTH];
+} CollTryCntAlign;
 
 typedef struct alignas(16) {
   /* ****** 根据hasQuitted的值，决定重置还是从globalMem里读 ****** */
@@ -186,6 +222,10 @@ typedef struct alignas(16) {
       int iterSqNum;
       int collIdInSqe[RESNET_COLL_CNT];
       int taskQLenAfterGetSqe[RESNET_COLL_CNT];
+      int collId4Cq[RESNET_COLL_CNT];
+
+      int totalSqeCnt;
+      int totalCqeCnt;
     #endif
 
     #ifdef DEBUG_CLOCK_IO
@@ -221,6 +261,7 @@ typedef struct alignas(16) {
   // 这样的好处是以16B复制的时候，没有越界风险
   CollStatusAlign collStatusAlign;
   ActiveCollIdsAlign activeCollIdsAlign;
+  CollTryCntAlign collTryCntAllign;
 
 
   /* ****** 固定从globalMem里读 ****** */
@@ -228,6 +269,7 @@ typedef struct alignas(16) {
 
 
   /* ****** daemonKernel每次启动需要重置 ****** */
+  int willingnessToGetSqe;
   int currLoadedCollId;
   char quit;
   char finallyQuit;
@@ -301,7 +343,7 @@ typedef struct alignas(16) {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t BOUNS_SWITCH_4_PROCESSED_COLL);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t NUM_TRY_TASKQ_HEAD, const int64_t NUM_ITER_ENV);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****

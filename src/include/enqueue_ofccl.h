@@ -71,7 +71,8 @@ typedef struct {
   int64_t TRAVERSE_TIMES;
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
-  int64_t BOUNS_SWITCH_4_PROCESSED_COLL;
+  int64_t NUM_TRY_TASKQ_HEAD;
+  int64_t NUM_ITER_ENV;
 
   #ifdef DEBUG_CLOCK
     std::chrono::system_clock::time_point kernelStart;
@@ -114,7 +115,7 @@ struct ofcclRankCtx {
   dim3 gridDim4Coll[MAX_LENGTH];
   dim3 blockDim4Coll[MAX_LENGTH]; // TODO: 这个可能意义不大，考虑删掉。
 
-  void *argsptrs[18];
+  void *argsptrs[19];
   cudaStream_t kernelStream;
 
   CQE hostCqes[MAX_LENGTH];
@@ -145,10 +146,21 @@ struct ofcclRankCtx {
 
   unsigned long long int *barrierCnt;
   unsigned long long int *collCounters; // 设计为每个block，对每个coll，有一串数
-#ifdef ARRAY_DEBUG
-  pthread_t barrierCntPrinter;
-  BarrierCntPrinterArgs barrierCntPrinterArgs;
-#endif
+
+  #ifdef ARRAY_DEBUG
+    pthread_t barrierCntPrinter;
+    BarrierCntPrinterArgs barrierCntPrinterArgs;
+  #endif
+
+  #ifdef DEBUG_CLOCK_3D
+    int *taskQLen4RankBlkIterColl;
+    int *unprogressed7SwitchCnt4RankBlkIterColl;
+    int *progressed7SwitchCnt4RankBlkIterColl;
+    int *unprogressed7SwitchCntTotal4RankBlkIterColl;
+    int *progressed7SwitchCntTotal4RankBlkIterColl;
+    int *collIdInSqe4RankBlkIterColl;
+    int *collId4Cq4RankBlkIterColl;
+  #endif
 };
 
 

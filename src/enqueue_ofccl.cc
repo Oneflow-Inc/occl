@@ -21,6 +21,8 @@
 #include "transport.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring> // std::memcpy
 #include <fstream>
@@ -856,7 +858,19 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[14] = &args->TRAVERSE_TIMES;
   rankCtx->argsptrs[15] = &args->TOLERANT_UNPROGRESSED_CNT;
   rankCtx->argsptrs[16] = &args->BASE_CTX_SWITCH_THRESHOLD;
-  rankCtx->argsptrs[17] = &args->BOUNS_SWITCH_4_PROCESSED_COLL;
+  rankCtx->argsptrs[17] = &args->NUM_TRY_TASKQ_HEAD;
+  rankCtx->argsptrs[18] = &args->NUM_ITER_ENV;
+
+  #ifdef DEBUG_CLOCK_3D
+    cudaMemcpyToSymbol(&taskQLen4RankBlkIterColl, &rankCtx->taskQLen4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&unprogressed7SwitchCnt4RankBlkIterColl, &rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&progressed7SwitchCnt4RankBlkIterColl, &rankCtx->progressed7SwitchCnt4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&unprogressed7SwitchCntTotal4RankBlkIterColl, &rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&progressed7SwitchCntTotal4RankBlkIterColl, &rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&numColl, &rankCtx->collCount, sizeof(int));
+    cudaMemcpyToSymbol(&collIdInSqe4RankBlkIterColl, &rankCtx->collIdInSqe4RankBlkIterColl, sizeof(int *));
+    cudaMemcpyToSymbol(&collId4Cq4RankBlkIterColl, &rankCtx->collId4Cq4RankBlkIterColl, sizeof(int *));
+  #endif
 
   struct cudaLaunchParams daemonKernelParam;
   daemonKernelParam.func = (void *)daemonKernel;
@@ -866,6 +880,7 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   // daemonKernelParam.sharedMem = 60 * 1024 * MAX_LENGTH;
   daemonKernelParam.stream = rankCtx->kernelStream;
   daemonKernelParam.args = rankCtx->argsptrs;
+
 
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, sq @ %p, cq @ %p, globalCqes @ %p, globalBlkCount4Coll @ %p, func @ %p, stream @ %p, args @ %p, collCount=%d", pthread_self(), rankCtx->rank, rankCtx->sq, rankCtx->cq, rankCtx->globalCqes, rankCtx->globalBlkCount4Coll, daemonKernelParam.func, daemonKernelParam.stream, daemonKernelParam.args, rankCtx->collCount);
 
@@ -932,10 +947,6 @@ void *startPoller(void *args) {
 void *startKernel7SqObserver(void *args) {
   ofcclRankCtx *rankCtx = ((ObserverThrdArgs *)args)->rankCtx;
 
-  // #ifdef DEBUG_CLOCK
-  //   ((ObserverThrdArgs *)args)->kernelStart = std::chrono::high_resolution_clock::now();
-  // #endif
-
   while (true) {
     pthread_mutex_lock(&rankCtx->observer_mutex);
     pthread_cond_wait(&rankCtx->hasRemainingSqeCv, &rankCtx->observer_mutex);
@@ -945,12 +956,6 @@ void *startKernel7SqObserver(void *args) {
     checkRuntime(cudaStreamSynchronize(rankCtx->kernelStream)); // 阻塞等待kernel执行，就算不收SQE了，也反复等，直到kernel自己看到quit sqe，这应该对了，保证最终一致性。
     // OFCCL_LOG(OFCCL, "<%lu> Rank<%d>, kernel exits or not started, *rankCtx->finallyQuit = %d, rankCtx->remainingSqeCnt = %d", pthread_self(), rankCtx->rank, *rankCtx->finallyQuit, rankCtx->remainingSqeCnt);
     if (*rankCtx->finallyQuit) {
-      // #ifdef DEBUG_CLOCK
-      //   ((ObserverThrdArgs *)args)->kernelQuit = std::chrono::high_resolution_clock::now();
-      //   double deltaSec = std::chrono::duration_cast<std::chrono::duration<double>>(((ObserverThrdArgs *)args)->kernelQuit - ((ObserverThrdArgs *)args)->kernelStart).count();
-      //   OFCCL_LOG(OFCCL_DEBUG_TIME, "Rank<%d> CPU quit-start=%fus", rankCtx->rank, deltaSec * 1e6);
-      // #endif
-
       break;
     }
     startKernel(rankCtx, (ObserverThrdArgs *)args);
@@ -1122,7 +1127,7 @@ void *startBarrierCntPrinter(void *args) {
     for (int bid = 0; bid < rankCtx->daemonKernelGridDim.x; ++bid) {
       file << "Rank " << rankCtx->rank << " Block " << bid << " totalCtxSaveCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 33 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalCtxLoadCnt=" << 
-        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalProgressed7SwithchCnt=" << 
+        *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 34 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalProgressed7SwitchCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 35 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " numActiveColls=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 36 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " unprogressedCnt=" << 
         *(rankCtx->barrierCnt + 0 + 8 * BARCNT_INNER_SIZE + 37 * NUM_BARRIERS * BARCNT_INNER_SIZE + bid * rankCtx->daemonKernelBlockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) << " totalUnprogressedQuitCnt=" << 
@@ -1176,10 +1181,16 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
-  int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
+  int64_t NUM_TRY_TASKQ_HEAD = ParseIntegerFromEnv("NUM_TRY_TASKQ_HEAD", 5);
+  int64_t NUM_ITER_ENV = ParseIntegerFromEnv("NUM_ITER_ENV", 200);
 
   std::string DEBUG_FILE = GetStringFromEnv("DEBUG_FILE", "/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_") + std::to_string(rankCtx->rank) + ".log";
   strcpy(rankCtx->debugtFile, DEBUG_FILE.c_str());
+
+  #ifdef DEBUG_CLOCK_3D
+    int num_block;
+    int num_coll;
+  #endif
   
   // OFCCL_LOG(OFCCL_INFO, "Rank %d registers %d colls", rankCtx->rank, rankCtx->collCount);
 
@@ -1389,6 +1400,19 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
     rankCtx->noMoreSqes = 0;
   #endif
 
+  #ifdef DEBUG_CLOCK_3D
+    num_block = rankCtx->daemonKernelGridDim.x;
+    num_coll = rankCtx->collCount;
+    OFCCL_LOG(OFCCL, "num_block = %d, NUM_ITER = %d, num_coll = %d", num_block, NUM_ITER, num_coll);
+    checkRuntime(cudaMallocHost(&rankCtx->taskQLen4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCnt4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->collIdInSqe4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->collId4Cq4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+    checkRuntime(cudaMallocHost(&rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, num_block * NUM_ITER * num_coll * sizeof(int)));
+  #endif
+
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
 
@@ -1400,7 +1424,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL };
+  rankCtx->observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
   #ifdef ARRAY_DEBUG
@@ -1409,7 +1433,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #endif
 
   if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld, BOUNS_SWITCH_4_PROCESSED_COLL=%ld", TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL);
+    OFCCL_LOG(ENV, "TRAVERSE_TIMES=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld, NUM_TRY_TASKQ_HEAD=%ld", TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD);
   }
 end:
   return ret;
@@ -1424,8 +1448,9 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   int64_t TRAVERSE_TIMES = ParseIntegerFromEnv("TRAVERSE_TIMES", 10);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
-  int64_t BOUNS_SWITCH_4_PROCESSED_COLL = ParseIntegerFromEnv("BOUNS_SWITCH_4_PROCESSED_COLL", 100);
-  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, BOUNS_SWITCH_4_PROCESSED_COLL };
+  int64_t NUM_TRY_TASKQ_HEAD = ParseIntegerFromEnv("NUM_TRY_TASKQ_HEAD", 5);
+  int64_t NUM_ITER_ENV = ParseIntegerFromEnv("NUM_ITER_ENV", 200);
+  ObserverThrdArgs observerThrdArgs = { rankCtx, TRAVERSE_TIMES, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
 
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 
@@ -1454,6 +1479,32 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   pthread_join(rankCtx->kernel7SqObserver, nullptr);
   pthread_cond_destroy(&rankCtx->hasRemainingSqeCv);
   pthread_mutex_destroy(&rankCtx->observer_mutex);
+
+  #ifdef DEBUG_CLOCK_3D
+    int num_block = rankCtx->daemonKernelGridDim.x;
+    int num_coll = rankCtx->collCount;
+    std::ofstream clean(rankCtx->debugtFile, std::ios_base::out);
+    clean << "";
+    clean.close();
+    std::ofstream file(rankCtx->debugtFile, std::ios_base::app);
+
+    for (int iter = 0; iter < NUM_ITER; ++iter) {
+      file << "=================== " << iter << "th iter ===================" << std::endl;
+      for (int blk = 0; blk < num_block; ++blk) {
+        int collCnt4Blk = getCollCnt4Blk(blk);
+        for (int i = 0; i < collCnt4Blk; ++i) {
+          int coll_id = *getSlot(rankCtx->collIdInSqe4RankBlkIterColl, blk, iter, i, NUM_ITER, num_coll);
+          file << "Rank<" << rankCtx->rank << "> Blk<" << blk << "> in " << iter << "th iter, coll_id = " << coll_id << " (" << int(rankCtx->hostBlkCount4Coll[coll_id]) << "), after get sqe, taskQLen = " << *getSlot(rankCtx->taskQLen4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", after done, unprogressed7SwitchCntIterDelta = " << *getSlot(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", total unprogressed7SwitchCnt = " << *getSlot(rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", progressed7SwitchCntIterDelta = " << *getSlot(rankCtx->progressed7SwitchCnt4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << ", total progressed7SwitchCnt = " << *getSlot(rankCtx->progressed7SwitchCntTotal4RankBlkIterColl, blk, iter, coll_id, NUM_ITER, num_coll) << std::endl;
+        }
+        file << std::endl;
+      }
+    }
+    checkRuntime(cudaFreeHost(rankCtx->taskQLen4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->unprogressed7SwitchCnt4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->progressed7SwitchCnt4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->unprogressed7SwitchCntTotal4RankBlkIterColl));
+    checkRuntime(cudaFreeHost(rankCtx->progressed7SwitchCntTotal4RankBlkIterColl));
+  #endif
 
   pthread_mutex_lock(&rankCtx->poller_mutex);
   rankCtx->poll_stop = 1;
