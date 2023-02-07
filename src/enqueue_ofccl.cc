@@ -858,8 +858,8 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[14] = &args->TRAVERSE_TIMES;
   rankCtx->argsptrs[15] = &args->TOLERANT_UNPROGRESSED_CNT;
   rankCtx->argsptrs[16] = &args->BASE_CTX_SWITCH_THRESHOLD;
-  rankCtx->argsptrs[17] = &args->NUM_TRY_TASKQ_HEAD;
-  rankCtx->argsptrs[18] = &args->NUM_ITER_ENV;
+
+  cudaMemcpyToSymbol(&NUM_TRY_TASKQ_HEAD, &args->NUM_TRY_TASKQ_HEAD, sizeof(int64_t));
 
   #ifdef DEBUG_CLOCK_3D
     cudaMemcpyToSymbol(&taskQLen4RankBlkIterColl, &rankCtx->taskQLen4RankBlkIterColl, sizeof(int *));
@@ -870,6 +870,9 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
     cudaMemcpyToSymbol(&numColl, &rankCtx->collCount, sizeof(int));
     cudaMemcpyToSymbol(&collIdInSqe4RankBlkIterColl, &rankCtx->collIdInSqe4RankBlkIterColl, sizeof(int *));
     cudaMemcpyToSymbol(&collId4Cq4RankBlkIterColl, &rankCtx->collId4Cq4RankBlkIterColl, sizeof(int *));
+  #endif
+  #ifdef SHOW_CNT
+    cudaMemcpyToSymbol(&NUM_ITER_ENV, &args->NUM_ITER_ENV, sizeof(int64_t));
   #endif
 
   struct cudaLaunchParams daemonKernelParam;
