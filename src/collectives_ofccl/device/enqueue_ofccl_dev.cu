@@ -654,8 +654,9 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
   return;
 }
 
-static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalCollCtx4Blk7Coll, CollCtx *globalBlk2CollId2CollCtx) {
+static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollId, CQ *cq, CQE *globalCqes, CollCtx *globalBlk2CollId2CollCtx) {
 
+  CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + blockIdx.x * MAX_LENGTH + doneCollId;
   // 放在这里，让每个完成了coll的block都打印自己的情况，而不是只有最终写cqe的那个block才报告。
   #ifdef DEBUG_CLOCK_3D
     ++blkStatus.iterCqeCnt;
@@ -817,23 +818,21 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
         if (wid < sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.nWarps) {
           ofcclFuncs[sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
         }
-
-        // #ifdef DEBUG_CLOCK_3D
-        //   if (threadIdx.x == 0) {
-        //     if (blkStatus.collStatusAlign.collStatus[collId] == 2) {
-        //       // 为了严格按照coll完成的顺序把collId加入数组中，所以放到这里，现在已经确认了是保证顺序的。所以可以把这里挪回manipulateCQ7ResetDoneColl了。
-        //       blkStatus.collId4Cq[blkStatus.iterCqeCnt++] = collId;
-        //       ++blkStatus.totalCqeCnt;
-        //     }
-        //   }
-        // #endif
-        ofcclBarrier(3); // 跑完一个集合通信，同步一下。
+        ofcclBarrier(3);  // 跑完一个集合通信，同步一下。
         if (blkStatus.collStatusAlign.collStatus[collId] == 2) {
+          if (threadIdx.x == 0) {
+            *unprogressedCnt = 0;
+  
+            blkStatus.collTryCntAllign.collTryCnt[collId] = 0;
+  
+            manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalBlk2CollId2CollCtx);
+            // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
+          }
           break;
         }
       }
+      ofcclBarrier(3);
     }
-
   }
 
   #if defined(ARRAY_DEBUG)
@@ -884,20 +883,20 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] < 0) { // 不应该有1 的存在了，只有-1, -2或者2
             blkStatus.activeCollIdsAlign.activeCollIds[new_numActiveColls++] = collIdInTaskQ; // 小于0，就要继续放在taskQ里
 
-            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= getTryNum(i)) { // TODO: 这里是个bug
+            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= getTryNum(i)) { // TODO: 做一个新的函数判断stuck，现在这样循环一次任务列表肯定就算stuck了。
               ++numStuckColls;
             }
 
-          } else if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] == 2) {
-            unprogressedCnt = 0;
+          } 
+          // else if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] == 2) {
+          //   unprogressedCnt = 0;
 
-            blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] = 0;
-            // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, done, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatusAlign.collStatus[collIdInTaskQ]);
+          //   blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] = 0;
+          //   // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, done, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatusAlign.collStatus[collIdInTaskQ]);
 
-            CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collIdInTaskQ;
-            manipulateCQ7ResetDoneColl(thrdCudaDev, collIdInTaskQ, cq, globalCqes, globalCollCtx4Blk7Coll, globalBlk2CollId2CollCtx);
-            // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
-          }
+          //   manipulateCQ7ResetDoneColl(thrdCudaDev, collIdInTaskQ, cq, globalCqes, globalBlk2CollId2CollCtx);
+          //   // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
+          // }
 
           // 全部重置？还是只重置完成的？
           // blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] = 0;
