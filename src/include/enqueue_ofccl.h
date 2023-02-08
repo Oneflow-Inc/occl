@@ -69,6 +69,7 @@ typedef struct {
 typedef struct {
   ofcclRankCtx *rankCtx;
   int64_t RECV_SUCCESS_FACTOR;
+  int64_t RECV_SUCCESS_THRESHOLD;
   int64_t TOLERANT_UNPROGRESSED_CNT;
   int64_t BASE_CTX_SWITCH_THRESHOLD;
   int64_t NUM_TRY_TASKQ_HEAD;

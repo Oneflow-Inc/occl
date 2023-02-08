@@ -859,6 +859,8 @@ void startKernel(ofcclRankCtx *rankCtx, ObserverThrdArgs *args) {
   rankCtx->argsptrs[15] = &args->BASE_CTX_SWITCH_THRESHOLD;
 
   cudaMemcpyToSymbol(&NUM_TRY_TASKQ_HEAD, &args->NUM_TRY_TASKQ_HEAD, sizeof(int64_t));
+  cudaMemcpyToSymbol(&RECV_SUCCESS_FACTOR, &args->RECV_SUCCESS_FACTOR, sizeof(int64_t));
+  cudaMemcpyToSymbol(&RECV_SUCCESS_THRESHOLD, &args->RECV_SUCCESS_THRESHOLD, sizeof(int64_t));
 
   #ifdef DEBUG_CLOCK_3D
     cudaMemcpyToSymbol(&taskQLen4RankBlkIterColl, &rankCtx->taskQLen4RankBlkIterColl, sizeof(int *));
@@ -1181,6 +1183,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   
   // 超参数：
   int64_t RECV_SUCCESS_FACTOR = ParseIntegerFromEnv("RECV_SUCCESS_FACTOR", 5);
+  int64_t RECV_SUCCESS_THRESHOLD = ParseIntegerFromEnv("RECV_SUCCESS_THRESHOLD", 10000);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
   int64_t NUM_TRY_TASKQ_HEAD = ParseIntegerFromEnv("NUM_TRY_TASKQ_HEAD", 5);
@@ -1426,7 +1429,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   rankCtx->pollerArgs = { rankCtx };
   pthread_create(&rankCtx->poller, nullptr, startPoller, &rankCtx->pollerArgs);
 
-  rankCtx->observerThrdArgs = { rankCtx, RECV_SUCCESS_FACTOR, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
+  rankCtx->observerThrdArgs = { rankCtx, RECV_SUCCESS_FACTOR, RECV_SUCCESS_THRESHOLD, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
   pthread_create(&rankCtx->kernel7SqObserver, nullptr, startKernel7SqObserver, &rankCtx->observerThrdArgs);
 
   #ifdef ARRAY_DEBUG
@@ -1435,7 +1438,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   #endif
 
   if (SHOW_ALL_PREPARED_COLL) {
-    OFCCL_LOG(ENV, "RECV_SUCCESS_FACTOR=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld, NUM_TRY_TASKQ_HEAD=%ld", RECV_SUCCESS_FACTOR, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD);
+    OFCCL_LOG(ENV, "RECV_SUCCESS_FACTOR=%ld, RECV_SUCCESS_THRESHOLD=%ld, TOLERANT_UNPROGRESSED_CNT=%ld, BASE_CTX_SWITCH_THRESHOLD=%ld, NUM_TRY_TASKQ_HEAD=%ld", RECV_SUCCESS_FACTOR, RECV_SUCCESS_THRESHOLD, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD);
   }
 end:
   return ret;
@@ -1448,11 +1451,12 @@ ncclResult_t ofcclPrepareDone(ofcclRankCtx_t rankCtx) {
   ncclResult_t ret = ncclSuccess;
 
   int64_t RECV_SUCCESS_FACTOR = ParseIntegerFromEnv("RECV_SUCCESS_FACTOR", 5);
+  int64_t RECV_SUCCESS_THRESHOLD = ParseIntegerFromEnv("RECV_SUCCESS_THRESHOLD", 10000);
   int64_t TOLERANT_UNPROGRESSED_CNT = ParseIntegerFromEnv("TOLERANT_UNPROGRESSED_CNT", 500000);
   int64_t BASE_CTX_SWITCH_THRESHOLD = ParseIntegerFromEnv("BASE_CTX_SWITCH_THRESHOLD", 80);
   int64_t NUM_TRY_TASKQ_HEAD = ParseIntegerFromEnv("NUM_TRY_TASKQ_HEAD", 5);
   int64_t NUM_ITER_ENV = ParseIntegerFromEnv("NUM_ITER_ENV", 200);
-  ObserverThrdArgs observerThrdArgs = { rankCtx, RECV_SUCCESS_FACTOR, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
+  ObserverThrdArgs observerThrdArgs = { rankCtx, RECV_SUCCESS_FACTOR, RECV_SUCCESS_THRESHOLD, TOLERANT_UNPROGRESSED_CNT, BASE_CTX_SWITCH_THRESHOLD, NUM_TRY_TASKQ_HEAD, NUM_ITER_ENV };
 
   NCCLCHECKGOTO(ofcclFinalizeRankCtx7StartHostThrds(rankCtx), ret, end);
 

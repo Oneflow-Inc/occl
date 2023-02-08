@@ -20,6 +20,7 @@
 
 extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 extern __constant__ int64_t RECV_SUCCESS_FACTOR;
+extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
 // #define DEBUG_CLOCK 1
 
@@ -322,14 +323,15 @@ typedef struct alignas(16) {
   // TODO: 对LL、LL128的支持
 
 
-  /* ****** 每次执行需要重置 ****** */
+  /* ****** 每次执行前在maintainSharedCollCtx重置 ****** */
+  int64_t ctxSwitchThreshold;
+  int recvSuccess; // 这个关注在一次ofcclFunc的执行过程中，是否成功recv了peer的数据，用来作为调整黏性的依据。
   int saveCtx7Quit;
 
 
   /* ****** 每次load需要重置、加载 ****** */
   // ---- load的时候用常数重置 ----
-  int progressed;
-  int64_t ctxSwitchThreshold;
+  int progressed; // 这个主要关注在sharedCollCtx里加载好的collCtx的值有没有变化，即便只是send，那runRing里的step还是改了的。
   // ---- 只需要load，不需要save ----
   StaticCollCtx staticCollCtx;
   // ---- load、save的时候都需要和globalMem发生关系；完成的时候需要用0重置 ----

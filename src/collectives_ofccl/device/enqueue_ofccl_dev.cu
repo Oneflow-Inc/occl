@@ -43,6 +43,7 @@ __constant__ int numColl;
 
 __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 __constant__ int64_t RECV_SUCCESS_FACTOR;
+__constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
 #ifdef SHOW_CNT
 __constant__ int64_t NUM_ITER_ENV;
@@ -621,7 +622,9 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
     blkStatus.currLoadedCollId = collId; // 这个变量只起一个传递信息的作用了，不再标记shmem是否valid
     
     ++blkStatus.collTryCntAllign.collTryCnt[collId]; // tryCnt增加是不应该受干扰的行为。
-    getInitSwitchThreshold(collId, BASE_CTX_SWITCH_THRESHOLD);
+    getInitSwitchThreshold(collId, BASE_CTX_SWITCH_THRESHOLD); // 设置了sharedCollCtx[].ctxSwitchThreshold
+    sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit = 0;
+    sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].recvSuccess = 0;
 
     if (blkStatus.collStatusAlign.collStatus[collId] == -1) {
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId], sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold);
@@ -652,7 +655,6 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
     #endif
 
     blkStatus.collStatusAlign.collStatus[collId] = 1; // 每次准备执行的时候，重置为正常执行状态。新的coll已经是1，不过不要浪费if了。 
-    sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].saveCtx7Quit = 0; // 重置。
   }
 
   ofcclBarrier(4);
