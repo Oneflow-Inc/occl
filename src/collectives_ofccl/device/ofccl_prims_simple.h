@@ -99,6 +99,7 @@ class Primitives<
         if (ctxSwitchCounter++ >= switchThreshold) {
           sharedCollCtx[currUsedSlotId].saveCtx7Quit = 1;
           sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain = 1;
+          
 
           // if ((flags & (Recv*RoleWaitRecv))) {
           //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step + StepPerSlice);
