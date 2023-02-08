@@ -76,15 +76,27 @@ class Primitives<
     return flags & Aborted;
   }
 
+  template <int Recv>
+  __device__ __forceinline__ void udpateSwitchThreshold(int64_t ctxSwitchCounter) {
+    if (sharedCollCtx[currUsedSlotId].recvSuccess) {
+      sharedCollCtx[currUsedSlotId].ctxSwitchThreshold = (RECV_SUCCESS_FACTOR * ctxSwitchCounter > sharedCollCtx[currUsedSlotId].ctxSwitchThreshold) ? RECV_SUCCESS_FACTOR * ctxSwitchCounter : sharedCollCtx[currUsedSlotId].ctxSwitchThreshold;
+    }
+
+    // sharedCollCtx[currUsedSlotId].ctxSwitchThreshold = (sharedCollCtx[currUsedSlotId].progressed == 1) ?10000 : sharedCollCtx[currUsedSlotId].ctxSwitchThreshold;
+
+    // sharedCollCtx[currUsedSlotId].ctxSwitchThreshold = (sharedCollCtx[currUsedSlotId].recvSuccess == 1) ?10000 : sharedCollCtx[currUsedSlotId].ctxSwitchThreshold;
+  }
+
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t dstIx, intptr_t remoteIx, int offset, int nelts) {
     const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
     const bool noRecvWait = DirectRecv && Src && (flags & DirectRead);        // no wait when directly reading from remote input
     const bool noSendWait = DirectSend && (flags & (DirectRead|DirectWrite)); // no wait in empty send (e.g. directScatter) or direct remote write
+    
+    int64_t ctxSwitchCounter = 0;
     if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
         ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8 
       // int spins = 0;
-      unsigned long long int ctxSwitchCounter = 0;
 
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
 
@@ -94,11 +106,11 @@ class Primitives<
         connStepCache = *connStepPtr;
         // if (checkAbort(spins)) break; // nccl自己有个退出机制，不过没有保留上下文的功能，最终会设置到comm里的一个flag，用来告知用户abort了，去自行处理。
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
-        // TODO: 这里的逻辑还需要细化，传输开始之后我们希望等待和传输数据大小匹配的时间；如果只是单纯写成功，还不意味这传输开始。
-        int64_t switchThreshold = (sharedCollCtx[currUsedSlotId].progressed == 1) ? 10000 : sharedCollCtx[currUsedSlotId].ctxSwitchThreshold;
-        if (ctxSwitchCounter++ >= switchThreshold) {
+        
+        if (ctxSwitchCounter++ >= sharedCollCtx[currUsedSlotId].ctxSwitchThreshold) {
           sharedCollCtx[currUsedSlotId].saveCtx7Quit = 1;
           sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain = 1;
+          
 
           // if ((flags & (Recv*RoleWaitRecv))) {
           //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step + StepPerSlice);
@@ -118,6 +130,10 @@ class Primitives<
       // wait成功，在subBarrier和barrier之前，标记一下，保证后续的可见性。
       atomicOr(&sharedCollCtx[currUsedSlotId].progressed, (((flags & RoleWaitRecv) != 0) || ((!Recv) && ((flags & RoleWaitSend) != 0))));
       // 若RoleWaitRecv线程wait成功，那可以设置；若RoleWaitSend线程wait成功，只有在不需要recv的时候才可以设置；并且一旦设成1，就不再清零了。
+
+      atomicOr(&sharedCollCtx[currUsedSlotId].recvSuccess, (flags & (Recv*RoleWaitRecv)) != 0);
+
+      udpateSwitchThreshold<Recv>(ctxSwitchCounter);
 
       // if ((flags & (Recv*RoleWaitRecv))) {
       //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, progressed = %d, Send = %d, Recv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, sharedCollCtx[currUsedSlotId].progressed, Send, Recv);

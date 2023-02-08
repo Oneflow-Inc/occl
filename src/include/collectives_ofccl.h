@@ -18,6 +18,10 @@
 #define COLL_ID_MASK          0x00000000ffffffff
 #define COLL_ID_BIT           32
 
+extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
+extern __constant__ int64_t RECV_SUCCESS_FACTOR;
+extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
+
 // #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
@@ -26,6 +30,9 @@
 // #define DEBUG_CLOCK_3D_HOST 1
 
 #define SHOW_CNT 1
+#ifdef SHOW_CNT
+extern __constant__ int64_t NUM_ITER_ENV;
+#endif
 
 // #define ARRAY_DEBUG 1
 
@@ -316,14 +323,15 @@ typedef struct alignas(16) {
   // TODO: 对LL、LL128的支持
 
 
-  /* ****** 每次执行需要重置 ****** */
+  /* ****** 每次执行前在maintainSharedCollCtx重置 ****** */
+  int64_t ctxSwitchThreshold;
+  int recvSuccess; // 这个关注在一次ofcclFunc的执行过程中，是否成功recv了peer的数据，用来作为调整黏性的依据。
   int saveCtx7Quit;
 
 
   /* ****** 每次load需要重置、加载 ****** */
   // ---- load的时候用常数重置 ----
-  int progressed;
-  int64_t ctxSwitchThreshold;
+  int progressed; // 这个主要关注在sharedCollCtx里加载好的collCtx的值有没有变化，即便只是send，那runRing里的step还是改了的。
   // ---- 只需要load，不需要save ----
   StaticCollCtx staticCollCtx;
   // ---- load、save的时候都需要和globalMem发生关系；完成的时候需要用0重置 ----
@@ -343,7 +351,7 @@ typedef struct alignas(16) {
 
 } CollCtx;
 
-extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TRAVERSE_TIMES, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD, const int64_t NUM_TRY_TASKQ_HEAD, const int64_t NUM_ITER_ENV);
+extern __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE *globalCqes, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, int *finallyQuit, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters, const int64_t TOLERANT_UNPROGRESSED_CNT, const int64_t BASE_CTX_SWITCH_THRESHOLD);
 // ***** 先不要定义ofccl版本的ncclDevRedOp_t, ncclDevRedOpFull, 这个在其他地方有使用 *****
 
 // ***** 保留FUNC_INDEX *****
