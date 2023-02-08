@@ -55,6 +55,12 @@ inline __device__ int getTryNum(int posInTaskQ) {
   return 1;
 }
 
+inline __device__ void getInitSwitchThreshold(int collId, int64_t BASE_CTX_SWITCH_THRESHOLD) {
+  // 这个行为到底有没有意义？或许可以讨论下。
+  int tryCnt =  min(int(blkStatus.collTryCntAllign.collTryCnt[collId]), int(NUM_TRY_TASKQ_HEAD));
+  sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD * tryCnt;
+}
+
 static __device__ int sqRead(SQ *sq, SQE *target, int thrdCudaDev) {
 
   unsigned long long int currSqFrontier = blkStatus.dynamicBlkStatus.sqReadFrontier;
@@ -614,9 +620,8 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
   if (tid == 0) {
     blkStatus.currLoadedCollId = collId; // 这个变量只起一个传递信息的作用了，不再标记shmem是否valid
     
-    // 对ctxSwitchThreshold的设置不再依赖collStaus，而是统一根据tryCnt计算。
-    blkStatus.collTryCntAllign.collTryCnt[collId] = min(int(blkStatus.collTryCntAllign.collTryCnt[collId] + 1), int(NUM_TRY_TASKQ_HEAD));
-    sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = BASE_CTX_SWITCH_THRESHOLD * blkStatus.collTryCntAllign.collTryCnt[collId];
+    ++blkStatus.collTryCntAllign.collTryCnt[collId]; // tryCnt增加是不应该受干扰的行为。
+    getInitSwitchThreshold(collId, BASE_CTX_SWITCH_THRESHOLD);
 
     if (blkStatus.collStatusAlign.collStatus[collId] == -1) {
       // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold = %ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId], sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].ctxSwitchThreshold);
@@ -883,27 +888,18 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] < 0) { // 不应该有1 的存在了，只有-1, -2或者2
             blkStatus.activeCollIdsAlign.activeCollIds[new_numActiveColls++] = collIdInTaskQ; // 小于0，就要继续放在taskQ里
 
-            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= getTryNum(i)) { // TODO: 做一个新的函数判断stuck，现在这样循环一次任务列表肯定就算stuck了。
+            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= getTryNum(i)) { // TODO: 做一个新的函数判断stuck，现在这样循环一次任务列表肯定就算stuck了。 // 不过目前不太好完全解耦。
               ++numStuckColls;
             }
 
-          } 
-          // else if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] == 2) {
-          //   unprogressedCnt = 0;
-
-          //   blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] = 0;
-          //   // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d> coll_id = %d, blkStatus.collStatusAlign.collStatus is %d, done, reset nprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, collIdInTaskQ, blkStatus.collStatusAlign.collStatus[collIdInTaskQ]);
-
-          //   manipulateCQ7ResetDoneColl(thrdCudaDev, collIdInTaskQ, cq, globalCqes, globalBlk2CollId2CollCtx);
-          //   // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
-          // }
+          }
 
           // 全部重置？还是只重置完成的？
           // blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] = 0;
         }
         blkStatus.dynamicBlkStatus.numActiveColls = new_numActiveColls;
         if (numStuckColls == new_numActiveColls) {
-          blkStatus.willingnessToGetSqe = 1;
+          blkStatus.willingnessToGetSqe = 1; // TODO: 目前不太好完全解耦。
         }
         #ifdef CQE_DEBUG_ALL_RANK
           logTaskQ(1, thrdCudaDev, -1);
