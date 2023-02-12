@@ -41,7 +41,7 @@ extern __constant__ int64_t NUM_ITER_ENV;
   #define NUM_SHMEM_SLOT 1
 
   #ifdef DEBUG_CLOCK_TRAIN
-    #define RECORD_ITER 4
+    #define RECORD_ITER 2
     #define SKIP_WARMUP_ITER 0
     #define MAX_LENGTH 162LL // 受到0xc000 shmem的限制
   #endif
