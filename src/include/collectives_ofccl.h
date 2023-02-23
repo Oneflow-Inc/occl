@@ -160,8 +160,8 @@ typedef struct alignas(16) {
   #ifdef SHOW_CNT
     unsigned long long int totalCtxSaveCnt; // 统计信息，测量绝对性能的时候考虑删掉。
     unsigned long long int totalCtxLoadCnt;
-    unsigned long long int totalProgressed7SwitchCnt;
-    unsigned long long int totalUnprogressed7SwitchCnt;
+    unsigned long long int totalSwitchCntAfterRecvSuccess;
+    unsigned long long int totalSwitchCntBeforeRecvSuccess;
     unsigned long long int totalUnprogressedQuitCnt;
   #endif
   unsigned int cqCnt[MAX_LENGTH];
@@ -219,10 +219,10 @@ typedef struct alignas(16) {
     #endif
 
     #ifdef DEBUG_CLOCK_3D
-      int progressed7SwitchCnt[MAX_LENGTH];
-      int unprogressed7SwitchCnt[MAX_LENGTH];
-      int progressed7SwitchCntIterDelta[MAX_LENGTH];
-      int unprogressed7SwitchCntIterDelta[MAX_LENGTH];
+      int switchCntAfterRecvSuccess[MAX_LENGTH];
+      int switchCntBeforeRecvSuccess[MAX_LENGTH];
+      int switchCntAfterRecvSuccessIterDelta[MAX_LENGTH];
+      int switchCntBeforeRecvSuccessIterDelta[MAX_LENGTH];
       int iterCqeCnt;
       int iterNum;
       int iterSqeCnt;
