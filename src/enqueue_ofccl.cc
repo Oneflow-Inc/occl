@@ -1315,6 +1315,9 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // 当前线程管理单独一个设备，所以用同步的malloc、memcpy应该是可以的。
 
   // OFCCL_LOG(OFCCL, "<%lu> device %d participate in %d colls, rankCtx->daemonKernelGridDim.x=%d, rankCtx->daemonKernelBlockDim.x=%d, sizeof(CollCtx)=%lu, sizeof(CollCtxGroup)=%lu, offsetof(struct CollCtx, redOpArgs)=%lu, sizeof(ncclDevComm)=%lu, sizeof(ncclChannel)=%lu, sizeof(ncclWork)=%lu, sizeof(struct ncclWorkElem)=%lu, sizeof(struct ncclWorkElemHeader)=%lu alignof(ncclDevComm)=%lu, alignof(ncclChannel)=%lu, alignof(CollCtx)=%lu, sizeof(DynamicBlkStatus)=%lu, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, alignof(DynamicCollCtx)=%lu", pthread_self(), rankCtx->rank, rankCtx->collCount, rankCtx->daemonKernelGridDim.x, rankCtx->daemonKernelBlockDim.x, sizeof(CollCtx), sizeof(CollCtxGroup), offsetof(CollCtx, redOpArgs), sizeof(ncclDevComm), sizeof(ncclChannel), sizeof(ncclWork), sizeof(struct ncclWorkElem), sizeof(struct ncclWorkElemHeader), alignof(ncclDevComm), alignof(ncclChannel), alignof(CollCtx), sizeof(DynamicBlkStatus), sizeof(StaticCollCtx), sizeof(DynamicCollCtx), alignof(DynamicCollCtx));
+
+  // OFCCL_LOG(OFCCL, "SharedMem size: MAX_LENGTH=%lld, NUM_SHMEM_SLOT=%d, sizeof(CollCtx)=%ld, sizeof(BlkStatus)=%ld, sizeof(BlkCount4CollAlign)=%ld, totally=%ld", MAX_LENGTH, NUM_SHMEM_SLOT, sizeof(CollCtx), sizeof(BlkStatus), sizeof(BlkCount4CollAlign), sizeof(CollCtx)*NUM_SHMEM_SLOT + sizeof(BlkStatus) + sizeof(BlkCount4CollAlign) + sizeof(int) + sizeof(unsigned long long int) * 2);
+
   #ifdef DEBUG_CLOCK
     if (rankCtx->rank == 0) {
       OFCCL_LOG(OFCCL_DEBUG_TIME, "nBlocks = %d", rankCtx->daemonKernelGridDim.x);
@@ -1420,6 +1423,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
 
   // make sure Memcpy to globalBlkCount4Coll finish
   checkRuntime(cudaDeviceSynchronize());
+
+  // OFCCL_LOG(OFCCL, "GlobalMem Size: MAX_LENGTH=%lld, rankCtx->daemonKernelGridDim.x = %d, all blocks: %llu, each block: %llu", MAX_LENGTH, rankCtx->daemonKernelGridDim.x, MAX_LENGTH * sizeof(CQE) + MAX_LENGTH * sizeof(char) + MAX_LENGTH * sizeof(short), MAX_LENGTH * sizeof(CollCtx) + sizeof(BlkStatus));
 
   rankCtx->remainingSqeCnt = 0;
   pthread_mutex_init(&rankCtx->observer_mutex, nullptr);

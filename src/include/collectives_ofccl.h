@@ -182,6 +182,15 @@ typedef struct alignas(16) {
   char collTryCnt[MAX_LENGTH];
 } CollTryCntAlign;
 
+
+typedef struct alignas(16) {
+  short collIds[MAX_LENGTH];
+} IdsAlign;
+
+typedef struct alignas(16) {
+  char blkCount4Coll[MAX_LENGTH];
+} BlkCount4CollAlign;
+
 typedef struct alignas(16) {
   /* ****** 根据hasQuitted的值，决定重置还是从globalMem里读 ****** */
   DynamicBlkStatus dynamicBlkStatus;
