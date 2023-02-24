@@ -22,12 +22,14 @@ extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 extern __constant__ int64_t RECV_SUCCESS_FACTOR;
 extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
-// #define DEBUG_CLOCK 1
+#define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
-// #define DEBUG_CLOCK_IO 1
+#define DEBUG_CLOCK_IO 1
 // #define DEBUG_CLOCK_3D 1
 // #define DEBUG_CLOCK_3D_HOST 1
+
+#define DEBUG_CLOCK_CTX 1 // 依赖于DEBUG_CLOCK_IO
 
 #define SHOW_CNT 1
 #ifdef SHOW_CNT
@@ -257,6 +259,9 @@ typedef struct alignas(16) {
       int getSqeIter;
       long long int getSqeClock[RECORD_ITER];
 
+      long long int beforeOfcclFuncClock[RECORD_ITER];
+      long long int afterGetSqeBeforeOfcclFuncDeltaClock[RECORD_ITER];
+
       long long int beforePutCqeClock[RECORD_ITER];
 
       long long int putCqeClock[RECORD_ITER];
@@ -268,6 +273,14 @@ typedef struct alignas(16) {
 
       int sqReadCnt;
       int cqWriteCnt;
+
+      #ifdef DEBUG_CLOCK_CTX
+        long long int beforeLoadClock[RECORD_ITER];
+        long long int afterLoadDeltaClock[RECORD_ITER];
+        long long int beforeSaveClock[RECORD_ITER];
+        long long int afterSaveDeltaClock[RECORD_ITER];
+      #endif
+
     #endif
 
   #endif

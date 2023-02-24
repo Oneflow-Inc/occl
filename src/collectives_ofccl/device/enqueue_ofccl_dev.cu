@@ -295,6 +295,17 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
             blkStatus.afterAddSqFrontierCounterDeltaClock[j] = 0;
             blkStatus.afterUpdateSqHeadDeltaClock[j] = 0;
             blkStatus.afterRecordBuffDeltaClock[j] = 0;
+
+            blkStatus.beforeOfcclFuncClock[j] = 0;
+            blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j] = 0;
+
+            #ifdef DEBUG_CLOCK_CTX
+              blkStatus.beforeLoadClock[j] = 0;
+              blkStatus.afterLoadDeltaClock[j] = 0;
+              blkStatus.beforeSaveClock[j] = 0;
+              blkStatus.afterSaveDeltaClock[j] = 0;
+            #endif
+
           }
           blkStatus.sqReadCnt = 0;
           blkStatus.cqWriteCnt = 0;
@@ -367,6 +378,16 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
               blkStatus.afterAddSqFrontierCounterDeltaClock[j] = myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j];
               blkStatus.afterUpdateSqHeadDeltaClock[j] = myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j];
               blkStatus.afterRecordBuffDeltaClock[j] = myGlobalBlkStatus->afterRecordBuffDeltaClock[j];
+
+              blkStatus.beforeOfcclFuncClock[j] = myGlobalBlkStatus->beforeOfcclFuncClock[j];
+              blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j] = myGlobalBlkStatus->afterGetSqeBeforeOfcclFuncDeltaClock[j];
+
+              #ifdef DEBUG_CLOCK_CTX
+                blkStatus.beforeLoadClock[j] = myGlobalBlkStatus->beforeLoadClock[j];
+                blkStatus.afterLoadDeltaClock[j] = myGlobalBlkStatus->afterLoadDeltaClock[j];
+                blkStatus.beforeSaveClock[j] = myGlobalBlkStatus->beforeSaveClock[j];
+                blkStatus.afterSaveDeltaClock[j] = myGlobalBlkStatus->afterSaveDeltaClock[j];
+              #endif
             }
             blkStatus.beforeGetSqeIter = myGlobalBlkStatus->beforeGetSqeIter;
             blkStatus.getSqeIter = myGlobalBlkStatus->getSqeIter;
@@ -809,6 +830,17 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
         // ***** 然后调用ofcclFunc *****
         int wid = threadIdx.x / WARP_SIZE;
         if (wid < sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.nWarps) {
+
+          #ifdef DEBUG_CLOCK_IO
+            if (threadIdx.x == 0) {
+              if (blkStatus.beforeGetSqeIter >= SKIP_WARMUP_ITER + 1) {
+                int iter = (blkStatus.beforeGetSqeIter - SKIP_WARMUP_ITER - 1) % RECORD_ITER;
+                blkStatus.beforeOfcclFuncClock[iter] = clock64();
+                blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[iter] = calcDeltaClock(blkStatus.getSqeClock[iter], blkStatus.beforeOfcclFuncClock[iter]);
+              }
+            }
+          #endif
+
           ofcclFuncs[sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
         }
         ofcclBarrier(3);  // 跑完一个集合通信，同步一下。
@@ -1127,6 +1159,13 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, RecordBuffDelta = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.afterRecordBuffDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterRecordBuffDeltaClock[4]/CLOCK2US_FACTOR);
               OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, RecordBuffDelta AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
 
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, afterGetSqeBeforeOfcclFuncDeltaClock = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, afterGetSqeBeforeOfcclFuncDeltaClock AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
 
               int putCqeCnt;
               int putCqeCnt_adjust;
@@ -1239,6 +1278,16 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
                 myGlobalBlkStatus->afterAddSqFrontierCounterDeltaClock[j] = blkStatus.afterAddSqFrontierCounterDeltaClock[j];
                 myGlobalBlkStatus->afterUpdateSqHeadDeltaClock[j] = blkStatus.afterUpdateSqHeadDeltaClock[j];
                 myGlobalBlkStatus->afterRecordBuffDeltaClock[j] = blkStatus.afterRecordBuffDeltaClock[j];
+
+                myGlobalBlkStatus->beforeOfcclFuncClock[j] = blkStatus.beforeOfcclFuncClock[j];
+                myGlobalBlkStatus->afterGetSqeBeforeOfcclFuncDeltaClock[j] = blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j];
+
+                #ifdef DEBUG_CLOCK_CTX
+                  myGlobalBlkStatus->beforeLoadClock[j] = blkStatus.beforeLoadClock[j];
+                  myGlobalBlkStatus->afterLoadDeltaClock[j] = blkStatus.afterLoadDeltaClock[j];
+                  myGlobalBlkStatus->beforeSaveClock[j] = blkStatus.beforeSaveClock[j];
+                  myGlobalBlkStatus->afterSaveDeltaClock[j] = blkStatus.afterSaveDeltaClock[j];
+                #endif
               }
               myGlobalBlkStatus->beforeGetSqeIter = blkStatus.beforeGetSqeIter;
               myGlobalBlkStatus->getSqeIter = blkStatus.getSqeIter;
