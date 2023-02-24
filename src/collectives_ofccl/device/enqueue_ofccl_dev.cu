@@ -298,18 +298,22 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
 
             blkStatus.beforeOfcclFuncClock[j] = 0;
             blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j] = 0;
-
-            #ifdef DEBUG_CLOCK_CTX
-              blkStatus.beforeLoadClock[j] = 0;
-              blkStatus.afterLoadDeltaClock[j] = 0;
-              blkStatus.beforeSaveClock[j] = 0;
-              blkStatus.afterSaveDeltaClock[j] = 0;
-            #endif
-
           }
           blkStatus.sqReadCnt = 0;
           blkStatus.cqWriteCnt = 0;
         #endif
+
+        #ifdef DEBUG_CLOCK_CTX
+          for (int j = 0; j < RECORD_ITER; ++j) {
+            blkStatus.beforeLoadClock[j] = 0;
+            blkStatus.afterLoadDeltaClock[j] = 0;
+            blkStatus.beforeSaveClock[j] = 0;
+            blkStatus.afterSaveDeltaClock[j] = 0;
+          }
+          blkStatus.loadIter = 0;
+          blkStatus.saveIter = 0;
+        #endif
+
       ONE_THRD_DO_END
     #endif
 
@@ -381,19 +385,22 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
 
               blkStatus.beforeOfcclFuncClock[j] = myGlobalBlkStatus->beforeOfcclFuncClock[j];
               blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j] = myGlobalBlkStatus->afterGetSqeBeforeOfcclFuncDeltaClock[j];
-
-              #ifdef DEBUG_CLOCK_CTX
-                blkStatus.beforeLoadClock[j] = myGlobalBlkStatus->beforeLoadClock[j];
-                blkStatus.afterLoadDeltaClock[j] = myGlobalBlkStatus->afterLoadDeltaClock[j];
-                blkStatus.beforeSaveClock[j] = myGlobalBlkStatus->beforeSaveClock[j];
-                blkStatus.afterSaveDeltaClock[j] = myGlobalBlkStatus->afterSaveDeltaClock[j];
-              #endif
             }
             blkStatus.beforeGetSqeIter = myGlobalBlkStatus->beforeGetSqeIter;
             blkStatus.getSqeIter = myGlobalBlkStatus->getSqeIter;
 
             blkStatus.sqReadCnt = myGlobalBlkStatus->sqReadCnt;
             blkStatus.cqWriteCnt = myGlobalBlkStatus->cqWriteCnt;
+          #endif
+          #ifdef DEBUG_CLOCK_CTX
+            for (int j = 0; j < RECORD_ITER; ++j) {
+              blkStatus.beforeLoadClock[j] = myGlobalBlkStatus->beforeLoadClock[j];
+              blkStatus.afterLoadDeltaClock[j] = myGlobalBlkStatus->afterLoadDeltaClock[j];
+              blkStatus.beforeSaveClock[j] = myGlobalBlkStatus->beforeSaveClock[j];
+              blkStatus.afterSaveDeltaClock[j] = myGlobalBlkStatus->afterSaveDeltaClock[j];
+            }
+            blkStatus.loadIter = myGlobalBlkStatus->loadIter;
+            blkStatus.saveIter = myGlobalBlkStatus->saveIter;
           #endif
         ONE_THRD_DO_END
     #endif
@@ -627,14 +634,46 @@ static __device__ void maintainSharedCollCtx(int thrdCudaDev, CollCtx *globalBlk
     // bugfix: save的时候，不应该save到即将load的coll的global collCtx副本里。
     CollCtx *globalCollCtx4Blk7OldColl = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collIdOfThatSlot;
 
+    #ifdef DEBUG_CLOCK_CTX
+      if (threadIdx.x == 0) {
+        int iter = (blkStatus.saveIter) % RECORD_ITER;
+        blkStatus.beforeSaveClock[iter] = clock64();
+      }
+    #endif
+
     saveExcutingCollCtx(thrdCudaDev, globalCollCtx4Blk7OldColl, collIdOfThatSlot);
+
+    #ifdef DEBUG_CLOCK_CTX
+      if (threadIdx.x == 0) {
+        int iter = (blkStatus.saveIter) % RECORD_ITER;
+        long long int afterSaveClock = clock64();
+        blkStatus.afterSaveDeltaClock[iter] = calcDeltaClock(blkStatus.beforeSaveClock[iter], afterSaveClock);
+        ++blkStatus.saveIter;
+      }
+    #endif
 
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> save ctx for coll_id = %d, slice4SimpleGenericOp=%d, offset4SimpleGenericOp=%d, currentStep4RunRing=%d, gridOffset4RunRing=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collIdOfThatSlot, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RunRing, sharedCollCtx[collIdOfThatSlot % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RunRing);
   }
 
   if (needLoad) {
+    #ifdef DEBUG_CLOCK_CTX
+      if (threadIdx.x == 0) {
+        int iter = (blkStatus.loadIter) % RECORD_ITER;
+        blkStatus.beforeLoadClock[iter] = clock64();
+      }
+    #endif
+
     CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + collId;
     loadCollCtx(thrdCudaDev, globalCollCtx4Blk7Coll, collId, BASE_CTX_SWITCH_THRESHOLD);
+
+    #ifdef DEBUG_CLOCK_CTX
+      if (threadIdx.x == 0) {
+        int iter = (blkStatus.loadIter) % RECORD_ITER;
+        long long int afterLoadClock = clock64();
+        blkStatus.afterLoadDeltaClock[iter] = calcDeltaClock(blkStatus.beforeLoadClock[iter], afterLoadClock);
+        ++blkStatus.loadIter;
+      }
+    #endif
 
     // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> load ctx for coll_id = %d, loadAgain=%d, slice4SimpleGenericOp=%d, offset4SimpleGenericOp=%d, currentStep4RunRing=%d, gridOffset4RunRing=%ld", thrdCudaDev, blockIdx.x, threadIdx.x, collId, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.loadAgain, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.slice4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.offset4SimpleGenericOp, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.currentStep4RunRing, sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx.gridOffset4RunRing);
   }
@@ -1101,6 +1140,26 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
               }
             #endif
 
+            #ifdef DEBUG_CLOCK_CTX
+            long long int totalDeltaClock = 0;
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>, loadIter=%d", thrdCudaDev, bid, tid, blkStatus.loadIter);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterLoadDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, LoadDeltaClock = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.afterLoadDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterLoadDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterLoadDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterLoadDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterLoadDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, LoadDeltaClock AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d>", thrdCudaDev, bid, tid);
+              totalDeltaClock = 0;
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                totalDeltaClock += blkStatus.afterSaveDeltaClock[j];
+              }
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, SaveDeltaClock = %.2lf\t%.2lf\t%.2lf\t%.2lf\t%.2lf", thrdCudaDev, bid, tid, blkStatus.afterSaveDeltaClock[0]/CLOCK2US_FACTOR, blkStatus.afterSaveDeltaClock[1]/CLOCK2US_FACTOR, blkStatus.afterSaveDeltaClock[2]/CLOCK2US_FACTOR, blkStatus.afterSaveDeltaClock[3]/CLOCK2US_FACTOR, blkStatus.afterSaveDeltaClock[4]/CLOCK2US_FACTOR);
+              OFCCL_LOG_RANK_0(OFCCL_DEBUG_TIME, "Rank<%d> Blk<%d> Thrd<%d> coll_id = 0, SaveDeltaClock AVG = %.2lf us, weight = %d", thrdCudaDev, bid, tid, totalDeltaClock/RECORD_ITER/CLOCK2US_FACTOR, RECORD_ITER);
+              
+            #endif
+
             #ifdef DEBUG_CLOCK_IO
               long long int totalDeltaClock = 0;
               int commitSqeCnt;
@@ -1281,19 +1340,23 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
                 myGlobalBlkStatus->beforeOfcclFuncClock[j] = blkStatus.beforeOfcclFuncClock[j];
                 myGlobalBlkStatus->afterGetSqeBeforeOfcclFuncDeltaClock[j] = blkStatus.afterGetSqeBeforeOfcclFuncDeltaClock[j];
-
-                #ifdef DEBUG_CLOCK_CTX
-                  myGlobalBlkStatus->beforeLoadClock[j] = blkStatus.beforeLoadClock[j];
-                  myGlobalBlkStatus->afterLoadDeltaClock[j] = blkStatus.afterLoadDeltaClock[j];
-                  myGlobalBlkStatus->beforeSaveClock[j] = blkStatus.beforeSaveClock[j];
-                  myGlobalBlkStatus->afterSaveDeltaClock[j] = blkStatus.afterSaveDeltaClock[j];
-                #endif
               }
               myGlobalBlkStatus->beforeGetSqeIter = blkStatus.beforeGetSqeIter;
               myGlobalBlkStatus->getSqeIter = blkStatus.getSqeIter;
 
               myGlobalBlkStatus->sqReadCnt = blkStatus.sqReadCnt;
               myGlobalBlkStatus->cqWriteCnt = blkStatus.cqWriteCnt;
+            #endif
+
+            #ifdef DEBUG_CLOCK_CTX
+              for (int j = 0; j < RECORD_ITER; ++j) {
+                myGlobalBlkStatus->beforeLoadClock[j] = blkStatus.beforeLoadClock[j];
+                myGlobalBlkStatus->afterLoadDeltaClock[j] = blkStatus.afterLoadDeltaClock[j];
+                myGlobalBlkStatus->beforeSaveClock[j] = blkStatus.beforeSaveClock[j];
+                myGlobalBlkStatus->afterSaveDeltaClock[j] = blkStatus.afterSaveDeltaClock[j];
+              }
+              myGlobalBlkStatus->loadIter = blkStatus.loadIter;
+              myGlobalBlkStatus->saveIter = blkStatus.saveIter;
             #endif
           ONE_THRD_DO_END
         #endif

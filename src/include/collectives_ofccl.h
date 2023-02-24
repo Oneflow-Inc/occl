@@ -22,14 +22,14 @@ extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 extern __constant__ int64_t RECV_SUCCESS_FACTOR;
 extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
-#define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_IO 1
 // #define DEBUG_CLOCK_3D 1
 // #define DEBUG_CLOCK_3D_HOST 1
 
-#define DEBUG_CLOCK_CTX 1 // 依赖于DEBUG_CLOCK_IO
+// #define DEBUG_CLOCK_CTX 1 // 独立，不依赖DEBUG_CLOCK_IO
 
 #define SHOW_CNT 1
 #ifdef SHOW_CNT
@@ -51,6 +51,10 @@ extern __constant__ int64_t NUM_ITER_ENV;
     #define RECORD_ITER 5
     #define SKIP_WARMUP_ITER 3
     #define MAX_LENGTH 2LL // 受到0xc000 shmem的限制
+  #endif
+  #ifdef DEBUG_CLOCK_CTX
+    #define RECORD_ITER 5
+    #define MAX_LENGTH 10LL // 受到0xc000 shmem的限制
   #endif
   #ifdef DEBUG_CLOCK_3D
     #define SKIP_WARMUP_ITER 0
@@ -273,14 +277,15 @@ typedef struct alignas(16) {
 
       int sqReadCnt;
       int cqWriteCnt;
+    #endif
 
-      #ifdef DEBUG_CLOCK_CTX
-        long long int beforeLoadClock[RECORD_ITER];
-        long long int afterLoadDeltaClock[RECORD_ITER];
-        long long int beforeSaveClock[RECORD_ITER];
-        long long int afterSaveDeltaClock[RECORD_ITER];
-      #endif
-
+    #ifdef DEBUG_CLOCK_CTX
+      int loadIter;
+      int saveIter;
+      long long int beforeLoadClock[RECORD_ITER];
+      long long int afterLoadDeltaClock[RECORD_ITER];
+      long long int beforeSaveClock[RECORD_ITER];
+      long long int afterSaveDeltaClock[RECORD_ITER];
     #endif
 
   #endif
