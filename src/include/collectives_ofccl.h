@@ -22,10 +22,10 @@ extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 extern __constant__ int64_t RECV_SUCCESS_FACTOR;
 extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
-// #define DEBUG_CLOCK 1
+#define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
-// #define DEBUG_CLOCK_IO 1
+#define DEBUG_CLOCK_IO 1
 // #define DEBUG_CLOCK_3D 1
 // #define DEBUG_CLOCK_3D_HOST 1
 
@@ -265,6 +265,7 @@ typedef struct alignas(16) {
 
       long long int beforeOfcclFuncClock[RECORD_ITER];
       long long int afterGetSqeBeforeOfcclFuncDeltaClock[RECORD_ITER];
+      long long int afterGetSqeBeforeMaintainSharedCtxDeltaClock[RECORD_ITER];
 
       long long int beforePutCqeClock[RECORD_ITER];
 
