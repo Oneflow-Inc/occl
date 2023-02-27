@@ -862,7 +862,7 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[collId];
 
     if (bid < blkLimit) { // blk天然分化，保留这个条件
-      int try_cnt = getTryNum(i); // 只有队头循环多次。
+      int try_cnt = 1;// getTryNum(i); // 只有队头循环多次。
       for (int tryCnt = 0; tryCnt < try_cnt; ++tryCnt) {
 
         // ***** 先准备好sharedCollCtx，全部线程都参与 *****
@@ -981,7 +981,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
           if (blkStatus.collStatusAlign.collStatus[collIdInTaskQ] < 0) { // 不应该有1 的存在了，只有-1, -2或者2
             blkStatus.activeCollIdsAlign.activeCollIds[new_numActiveColls++] = collIdInTaskQ; // 小于0，就要继续放在taskQ里
 
-            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= getTryNum(i)) { // TODO: 做一个新的函数判断stuck，现在这样循环一次任务列表肯定就算stuck了。 // 不过目前不太好完全解耦。
+            if (blkStatus.collTryCntAllign.collTryCnt[collIdInTaskQ] >= NUM_TRY_TASKQ_HEAD) { // getTryNum(i) // TODO: 做一个新的函数判断stuck，现在这样循环一次任务列表肯定就算stuck了。 // 不过目前不太好完全解耦。
               ++numStuckColls;
             }
 
