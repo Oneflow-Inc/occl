@@ -1190,7 +1190,7 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   int64_t NUM_ITER_ENV = ParseIntegerFromEnv("NUM_ITER_ENV", 200);
 
   std::string DEBUG_FILE = GetStringFromEnv("DEBUG_FILE", "/home/panlichen/work2/ofccl/log/oneflow_cpu_rank_") + std::to_string(rankCtx->rank) + ".log";
-  strcpy(rankCtx->debugtFile, DEBUG_FILE.c_str());
+  strcpy(rankCtx->debugFile, DEBUG_FILE.c_str());
 
   #ifdef DEBUG_CLOCK_3D
     int num_block;
@@ -1494,10 +1494,10 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   #ifdef DEBUG_CLOCK_3D
     int num_block = rankCtx->daemonKernelGridDim.x;
     int num_coll = rankCtx->collCount;
-    std::ofstream clean(rankCtx->debugtFile, std::ios_base::out);
+    std::ofstream clean(rankCtx->debugFile, std::ios_base::out);
     clean << "";
     clean.close();
-    std::ofstream file(rankCtx->debugtFile, std::ios_base::app);
+    std::ofstream file(rankCtx->debugFile, std::ios_base::app);
 
     for (int iter = 0; iter < NUM_ITER; ++iter) {
       file << "=================== " << iter << "th iter ===================" << std::endl;
