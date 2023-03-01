@@ -35,7 +35,7 @@ Results in Fig. 8 can be reproduced with [train_ofccl_graph_distributed_fp32.sh]
 bash train_ofccl_graph_distributed_fp32.sh <NUM_CARDS>
 ```
 
-Results in Fig.9 were recorded when the stickiness adjustment scheme was not implemented well. The number of context switch and the task queue length can be reported when we uncomment the `DEBUG_CLOCK`, `DEBUG_CLOCK_3D`, and `DEBUG_CLOCK_3D_HOST` macros in [collectives_ofccl.h](/src/include/collectives_ofccl.h), recompile OCCL and OneFlow, and then run train_ofccl_graph_distributed_fp32.sh.
+Results in Fig.9 were recorded when the stickiness adjustment scheme of OCCL was not well implemented. The number of context switch and the task queue length can be reported when we uncomment the `DEBUG_CLOCK`, `DEBUG_CLOCK_3D`, and `DEBUG_CLOCK_3D_HOST` macros in [collectives_ofccl.h](/src/include/collectives_ofccl.h), recompile OCCL and OneFlow, and then run train_ofccl_graph_distributed_fp32.sh.
 
 ----
 
@@ -51,4 +51,4 @@ bash tools/train.sh tools/train_net.py configs/vit_imagenet.py <NUM_CARDS>
 
 ---
 
-All the figures are drawn with python scripts in [occl_figure repo](https://github.com/Panlichen/occl_figure), which also include the raw data of the figures.
+All the figures are drawn with python scripts in the [occl_figure repo](https://github.com/Panlichen/occl_figure), which also include the raw data of the figures.
