@@ -1,76 +1,54 @@
-# NCCL
+This documentation illustrates how experiments in the submitted paper to VLDB are reproduced.
 
-Optimized primitives for inter-GPU communication.
+OCCL is implemented based on NCCL 2.12.12, please refer the [NCCL repo](https://github.com/NVIDIA/nccl) for compiling and installing. 
 
-## Introduction
+---
 
-NCCL (pronounced "Nickel") is a stand-alone library of standard communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, as well as any send/receive based communication pattern. It has been optimized to achieve high bandwidth on platforms using PCIe, NVLink, NVswitch, as well as networking using InfiniBand Verbs or TCP/IP sockets. NCCL supports an arbitrary number of GPUs installed in a single node or across multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
+Experiments conducted in Sec. 5.2 rely on our [modified NCCL-Tests](https://github.com/Panlichen/nccl-tests), which are implemented based on official NCCL-Tests, too, please refer to the [official NCCL-Tests repo](https://github.com/NVIDIA/nccl-tests)  for compiling.
 
-For more information on NCCL usage, please refer to the [NCCL documentation](https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/index.html).
-
-## Build
-
-Note: the official and tested builds of NCCL can be downloaded from: https://developer.nvidia.com/nccl. You can skip the following build steps if you choose to use the official builds.
-
-To build the library :
+Two scripts are used to run experiments in our modified NCCL-Tests:
 
 ```shell
-$ cd nccl
-$ make -j src.build
+bash nccl_tests.sh <NUM_CARDS> <COLL_FUNC> <BUFFER_SIZE>
+bash ofccl_tests.sh <NUM_CARDS> <COLL_FUNC> <BUFFER_SIZE>
 ```
 
-If CUDA is not installed in the default /usr/local/cuda path, you can define the CUDA path with :
+The above commands evaluates NCCL and OCCL, and reports the bandwidth and end-to-end latency. By running these two commands properly we get results reported in Fig. 6.
+
+To get the time of "Read SQE", "Extra Overheads", and "Write CQE" as shown in Fig. 5, we need to uncomment the `DEBUG_CLOCK` and `DEBUG_CLOCK_IO` macros in [collectives_ofccl.h](/src/include/collectives_ofccl.h), recompile OCCL, and run the ofccl_tests.sh. 
+
+The Core Execution Time of OCCL reported in Fig. 7 can also be got in this way. 
+
+The Core Execution Time of NCCL is got via Nsight System and running nccl_tests.sh after recompiling when uncommenting the `NCCL_DEBUG_CLOCK` macro in [collectives.h](/src/include/collectives.h) and [common.h](https://github.com/Panlichen/nccl-tests/blob/master/src/common.h).
+
+----
+
+Experiments for 5.3 rely on our [modified OneFlow](https://github.com/Oneflow-Inc/oneflow/tree/ofccl_dev), please refer to the [official documentation of OneFlow](https://github.com/Oneflow-Inc/oneflow) for compiling and installing.
+
+---
+
+Training Resnet50 rely on the [models repo](https://github.com/Panlichen/models) that is forked from the official [Oneflow-Inc/models](https://github.com/Oneflow-Inc/models). 
+
+Results in Fig. 8 can be reproduced with [train_ofccl_graph_distributed_fp32.sh](https://github.com/Panlichen/models/blob/test_ofccl/Vision/classification/image/resnet50/examples/train_ofccl_graph_distributed_fp32.sh):
 
 ```shell
-$ make src.build CUDA_HOME=<path to cuda install>
+bash train_ofccl_graph_distributed_fp32.sh <NUM_CARDS>
 ```
 
-NCCL will be compiled and installed in `build/` unless `BUILDDIR` is set.
+Results in Fig.9 were recorded when the stickiness adjustment scheme was not implemented well. The number of context switch and the task queue length can be reported when we uncomment the `DEBUG_CLOCK`, `DEBUG_CLOCK_3D`, and `DEBUG_CLOCK_3D_HOST` macros in [collectives_ofccl.h](/src/include/collectives_ofccl.h), recompile OCCL and OneFlow, and then run train_ofccl_graph_distributed_fp32.sh.
 
-By default, NCCL is compiled for all supported architectures. To accelerate the compilation and reduce the binary size, consider redefining `NVCC_GENCODE` (defined in `makefiles/common.mk`) to only include the architecture of the target platform :
-```shell
-$ make -j src.build NVCC_GENCODE="-gencode=arch=compute_70,code=sm_70"
-```
+----
 
-## Install
+Training Vision Transformer rely on the [libai repo](https://github.com/Panlichen/libai) that is forked from the official [Oneflow-Inc/libai](https://github.com/Oneflow-Inc/libai).
 
-To install NCCL on the system, create a package then install it as root.
+Please refer to the official [libai documentation](https://libai.readthedocs.io/en/latest/index.html) for installing libai and configuring which parallel DNN training method to use.
 
-Debian/Ubuntu :
-```shell
-$ # Install tools to create debian packages
-$ sudo apt install build-essential devscripts debhelper fakeroot
-$ # Build NCCL deb package
-$ make pkg.debian.build
-$ ls build/pkg/deb/
-```
-
-RedHat/CentOS :
-```shell
-$ # Install tools to create rpm packages
-$ sudo yum install rpm-build rpmdevtools
-$ # Build NCCL rpm package
-$ make pkg.redhat.build
-$ ls build/pkg/rpm/
-```
-
-OS-agnostic tarball :
-```shell
-$ make pkg.txz.build
-$ ls build/pkg/txz/
-```
-
-## Tests
-
-Tests for NCCL are maintained separately at https://github.com/nvidia/nccl-tests.
+Results in Fig. 10 can be reproduced with [tools/train.sh](https://github.com/Panlichen/libai/blob/main/tools/train.sh) and other python files:
 
 ```shell
-$ git clone https://github.com/NVIDIA/nccl-tests.git
-$ cd nccl-tests
-$ make
-$ ./build/all_reduce_perf -b 8 -e 256M -f 2 -g <ngpus>
+bash tools/train_27.sh tools/train_net.py configs/vit_imagenet.py <NUM_CARDS>
 ```
 
-## Copyright
+---
 
-All source code and accompanying documentation is copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
+All the figures are drawn with python scripts in [occl_figure repo](https://github.com/Panlichen/occl_figure), which also include the raw data of the figures.
