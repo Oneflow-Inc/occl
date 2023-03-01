@@ -1,5 +1,5 @@
 # OCCL
-A Deadlock-free Library for GPU Collective Communication
+A Deadlock-free Library for GPU Collective Communication.
 
 ---
 
