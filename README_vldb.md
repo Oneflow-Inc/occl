@@ -26,6 +26,7 @@ The Core Execution Time of NCCL is got via Nsight System and running nccl_tests.
 
 
 The testing program demonstrating the deadlock-prevention capability of OCCL can be found [here](https://github.com/Panlichen/nccl-tests/tree/master/src_chaos_order).
+
 To get the time of loading and saving context, we need to uncomment the `DEBUG_CLOCK_CTX` macro in [collectives_ofccl.h](/src/include/collectives_ofccl.h), recompile OCCL, assign `BINARY="CHAOS"` in the ofccl_tests.sh and run the ofccl_tests.sh. 
 
 
