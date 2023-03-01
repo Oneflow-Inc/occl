@@ -3,4 +3,4 @@ A Deadlock-free Library for GPU Collective Communication
 
 ---
 
-[Supplemental material for VLDB](/README_vldb.md)
+Supplemental material for the VLDB paper can be found [here](/README_vldb.md).
