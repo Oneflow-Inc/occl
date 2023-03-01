@@ -46,7 +46,7 @@ Please refer to the official [libai documentation](https://libai.readthedocs.io/
 Results in Fig. 10 can be reproduced with [tools/train.sh](https://github.com/Panlichen/libai/blob/main/tools/train.sh) and other python files:
 
 ```shell
-bash tools/train_27.sh tools/train_net.py configs/vit_imagenet.py <NUM_CARDS>
+bash tools/train.sh tools/train_net.py configs/vit_imagenet.py <NUM_CARDS>
 ```
 
 ---
