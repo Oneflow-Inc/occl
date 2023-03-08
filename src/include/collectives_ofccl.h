@@ -22,10 +22,10 @@ extern __constant__ int64_t NUM_TRY_TASKQ_HEAD;
 extern __constant__ int64_t RECV_SUCCESS_FACTOR;
 extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
-#define DEBUG_CLOCK 1
+// #define DEBUG_CLOCK 1
 
 // #define DEBUG_CLOCK_TRAIN 1
-#define DEBUG_CLOCK_IO 1
+// #define DEBUG_CLOCK_IO 1
 // #define DEBUG_CLOCK_3D 1
 // #define DEBUG_CLOCK_3D_HOST 1
 
@@ -85,12 +85,19 @@ extern __constant__ int64_t NUM_ITER_ENV;
       //   return 46; // 2, 3号block参加46个coll，即需要4个block的coll。
       // }
 
-      // 8card vit
+      // 4card resnet
       if (blk == 0) {
-        return 85;
+        return 161;
       } else {
-        return 84;
+        return 53; // 共有53个coll需要2个block，大于36.75K之后。
       }
+
+      // 8card vit
+      // if (blk == 0) {
+      //   return 85;
+      // } else {
+      //   return 84;
+      // }
     }
   #endif
 #else
