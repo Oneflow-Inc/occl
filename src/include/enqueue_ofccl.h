@@ -19,7 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#define DEBUG_CLOCK_CPU 1
+// #define DEBUG_CLOCK_CPU 1
 #ifdef DEBUG_CLOCK_CPU
 #include <chrono>
 #endif
