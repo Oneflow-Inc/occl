@@ -19,6 +19,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#define DEBUG_CLOCK_CPU 1
+#ifdef DEBUG_CLOCK_CPU
+#include <chrono>
+#endif
+
 // #define MAX_ASYNC_PANELS 32
 // #define MAX_ASYNC_OPS 128
 

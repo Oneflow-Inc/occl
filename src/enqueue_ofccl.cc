@@ -20,6 +20,7 @@
 #include "nccl.h"
 #include "transport.h"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -650,6 +651,10 @@ static void sqDestroy(SQ *sq) {
 }
 
 int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx) {
+  #ifdef DEBUG_CLOCK_CPU
+    auto start_time = std::chrono::high_resolution_clock::now();
+  #endif
+
   pthread_mutex_lock(&sq->mutex);
 
   if (CpuSqFull(sq)) {
@@ -686,6 +691,13 @@ int sqWrite(SQ *sq, SQE *sqe, int rank, CallbackFunc callback, void *callbackArg
     rankCtx->poll_start = 1;
     pthread_mutex_unlock(&rankCtx->poller_mutex);
   }
+
+  #ifdef DEBUG_CLOCK_CPU
+    auto end_time = std::chrono::high_resolution_clock::now();
+    if (rank == 0) {
+      OFCCL_LOG(OFCCL_TIME, "Rank<%d> CPU write SQE for %ld us", rank, std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count());
+    }
+  #endif
   
   return 0;
 }
@@ -718,6 +730,9 @@ static void cqDestroy(CQ *cq) {
 static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
   // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> enter cqRead", pthread_self(), rankCtx->rank);
   // pthread_mutex_lock(&cq->mutex);
+  #ifdef DEBUG_CLOCK_CPU
+    auto start_time = std::chrono::high_resolution_clock::now();
+  #endif
   
   cq->readSlot %= NUM_CQ_SLOT; // 原来把取模放在for循环初始那里，事实上会在读失败的时候，一直反复循环，而不是返回。其实是不好的。
   for (; cq->readSlot < NUM_CQ_SLOT; ++cq->readSlot) {
@@ -736,6 +751,13 @@ static int cqRead(CQ *cq, CQE *target, ofcclRankCtx *rankCtx) {
       if (blockCnt == cq->blockCollCnt[blockIdx][collId]) {
         target->collId = cqSlot;
         ++cq->blockCollCnt[blockIdx][collId];
+
+        #ifdef DEBUG_CLOCK_CPU
+          auto end_time = std::chrono::high_resolution_clock::now();
+          if (rankCtx->rank == 0) {
+            OFCCL_LOG(OFCCL_TIME, "Rank<%d> CPU read CQE for %ld us", rankCtx->rank, std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count());
+          }
+        #endif
         return 0; // 这样就不会调用到++cq->readSlot，也就是优先会复用slot，在没有冲突的时候，比较好。
       }
       // 和预期不一致，判定失败，但是不急着返回-1，遍历完再返回吧。
