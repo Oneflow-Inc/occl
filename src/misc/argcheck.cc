@@ -39,10 +39,16 @@ ncclResult_t ArgsCheck(struct ncclInfo* info) {
     WARN("%s : invalid root %d (root should be in the 0..%d range)", info->opName, info->root, info->comm->nRanks);
     return ncclInvalidArgument;
   }
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> root pass", getpid(), pthread_self(), info->comm->rank);
+
   if (info->datatype < 0 || info->datatype >= ncclNumTypes) {
     WARN("%s : invalid type %d", info->opName, info->datatype);
     return ncclInvalidArgument;
   }
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> datatype pass", getpid(), pthread_self(), info->comm->rank);
+
   // Type is OK, compute nbytes. Convert Allgather/Broadcast/P2P calls to chars.
   info->nBytes = info->count * ncclTypeSize(info->datatype);
   if (info->coll == ncclFuncAllGather || info->coll == ncclFuncBroadcast) {
@@ -55,12 +61,17 @@ ncclResult_t ArgsCheck(struct ncclInfo* info) {
     WARN("%s : invalid reduction operation %d", info->opName, info->op);
     return ncclInvalidArgument;
   }
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> redOp & bytes pass", getpid(), pthread_self(), info->comm->rank);
+
   int opIx = int(ncclUserRedOpMangle(info->comm, info->op)) - int(ncclNumOps);
   if (ncclNumOps <= info->op &&
       (info->comm->userRedOpCapacity <= opIx || info->comm->userRedOps[opIx].freeNext != -1)) {
     WARN("%s : reduction operation %d unknown to this communicator", info->opName, info->op);
     return ncclInvalidArgument;
   }
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> redOp II pass", getpid(), pthread_self(), info->comm->rank);
 
   if (info->comm->checkPointers) {
     if ((info->coll == ncclFuncSend || info->coll == ncclFuncRecv)) {

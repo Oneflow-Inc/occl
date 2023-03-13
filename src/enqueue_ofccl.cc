@@ -33,6 +33,7 @@
 #include <sched.h>
 #include <algorithm> // max
 #include <semaphore.h>
+#include <unistd.h>
 #include <string>
 
 namespace {
@@ -796,11 +797,17 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
 
   // OfcclRankCtx里边的各种指针的内存分配、cudaMemcpy、值的初始化还是放到ofcclPrepareDone里边做
 
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ofcclInitRankCtx OK", getpid(), pthread_self(), rank);
+
   return ret;
 }
 
 ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx) {  
   ncclResult_t ret = ncclSuccess;
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> enter ofcclPrepareCollComm for coll_id = %d, comm->rank=%d", getpid(), pthread_self(), rankCtx->rank, collId, info->comm->rank);
   
   if (rankCtx->collCount >= MAX_LENGTH || collId >= MAX_LENGTH) {
     OFCCL_LOG(OFCCL_WARN, "Too many async operations in progress, max is %llu, rankCtx->collCount = %d, collId = %d",
@@ -811,8 +818,16 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCt
 
   // Check arguments
   info->comm->checkPointers = false; // we do not assign buff pointers yet.
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before PtrCheck comm(%p), info->comm->checkPointers=%d for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, info->comm->checkPointers, collId);
   NCCLCHECK(PtrCheck(info->comm, info->opName, "comm"));
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before ArgsCheck comm(%p), info->comm->checkPointers=%d for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, info->comm->checkPointers, collId);
   NCCLCHECKGOTO(ArgsCheck(info), ret, end);
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> after ArgsCheck comm(%p) for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, collId);
 
   // Copy reduction op state from op handle into info struct here since the
   // op handle may be destroyed before ncclGroupEnd().
@@ -829,9 +844,15 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCt
   }
   rankCtx->seenComms.insert(info->comm);
 
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before insert comm(%p) for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, collId);
+
   // 调整为插到相应的collId那里。
   rankCtx->ofcclCommList[collId].comm = info->comm;
   rankCtx->hostCollIds[rankCtx->collCount++] = collId;
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> insert comm(%p) for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, collId);
 
   // ***** Ignore *****
   // NCCLCHECKGOTO(checkSetStream(info), ret, end);
@@ -847,6 +868,9 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCt
          sizeof(struct ncclInfo));
   info->comm->asyncOpCount++;
   info->comm->asyncTotalSize += info->nBytes;
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ofcclPrepareCollComm succeed for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, collId);
 
 end:
   return ret;
