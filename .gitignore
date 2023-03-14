@@ -6,3 +6,5 @@
 .clangd
 nccl.h
 log/
+
+*.log

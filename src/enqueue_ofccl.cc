@@ -35,6 +35,7 @@
 #include <semaphore.h>
 #include <unistd.h>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -415,9 +416,9 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     struct ncclChannel* channel = comm->channels+channelId;
 
     // Proxy
-    proxyOp->channelId = channelId;
-    proxyOp->opCount = comm->collOpCount;
-    if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
+    // proxyOp->channelId = channelId;
+    // proxyOp->opCount = comm->collOpCount;
+    // if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
 
     elem->bid = bid % nChannels;
     // OFCCL_LOG(OFCCL, "elem->bid=%d", elem->bid);
@@ -434,7 +435,7 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     NCCLCHECK(ofEnqueueSegOp(workElemType, work, w, segment, &eqElem->buffRegInfo, channel, comm));
     channel->totalSize += channelSize;
   }
-  comm->collOpCount++;
+  // comm->collOpCount++;
 
   return ncclSuccess;
 }
@@ -542,7 +543,7 @@ static void CUDART_CB ofcclEnqueueHostSetup(void* arg) {
   NCCLCHECKGOTO(ofcclEnqueueCollKernel(comm, eqElem), ret, cb_end);
 
   NCCLCHECKGOTO(ofcclSetupLaunch(eqInfo), ret, cb_end);
-  NCCLCHECKGOTO(ofcclLaunchProxy(eqInfo), ret, cb_end);
+  // NCCLCHECKGOTO(ofcclLaunchProxy(eqInfo), ret, cb_end);
   
 cb_end:
   if (ret != ncclSuccess) {
@@ -553,82 +554,35 @@ cb_end:
 
 } // namespace
 
-// 5 * 3 * 3
-// TODO: algo = tree的时候，根据cuda版本不同可能有差别。allreduce里会根据cuda版本调用treeUpDown或者treeSplit
-static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {
-  {
-    {
-      0, //Broadcast, Tree, LL
-      0, //Broadcast, Tree, LL128
-      0  //Broadcast, Tree, Simple
-    }, {
-      0, //Broadcast, Ring, LL
-      0, //Broadcast, Ring, LL128
-      0  //Broadcast, Ring, Simple
-    }, {
-      0, //Broadcast, CollNet, LL
-      0, //Broadcast, CollNet, LL128
-      0  //Broadcast, CollNet, Simple
-    }
-  }, {
-    {
-      0, //Reduce, Tree, LL
-      0, //Reduce, Tree, LL128
-      0  //Reduce, Tree, Simple
-    }, {
-      0, //Reduce, Ring, LL
-      0, //Reduce, Ring, LL128
-      0  //Reduce, Ring, Simple
-    }, {
-      0, //Reduce, CollNet, LL
-      0, //Reduce, CollNet, LL128
-      0  //Reduce, CollNet, Simple
-    }
-  }, {
-    {
-      0, //AllGather, Tree, LL
-      0, //AllGather, Tree, LL128
-      0  //AllGather, Tree, Simple
-    }, {
-      0, //AllGather, Ring, LL
-      0, //AllGather, Ring, LL128
-      0  //AllGather, Ring, Simple
-    }, {
-      0, //AllGather, CollNet, LL
-      0, //AllGather, CollNet, LL128
-      0  //AllGather, CollNet, Simple
-    }
-  }, {
-    {
-      0, //ReduceScatter, Tree, LL
-      0, //ReduceScatter, Tree, LL128
-      0  //ReduceScatter, Tree, Simple
-    }, {
-      0, //ReduceScatter, Ring, LL
-      0, //ReduceScatter, Ring, LL128
-      0  //ReduceScatter, Ring, Simple
-    }, {
-      0, //ReduceScatter, CollNet, LL
-      0, //ReduceScatter, CollNet, LL128
-      0  //ReduceScatter, CollNet, Simple
-    }
-  }, {
-    {
-      0, //AllReduce, Tree, LL
-      0, //AllReduce, Tree, LL128
-      0  //AllReduce, Tree, Simple
-    }, {
-      0, //AllReduce, Ring, LL
-      0, //AllReduce, Ring, LL128
-      4  //AllReduce, Ring, Simple
-    }, {
-      0, //AllReduce, CollNet, LL
-      0, //AllReduce, CollNet, LL128
-      0  //AllReduce, CollNet, Simple
-    }
-  }
-};
+ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx) {
+  ncclComm *comm = rankCtx->collId2Comm[collId];
 
+  // 1. 插入proxyOp
+  struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
+  struct ncclQueueElem* eqElem = eqInfo->elemList->begin();
+  struct ncclWork* work = &eqElem->work;
+  struct ncclWorkElem* elem = work->elems;
+  struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
+  
+  int nChannels = elem->nChannels;
+  for (int bid=0; bid<nChannels; bid++) {
+    int channelId = ofGetNextChannel(comm);
+    proxyOp->channelId = channelId;
+    proxyOp->opCount = comm->collOpCount;
+    if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
+  }
+  comm->collOpCount++;
+
+  // 2. 更新指针、唤醒progress线程
+  for (int r=0; r<eqInfo->maxChannels; r++) {
+    struct ncclChannel* channel = comm->channels+r;
+    channel->workCount = 0;
+    channel->totalSize = 0;
+  }
+  comm->lastChannel = 0;
+  NCCLCHECK(ncclProxyStart(comm));
+  return ncclSuccess;
+}
 
 // still use 同步的Malloc吗？感觉是可以的，因为相当于是每个rank的init部分，而且prepareDone里还调用了cudaDeviceSynchronize
 static SQ *sqCreate(unsigned long long int length) {
@@ -791,6 +745,7 @@ ncclResult_t ofcclInitRankCtx(ofcclRankCtx_t* rankCtx, int rank) {
   newOfcclRankCtx->rank = rank;
   newOfcclRankCtx->queueLength = QLen;
   newOfcclRankCtx->seenComms = std::unordered_set<ncclComm_t>();
+  newOfcclRankCtx->collId2Comm = std::unordered_map<int, ncclComm_t>();
   newOfcclRankCtx->debugFp = nullptr;
 
   newOfcclRankCtx->CHECK_REMAINING_SQE_INTERVAL = int(ParseIntegerFromEnv("CHECK_REMAINING_SQE_INTERVAL", 10000));
@@ -843,6 +798,7 @@ ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCt
     goto end;
   }
   rankCtx->seenComms.insert(info->comm);
+  rankCtx->collId2Comm.insert(std::make_pair(collId, info->comm));
 
  
  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before insert comm(%p) for coll_id = %d", getpid(), pthread_self(), rankCtx->rank, info->comm, collId);
@@ -1717,3 +1673,83 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
 //       }
 //     }
 //   }
+
+
+
+
+
+// 5 * 3 * 3
+// TODO: algo = tree的时候，根据cuda版本不同可能有差别。allreduce里会根据cuda版本调用treeUpDown或者treeSplit
+// static int collExecContextCount[NCCL_NUM_FUNCTIONS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {
+//   {
+//     {
+//       0, //Broadcast, Tree, LL
+//       0, //Broadcast, Tree, LL128
+//       0  //Broadcast, Tree, Simple
+//     }, {
+//       0, //Broadcast, Ring, LL
+//       0, //Broadcast, Ring, LL128
+//       0  //Broadcast, Ring, Simple
+//     }, {
+//       0, //Broadcast, CollNet, LL
+//       0, //Broadcast, CollNet, LL128
+//       0  //Broadcast, CollNet, Simple
+//     }
+//   }, {
+//     {
+//       0, //Reduce, Tree, LL
+//       0, //Reduce, Tree, LL128
+//       0  //Reduce, Tree, Simple
+//     }, {
+//       0, //Reduce, Ring, LL
+//       0, //Reduce, Ring, LL128
+//       0  //Reduce, Ring, Simple
+//     }, {
+//       0, //Reduce, CollNet, LL
+//       0, //Reduce, CollNet, LL128
+//       0  //Reduce, CollNet, Simple
+//     }
+//   }, {
+//     {
+//       0, //AllGather, Tree, LL
+//       0, //AllGather, Tree, LL128
+//       0  //AllGather, Tree, Simple
+//     }, {
+//       0, //AllGather, Ring, LL
+//       0, //AllGather, Ring, LL128
+//       0  //AllGather, Ring, Simple
+//     }, {
+//       0, //AllGather, CollNet, LL
+//       0, //AllGather, CollNet, LL128
+//       0  //AllGather, CollNet, Simple
+//     }
+//   }, {
+//     {
+//       0, //ReduceScatter, Tree, LL
+//       0, //ReduceScatter, Tree, LL128
+//       0  //ReduceScatter, Tree, Simple
+//     }, {
+//       0, //ReduceScatter, Ring, LL
+//       0, //ReduceScatter, Ring, LL128
+//       0  //ReduceScatter, Ring, Simple
+//     }, {
+//       0, //ReduceScatter, CollNet, LL
+//       0, //ReduceScatter, CollNet, LL128
+//       0  //ReduceScatter, CollNet, Simple
+//     }
+//   }, {
+//     {
+//       0, //AllReduce, Tree, LL
+//       0, //AllReduce, Tree, LL128
+//       0  //AllReduce, Tree, Simple
+//     }, {
+//       0, //AllReduce, Ring, LL
+//       0, //AllReduce, Ring, LL128
+//       4  //AllReduce, Ring, Simple
+//     }, {
+//       0, //AllReduce, CollNet, LL
+//       0, //AllReduce, CollNet, LL128
+//       0  //AllReduce, CollNet, Simple
+//     }
+//   }
+// };

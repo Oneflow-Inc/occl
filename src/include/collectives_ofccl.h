@@ -31,7 +31,7 @@ extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 
 // #define DEBUG_CLOCK_CTX 1 // 独立，不依赖DEBUG_CLOCK_IO
 
-#define SHOW_CNT 1
+// #define SHOW_CNT 1
 #ifdef SHOW_CNT
 extern __constant__ int64_t NUM_ITER_ENV;
 #endif

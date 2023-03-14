@@ -62,6 +62,8 @@ extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcc
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
 
+extern ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx);
+
 struct ofcclCommArgs {
   ncclResult_t ret;
   ncclComm_t comm;
@@ -114,6 +116,7 @@ struct ofcclRankCtx {
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
   int collCount;
   std::unordered_set<ncclComm_t> seenComms;
+  std::unordered_map<int, ncclComm_t> collId2Comm;
 
   dim3 daemonKernelGridDim;
   dim3 daemonKernelBlockDim;
