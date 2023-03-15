@@ -114,6 +114,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm == NULL)
     return ncclSuccess;
 
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter commFree", getpid(), pthread_self());
   // First stop all threads before we free anything.
   NCCLCHECK(ncclProxyDestroy(comm));
 
@@ -1005,6 +1006,7 @@ static ncclResult_t ncclGraphHelperDestroy(ncclComm* comm) {
 }
 
 static ncclResult_t commDestroy(ncclComm_t comm) {
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> enter commDestroy", getpid(), pthread_self(), comm->rank);
   // Try and prevent a double free of the comm struct (user error)
   if (comm->rank == -1 || comm->nRanks <= 0 || comm->cudaDev == -1 || comm->busId == -1) {
     WARN("comm %p has already been destroyed", comm);
@@ -1039,6 +1041,8 @@ static ncclResult_t commDestroy(ncclComm_t comm) {
 
 NCCL_API(ncclResult_t, ncclCommDestroy, ncclComm_t comm);
 ncclResult_t ncclCommDestroy(ncclComm_t comm) {
+  
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> enter ncclCommDestroy", getpid(), pthread_self(), comm->rank);
   NVTX3_FUNC_RANGE_IN(nccl_domain);
   if (comm == NULL)
     return ncclSuccess;

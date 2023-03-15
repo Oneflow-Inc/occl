@@ -557,6 +557,8 @@ cb_end:
 ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx) {
   ncclComm *comm = rankCtx->collId2Comm[collId];
 
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ofcclInsert7UpdateProxy", getpid(), pthread_self(), comm->rank);
+
   // 1. 插入proxyOp
   struct ncclQueueInfo* eqInfo = comm->enqueueInfo;
   struct ncclQueueElem* eqElem = eqInfo->elemList->begin();
@@ -1552,6 +1554,7 @@ ncclResult_t ofcclDestroy(ofcclRankCtx_t rankCtx) {
   // ***** seems do not need to transverse ofcclCommList *****
   rankCtx->collCount = 0;
   free(rankCtx);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> destroy done", getpid(), pthread_self());
   return ret;
 }
 
