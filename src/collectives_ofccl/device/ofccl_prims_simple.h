@@ -100,12 +100,12 @@ class Primitives<
 
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
       
-      // if ((flags & (Recv*RoleWaitRecv))) {
-      //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
-      // }
-      // if ((flags & (Send*RoleWaitSend))) {
-      //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
-      // }
+      if ((flags & (Recv*RoleWaitRecv))) {
+        OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      }
+      if ((flags & (Send*RoleWaitSend))) {
+        OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      }
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -119,12 +119,12 @@ class Primitives<
           sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain = 1;
           
 
-          // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu, step = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step + StepPerSlice, step);
-          // }
-          // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
-          // }
+          if ((flags & (Recv*RoleWaitRecv))) {
+            OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu, step = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step + StepPerSlice, step);
+          }
+          if ((flags & (Send*RoleWaitSend))) {
+            OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          }
           // __syncwarp(); // ！！！！！！为了打印log加的！
           
           return; // 使用return，而不是break。
@@ -179,12 +179,12 @@ class Primitives<
       step += StepPerSlice;
     }
     
-    // if ((flags & (Recv*RoleWaitRecv))) {
-    //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step);
-    // }
-    // if ((flags & (Send*RoleWaitSend))) {
-    //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
-    // }
+    if ((flags & (Recv*RoleWaitRecv))) {
+      OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step);
+    }
+    if ((flags & (Send*RoleWaitSend))) {
+      OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
@@ -195,12 +195,12 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
-    // }
-    // if ((flags & (Send*RolePostSend))) {
-    //   OFCCL_LOG_RANK_0_SHMEM(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
-    // }
+    if ((flags & (Recv*RolePostRecv))) {
+      OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
+    }
+    if ((flags & (Send*RolePostSend))) {
+      OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
+    }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
 
