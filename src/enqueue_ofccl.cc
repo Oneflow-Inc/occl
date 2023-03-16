@@ -557,7 +557,7 @@ cb_end:
 ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx) {
   ncclComm *comm = rankCtx->collId2Comm[collId];
 
-  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ofcclInsert7UpdateProxy", getpid(), pthread_self(), comm->rank);
+  OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ofcclInsert7UpdateProxy", getpid(), pthread_self(), comm->rank);
 
   // 1. 插入proxyOp
   struct ncclQueueInfo* eqInfo = comm->enqueueInfo;

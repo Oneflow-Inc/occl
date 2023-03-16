@@ -82,7 +82,15 @@ class Primitives<
     const bool noRecvWait = DirectRecv && Src && (flags & DirectRead); // 目前应该一直是false       // no wait when directly reading from remote input
     const bool noSendWait = DirectSend && (flags & (DirectRead|DirectWrite)); // 目前应该一直是false // no wait in empty send (e.g. directScatter) or direct remote write
     if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
-        ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8 
+        ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8
+
+      if ((flags & (Recv*RoleWaitRecv))) {
+        OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+      }
+      if ((flags & (Send*RoleWaitSend))) {
+        OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+      }
+
       int spins = 0;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
         connStepCache = *connStepPtr;
@@ -121,6 +129,12 @@ class Primitives<
       }
       step += StepPerSlice;
     }
+    if ((flags & (Recv*RoleWaitRecv))) {
+      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, tail from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+    }
+    if ((flags & (Send*RoleWaitSend))) {
+      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, head from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+    }
   }
 
   template<int Recv, int Send>
@@ -130,12 +144,12 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG(NCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
-    // }
-    // if ((flags & (Send*RolePostSend))) {
-    //   OFCCL_LOG(NCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
-    // }
+    if ((flags & (Recv*RolePostRecv))) {
+      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
+    }
+    if ((flags & (Send*RolePostSend))) {
+      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
+    }
   }
 
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
@@ -237,7 +251,7 @@ class Primitives<
     // Non-workers come straight here. Workers too but only once the remaining
     // slices are all empty. Since empty slices are the uncommon case, and
     // worker perf is the limiter, perf-wise this loop is effectively unentered,
-    // hence just a single branch insn.
+    // hence just a single branch insn(instruction).
     #pragma unroll 1
     while (slice < SlicePerChunk) {
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
