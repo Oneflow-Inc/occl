@@ -100,12 +100,12 @@ class Primitives<
 
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
       
-      if ((flags & (Recv*RoleWaitRecv))) {
-        OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
-      }
-      if ((flags & (Send*RoleWaitSend))) {
-        OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
-      }
+      // if ((flags & (Recv*RoleWaitRecv))) {
+      //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      // }
+      // if ((flags & (Send*RoleWaitSend))) {
+      //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      // }
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -275,6 +275,12 @@ class Primitives<
           
         // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid);
         
+        if ((flags & (Recv*RoleWaitRecv))) {
+          OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, upper enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        }
+        if ((flags & (Send*RoleWaitSend))) {
+          OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, upper enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
         if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
@@ -348,6 +354,12 @@ class Primitives<
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
       { // Only workers could have Wait roles so we know the slice must be empty
         // since we've exited the loop above.
+        if ((flags & (Recv*RoleWaitRecv))) {
+          OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, lower enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        }
+        if ((flags & (Send*RoleWaitSend))) {
+          OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 1, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, lower enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
 

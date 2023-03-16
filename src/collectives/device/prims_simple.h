@@ -84,12 +84,12 @@ class Primitives<
     if (((flags & (Recv*RoleWaitRecv)) && !noRecvWait) || // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
         ((flags & (Send*RoleWaitSend)) && !noSendWait)) { // 1 * 8 + 0 号线程是 RoleWaitSend 8
 
-      if ((flags & (Recv*RoleWaitRecv))) {
-        OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-      }
-      if ((flags & (Send*RoleWaitSend))) {
-        OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-      }
+      // if ((flags & (Recv*RoleWaitRecv))) {
+      //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+      // }
+      // if ((flags & (Send*RoleWaitSend))) {
+      //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+      // }
 
       int spins = 0;
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -130,10 +130,10 @@ class Primitives<
       step += StepPerSlice;
     }
     if ((flags & (Recv*RoleWaitRecv))) {
-      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, tail from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, tail from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
     }
     if ((flags & (Send*RoleWaitSend))) {
-      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, head from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, head from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
     }
   }
 
@@ -145,10 +145,10 @@ class Primitives<
     }
     
     if ((flags & (Recv*RolePostRecv))) {
-      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
+      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
     }
     if ((flags & (Send*RolePostSend))) {
-      OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
+      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
     }
   }
 
@@ -208,6 +208,13 @@ class Primitives<
           ncclShmem.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
           ncclShmem.groups[group].dsts[0] = userBuff + dstIx + offset;
+        
+        if ((flags & (Recv*RoleWaitRecv))) {
+          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        }
+        if ((flags & (Send*RoleWaitSend))) {
+          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
         if (DirectRecv && ncclShmem.groups[group].srcs[0] == ncclShmem.groups[group].dsts[0]) {
@@ -257,6 +264,12 @@ class Primitives<
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
       { // Only workers could have Wait roles so we know the slice must be empty
         // since we've exited the loop above.
+        if ((flags & (Recv*RoleWaitRecv))) {
+          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        }
+        if ((flags & (Send*RoleWaitSend))) {
+          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
       barrier(); // Has couterpart in preceding worker-only loop.
