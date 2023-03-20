@@ -416,6 +416,8 @@ static ncclResult_t ofcclEnqueueCollKernel(struct ncclComm* comm, struct ncclQue
     struct ncclChannel* channel = comm->channels+channelId;
 
     // Proxy
+    // bugfix: 把proxyOp的channelId的赋值放到这里，而不是每次执行都在ofcclInsert7UpdateProxy里赋值，这导致了proxyOp->channelId的值不正确。事实上，我们只需要分配一个固定的channelId就可以了。
+    // TODO: 之后优化、池化comm的时候，再考虑如何分配channelId。
     // proxyOp->channelId = channelId;
     // proxyOp->opCount = comm->collOpCount;
     // if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
@@ -567,8 +569,12 @@ ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx) {
   struct ncclProxyOp* proxyOp = &eqElem->proxyOp;
   
   int nChannels = elem->nChannels;
+
+  // OFCCL_LOG(OFCCL_MPI, "Rank<%d> elem->nChannels = %d", comm->rank, nChannels);
+
   for (int bid=0; bid<nChannels; bid++) {
-    int channelId = ofGetNextChannel(comm);
+    // int channelId = ofGetNextChannel(comm);
+    int channelId = bid;
     proxyOp->channelId = channelId;
     proxyOp->opCount = comm->collOpCount;
     if (proxyOp->nsteps) NCCLCHECK(ncclProxySaveColl(comm, proxyOp, comm->nRanks));
@@ -1350,6 +1356,8 @@ ncclResult_t ofcclFinalizeRankCtx7StartHostThrds(ofcclRankCtx_t rankCtx) {
   // checkRuntime(cudaMemcpy(rankCtx->globalDevComm7WorkElems, rankCtx->hostDevComm7WorkElems, MAX_LENGTH * sizeof(DevComm7WorkElem), cudaMemcpyHostToDevice));
 
   checkRuntime(cudaStreamCreate(&rankCtx->kernelStream));
+
+  // OFCCL_LOG(OFCCL_MPI, "rankCtx->daemonKernelGridDim.x = %d", rankCtx->daemonKernelGridDim.x);
 
   rankCtx->hostBlk2CollId2CollCtx = (CollCtx *)calloc(rankCtx->daemonKernelGridDim.x * MAX_LENGTH, sizeof(CollCtx));
   for (int i = 0; i < rankCtx->collCount; ++i) {

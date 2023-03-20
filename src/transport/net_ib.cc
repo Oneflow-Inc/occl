@@ -801,8 +801,40 @@ ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
   return ncclSuccess;
 }
 
+void print_ip_port(const struct sockaddr_in *addr) {
+  char ip[16] = {0};
+  inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip));
+  printf("ip: %s, port: %d\n", ip, ntohs(addr->sin_port));
+}
+
+void print_socket_info(int sock) {
+  struct sockaddr_in local_addr, remote_addr;
+  socklen_t local_len = sizeof(local_addr);
+  socklen_t remote_len = sizeof(remote_addr);
+
+  // 获取本地地址
+  if (getsockname(sock, (struct sockaddr *)&local_addr, &local_len) == -1) {
+    perror("getsockname");
+    exit(EXIT_FAILURE);
+  }
+
+  // 获取远端地址
+  if (getpeername(sock, (struct sockaddr *)&remote_addr, &remote_len) == -1) {
+    perror("getpeername");
+    exit(EXIT_FAILURE);
+  }
+
+  // 打印地址信息
+  printf("Local IP: %s, Local Port: %d\n", inet_ntoa(local_addr.sin_addr), ntohs(local_addr.sin_port));
+  printf("Remote IP: %s, Remote Port: %d\n", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port));
+}
+
 ncclResult_t ncclRecvCheck(struct ncclIbRecvComm* comm) {
   // Do not block on this receive, return if not ready.
+
+  OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self());
+  print_socket_info(comm->sock.fd);
+
   int bytes = 0;
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->ready, sizeof(int), &bytes));
   if (bytes == 0) return ncclSuccess; // Try again later
@@ -982,13 +1014,26 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mh
 
   int slot = (comm->fifoHead)%MAX_REQUESTS;
   struct ncclIbRequest** reqs = comm->fifoReqs[slot];
-  slots = comm->fifo[slot];
+  slots = comm->fifo[slot]; // 相当于slots = comm->fifo[(comm->fifoHead)%MAX_REQUESTS]
   int idx = comm->fifoHead+1;
-  if (slots[0].idx != idx) { *request = NULL; return ncclSuccess; }
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slot=%d, comm->fifoHead+1=%lu", getpid(), pthread_self(), slot, comm->fifoHead+1);
+  
+  if (slots[0].idx != idx) {
+   
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slots[0].idx=%lu, comm->fifoHead+1=%lu", getpid(), pthread_self(), slots[0].idx, comm->fifoHead+1);
+    *request = NULL;
+    return ncclSuccess;
+  }
   nreqs = slots[0].nreqs;
   // Wait until all data has arrived
   for (int r=1; r<nreqs; r++) while(slots[r].idx != idx);
   __sync_synchronize(); // order the nreqsPtr load against tag/rkey/addr loads below
+
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> ncclIbIsend, comm->ready=%d, nreqs=%d", getpid(), pthread_self(), comm->ready, nreqs);
+
   for (int r=0; r<nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
@@ -1017,7 +1062,7 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mh
     req->send.offset = 0;
     req->addr = &comm->sock.addr;
     req->events = comm->nqps;
-    *request = reqs[r] = req;
+    *request = reqs[r] = req; // 设置*request，来通知调用者执行完成。
 
     // If this is a multi-recv, send only when all requests have matched.
     for (int r=0; r<nreqs; r++) {
@@ -1096,11 +1141,16 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, int
   NCCLCHECK(wrap_ibv_post_send(comm->qps[0], &wr, &bad_wr));
   comm->remFifo.fifoTail++;
 
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> after wrap_ibv_post_send, comm->remFifo.fifoTail=%lu", getpid(), pthread_self(), comm->remFifo.fifoTail);
+
   return ncclSuccess;
 }
 
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbIrecv, comm->ready=%d", getpid(), pthread_self(), comm->ready);
   if (comm->ready == 0) NCCLCHECK(ncclRecvCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
@@ -1132,6 +1182,8 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, int* sizes, int* ta
 
   // Post to FIFO to notify sender
   TIME_START(2);
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> before ncclIbPostFifo", getpid(), pthread_self());
   NCCLCHECK(ncclIbPostFifo(comm, n, data, sizes, tags, mhandles, req));
   TIME_STOP(2);
   return ncclSuccess;
@@ -1171,6 +1223,7 @@ ncclResult_t ncclIbIflush(void* recvComm, int n, void** data, int* sizes, void**
 }
 
 ncclResult_t ncclIbTest(void* request, int* done, int* sizes) {
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbTest", getpid(), pthread_self());
   struct ncclIbRequest *r = (struct ncclIbRequest*)request;
   *done = 0;
 

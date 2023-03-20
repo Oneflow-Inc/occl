@@ -481,6 +481,7 @@ ncclResult_t ncclSocketGetTask(struct ncclSocketComm* comm, int op, void* data, 
 }
 
 ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
+  // OFCCL_LOG1(OFCCL_MPI, "enter ncclSocketTest");
   *done = 0;
   struct ncclSocketRequest *r = (struct ncclSocketRequest*)request;
   if (r == NULL) {
@@ -558,12 +559,14 @@ ncclResult_t ncclSocketRegMr(void* comm, void* data, int size, int type, void** 
 ncclResult_t ncclSocketDeregMr(void* comm, void* mhandle) { return ncclSuccess; }
 
 ncclResult_t ncclSocketIsend(void* sendComm, void* data, int size, int tag, void* mhandle, void** request) {
+  // OFCCL_LOG1(OFCCL_MPI, "enter ncclSocketIsend");
   struct ncclSocketComm* comm = (struct ncclSocketComm*)sendComm;
   NCCLCHECK(ncclSocketGetRequest(comm, NCCL_SOCKET_SEND, data, size, (struct ncclSocketRequest**)request));
   return ncclSuccess;
 }
 
 ncclResult_t ncclSocketIrecv(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request) {
+  // OFCCL_LOG1(OFCCL_MPI, "enter ncclSocketIrecv");
   struct ncclSocketComm* comm = (struct ncclSocketComm*)recvComm;
   if (n != 1) return ncclInternalError;
   NCCLCHECK(ncclSocketGetRequest(comm, NCCL_SOCKET_RECV, data[0], sizes[0], (struct ncclSocketRequest**)request));

@@ -361,6 +361,9 @@ static ncclResult_t SaveProxy(struct ncclChannel* channel, int type, int peer, s
   }
   if (connector->transportComm->proxyProgress == NULL) return ncclSuccess;
 
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before ncclLocalOpAppend, connector->comm=%p, &connector->proxyConn=%p", getpid(), pthread_self(), connector->comm->rank, &connector->proxyConn, &connector->proxyConn);
+
   NCCLCHECK(ncclLocalOpAppend(connector->comm, &connector->proxyConn, op));
   return ncclSuccess;
 }
@@ -491,6 +494,15 @@ static ncclResult_t progressOps(struct ncclComm* comm, struct ncclProxyProgressS
   while (op) {
     if (op->state == ncclProxyOpNone) return ncclInternalError;
     TIME_START(0); TIME_START(1);
+
+    // int poolIndex, opIndex;
+    // NCCLCHECK(getOpIndex(op, state, &poolIndex, &opIndex));
+    // NCCLCHECK(printProxyOp(op, poolIndex, opIndex));
+    
+   
+    // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> dumpProxyState:", getpid(), pthread_self(), comm->rank);
+    // dumpProxyState(state);
+
     NCCLCHECK(op->progress(comm, op));
     if (op->idle) { TIME_STOP(1); TIME_CANCEL(0); } else { TIME_CANCEL(1); TIME_STOP(0); }
     *idle &= op->idle;

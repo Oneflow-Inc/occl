@@ -129,12 +129,12 @@ class Primitives<
       }
       step += StepPerSlice;
     }
-    if ((flags & (Recv*RoleWaitRecv))) {
-      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, tail from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
-    }
-    if ((flags & (Send*RoleWaitSend))) {
-      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, head from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
-    }
+    // if ((flags & (Recv*RoleWaitRecv))) {
+    //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, waitPeer success, tail from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+    // }
+    // if ((flags & (Send*RoleWaitSend))) {
+    //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, waitPeer success, head from Rank[%d] = %llu, new step %llu", ncclShmem.comm.rank, blockIdx.x, tid, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks, connStepCache, step);
+    // }
   }
 
   template<int Recv, int Send>
@@ -144,12 +144,12 @@ class Primitives<
       *connStepPtr = step;
     }
     
-    if ((flags & (Recv*RolePostRecv))) {
-      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
-    }
-    if ((flags & (Send*RolePostSend))) {
-      NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
-    }
+    // if ((flags & (Recv*RolePostRecv))) {
+    //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank - 1 + ncclShmem.comm.nRanks) % ncclShmem.comm.nRanks);
+    // }
+    // if ((flags & (Send*RolePostSend))) {
+    //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, postPeer update tail: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", ncclShmem.comm.rank, blockIdx.x, tid, *connStepPtr, connStepPtr, (ncclShmem.comm.rank + 1) % ncclShmem.comm.nRanks);
+    // }
   }
 
   // 后两个模板参数的常见取值：static constexpr int Input=0, Output=1;
@@ -209,12 +209,12 @@ class Primitives<
         if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
           ncclShmem.groups[group].dsts[0] = userBuff + dstIx + offset;
         
-        if ((flags & (Recv*RoleWaitRecv))) {
-          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-        }
-        if ((flags & (Send*RoleWaitSend))) {
-          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-        }
+        // if ((flags & (Recv*RoleWaitRecv))) {
+        //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        // }
+        // if ((flags & (Send*RoleWaitSend))) {
+        //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
         if (DirectRecv && ncclShmem.groups[group].srcs[0] == ncclShmem.groups[group].dsts[0]) {
@@ -264,12 +264,12 @@ class Primitives<
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
       { // Only workers could have Wait roles so we know the slice must be empty
         // since we've exited the loop above.
-        if ((flags & (Recv*RoleWaitRecv))) {
-          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-        }
-        if ((flags & (Send*RoleWaitSend))) {
-          NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
-        }
+        // if ((flags & (Recv*RoleWaitRecv))) {
+        //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        // }
+        // if ((flags & (Send*RoleWaitSend))) {
+        //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, lower enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
+        // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
       }
       barrier(); // Has couterpart in preceding worker-only loop.
@@ -370,6 +370,9 @@ class Primitives<
         connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
         connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0; // 这个和proxy相关，先不关注。int *offsFifo;      // Buffer fifo from proxy to GPU，所以对GPU是recv
+
+        //  NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, conn->offsFifo = %p", ncclShmem.comm.rank, blockIdx.x, tid, conn->offsFifo);
+
         if (Direct) { // 模板参数 Direct 是 1，下边会区分两种direct的方式
           // User buffers have been registered
           // 现在log打印出来 conn->direct=0
@@ -414,6 +417,9 @@ class Primitives<
         connStepPtr = conn->head;
         connStepCache = *connStepPtr;
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0;
+
+        // NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, conn->offsFifo = %p, conn->sizesFifo = %p", ncclShmem.comm.rank, blockIdx.x, tid, conn->offsFifo, conn->sizesFifo);
+
         if (flags & OffsFifoEnabled)
           connOffsFifoPtr = conn->offsFifo;
         connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
