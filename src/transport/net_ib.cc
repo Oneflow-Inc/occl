@@ -780,8 +780,45 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r) {
   return ncclSuccess;
 }
 
+static const char* GetStringFromEnv(const std::string& env_var, const char* default_value) {
+  const char* env_p = std::getenv(env_var.c_str());
+  if (env_p == nullptr) {
+    return default_value;
+  } else {
+    return env_p;
+  }
+}
+
+void print_socket_info(int sock) {
+  struct sockaddr_in local_addr, remote_addr;
+  socklen_t local_len = sizeof(local_addr);
+  socklen_t remote_len = sizeof(remote_addr);
+
+  // 获取本地地址
+  if (getsockname(sock, (struct sockaddr *)&local_addr, &local_len) == -1) {
+    perror("getsockname");
+    exit(EXIT_FAILURE);
+  }
+
+  // 获取远端地址
+  if (getpeername(sock, (struct sockaddr *)&remote_addr, &remote_len) == -1) {
+    perror("getpeername");
+    exit(EXIT_FAILURE);
+  }
+
+  // 打印地址信息
+  printf("Local IP: %s, Local Port: %d\n", inet_ntoa(local_addr.sin_addr), ntohs(local_addr.sin_port));
+  printf("Remote IP: %s, Remote Port: %d\n", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port));
+}
+
 ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
   struct ncclIbQpInfo remQpInfo;
+
+  auto host = GetStringFromEnv("HOST", "");
+  if (strcmp(host, "oneflow-25") == 0) {
+    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclSendCheck, socket ip & port:", getpid(), pthread_self(), host);
+    print_socket_info(comm->sock.fd);
+  }
 
   // Do not block on this receive, return if not ready.
   int bytes = 0;
@@ -807,33 +844,14 @@ void print_ip_port(const struct sockaddr_in *addr) {
   printf("ip: %s, port: %d\n", ip, ntohs(addr->sin_port));
 }
 
-void print_socket_info(int sock) {
-  struct sockaddr_in local_addr, remote_addr;
-  socklen_t local_len = sizeof(local_addr);
-  socklen_t remote_len = sizeof(remote_addr);
-
-  // 获取本地地址
-  if (getsockname(sock, (struct sockaddr *)&local_addr, &local_len) == -1) {
-    perror("getsockname");
-    exit(EXIT_FAILURE);
-  }
-
-  // 获取远端地址
-  if (getpeername(sock, (struct sockaddr *)&remote_addr, &remote_len) == -1) {
-    perror("getpeername");
-    exit(EXIT_FAILURE);
-  }
-
-  // 打印地址信息
-  printf("Local IP: %s, Local Port: %d\n", inet_ntoa(local_addr.sin_addr), ntohs(local_addr.sin_port));
-  printf("Remote IP: %s, Remote Port: %d\n", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port));
-}
-
 ncclResult_t ncclRecvCheck(struct ncclIbRecvComm* comm) {
   // Do not block on this receive, return if not ready.
 
-  OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self());
-  print_socket_info(comm->sock.fd);
+  auto host = GetStringFromEnv("HOST", "");
+  if (strcmp(host, "oneflow-27") == 0) {
+    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self(), host);
+    print_socket_info(comm->sock.fd);
+  }
 
   int bytes = 0;
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->ready, sizeof(int), &bytes));
