@@ -99,6 +99,13 @@ class Primitives<
       // int spins = 0;
 
       // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, connStepCache + (isSendNotRecv ? NCCL_STEPS : 0), step + StepPerSlice);
+      
+      // if ((flags & (Recv*RoleWaitRecv))) {
+      //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      // }
+      // if ((flags & (Send*RoleWaitSend))) {
+      //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+      // }
 
       // 目前RingAllReduce的send在这里等待条件会放宽，fall into while的条件是connStepCache + NCCL_STEPS < step + StepPerSlice)，即connStepCache + 8 < step + 2)，所以send更容易执行
       while (connStepCache + (isSendNotRecv ? NCCL_STEPS : 0) < step + StepPerSlice) {
@@ -113,10 +120,10 @@ class Primitives<
           
 
           // if ((flags & (Recv*RoleWaitRecv))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! tail from Rank[%d] = %llu, step + StepPerSlice = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step + StepPerSlice);
+          //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, SHOULD RETURN!! connStepCache(tail from Rank[%d], connStepPtr = %p) = %llu, step + StepPerSlice = %llu, step = %llu, ctxSwitchCounter = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepPtr, connStepCache, step + StepPerSlice, step, ctxSwitchCounter);
           // }
           // if ((flags & (Send*RoleWaitSend))) {
-          //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
+          //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, SHOULD RETURN!! connStepCache(head from Rank[%d], connStepPtr = %p) + NCCL_STEPS = %llu, step + StepPerSlice = %llu, isSendNotRecv = %d, ctxSwitchCounter = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepPtr, connStepCache + NCCL_STEPS, step + StepPerSlice, isSendNotRecv, ctxSwitchCounter);
           // }
           // __syncwarp(); // ！！！！！！为了打印log加的！
           
@@ -173,10 +180,10 @@ class Primitives<
     }
     
     // if ((flags & (Recv*RoleWaitRecv))) {
-    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step);
+    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, waitPeer success, tail from Rank[%d] = %llu, new step %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache, step);
     // }
     // if ((flags & (Send*RoleWaitSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
+    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, waitPeer success connStepCache(head from Rank[%d]) + NCCL_STEPS = %llu, new step %llu, isSendNotRecv = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks, connStepCache + NCCL_STEPS, step, isSendNotRecv);
     // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
@@ -189,10 +196,10 @@ class Primitives<
     }
     
     // if ((flags & (Recv*RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
+    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, coll_id = %d, postPeer update head: *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank - 1 + sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
     // }
     // if ((flags & (Send*RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = %llu to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
+    //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, coll_id = %d, postPeer update tail = *connStepPtr = %llu, connStepPtr = %p, to Rank[%d]", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, *connStepPtr, connStepPtr, (sharedCollCtx[currUsedSlotId].staticCollCtx.rank + 1) % sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks);
     // }
     // __syncwarp(); // ！！！！！！为了打印log加的！
   }
@@ -268,6 +275,12 @@ class Primitives<
           
         // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, before call waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid);
         
+        // if ((flags & (Recv*RoleWaitRecv))) {
+        //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, upper enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        // }
+        // if ((flags & (Send*RoleWaitSend))) {
+        //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, upper enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
         subBarrier();
         if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
@@ -323,9 +336,9 @@ class Primitives<
         #ifdef ARRAY_DEBUG
           *(blkStatus.barrierCnt + 1 + 1 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
         #endif
-        // if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
-        // __syncwarp();
-        // postPeer<Recv, Send>();
+        if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
+        __syncwarp();
+        postPeer<Recv, Send>();
         offset += sliceSize;
         slice += 1;
       } while (slice < SlicePerChunk && offset < nelem);
@@ -334,14 +347,21 @@ class Primitives<
     // Non-workers come straight here. Workers too but only once the remaining
     // slices are all empty. Since empty slices are the uncommon case, and
     // worker perf is the limiter, perf-wise this loop is effectively unentered,
-    // hence just a single branch insn.
+    // hence just a single branch insn(instruction).
     #pragma unroll 1
-    while (slice < SlicePerChunk && offset < nelem) { // 过滤不了。~~挺巧妙的，用这个条件把nworkers里的线程过滤掉了~~。// +  1023bug: 应该是从这里又让0号等线程钻进了waitPeer，然后设置了SaveCtx7Quit。
+    // while (slice < SlicePerChunk && offset < nelem) { // 过滤不了。~~挺巧妙的，用这个条件把nworkers里的线程过滤掉了~~。// +  1023bug: 应该是从这里又让0号等线程钻进了waitPeer，然后设置了SaveCtx7Quit。
+    while (slice < SlicePerChunk) {
       sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
-      // { // Only workers could have Wait roles so we know the slice must be empty
-      //   // since we've exited the loop above.
-      //   waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
-      // }
+      { // Only workers could have Wait roles so we know the slice must be empty
+        // since we've exited the loop above.
+        // if ((flags & (Recv*RoleWaitRecv))) {
+        //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, lower enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        // }
+        // if ((flags & (Send*RoleWaitSend))) {
+        //   OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, lower enter waitPeer", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        // }
+        waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, 0);
+      }
 
       // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 2, slice=%d(SlicePerChunk=%d), offset=%d(nelem=%d, sliceSize=%d)", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
       #ifdef ARRAY_DEBUG
@@ -408,6 +428,9 @@ class Primitives<
         connStepPtr = conn->tail; // uint64_t *tail;     // Local for recv, remote for send
         connStepCache = *connStepPtr; // 这个应该就是simple协议的标记位，这个被设置了，就代表buffer里是新数据了。对于recv来说，就代表收到了新数据
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0; // 这个和proxy相关，先不关注。int *offsFifo;      // Buffer fifo from proxy to GPU，所以对GPU是recv
+
+        // OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, conn->offsFifo = %p", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, conn->offsFifo);
+
         if (Direct) { // 模板参数 Direct 是 1，下边会区分两种direct的方式
           // User buffers have been registered
           // 现在log打印出来 conn->direct=0
@@ -459,6 +482,9 @@ class Primitives<
         connStepPtr = conn->head;
         connStepCache = *connStepPtr;
         flags |= (conn->offsFifo != nullptr) ? OffsFifoEnabled : 0;
+
+        // OFCCL_LOG_RANK_X_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, coll_id = %d, conn->offsFifo = %p, conn->sizesFifo = %p", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, conn->offsFifo, conn->sizesFifo);
+        
         if (flags & OffsFifoEnabled)
           connOffsFifoPtr = conn->offsFifo;
         connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
@@ -490,6 +516,101 @@ class Primitives<
   }
 
  public:
+
+  // 模板参数：Ring AllReduce里边，MaxSend和MaxRecv都是 1，Direct = 1
+  __device__ Primitives(
+      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint32_t group=0, struct ncclWorkElem* e = nullptr
+    ):
+    tid(tid),
+    genericOpExecCnt(0),
+    currUsedSlotId(blkStatus.currLoadedCollId % NUM_SHMEM_SLOT),
+    stepSize(sharedCollCtx[currUsedSlotId].buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
+
+    // For send operations, we need an extra warp to overlap the threadfence and the copy
+    this->nthreads = nthreads;
+    this->nworkers = nthreads - (MaxSend > 0 && nthreads-WARP_SIZE >= 64 ? WARP_SIZE : 0); // 这一行的意思是，nthreads足够大的话，就可以剔除出一个warp了，剩下的是worker。
+    this->group = group & (uint16_t)0xFFFF; // 还是 0. ring的情况下，group一直是0。
+    int connIndex = group >> 16; // 还是 0.
+
+    int nrecv=0, nsend=0; // 后边两行代码之后，变成nrecv=1, nsend=1，这也是因为ring AllReduce，上下游只有一个peer吧。
+    while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
+    while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
+    this->fan = Fan(nrecv, nsend); // 相当于调用 __device__ FanSymmetric<1>(1, 1)
+
+    constexpr int ThreadPerSync = 8;
+    static_assert(MaxSend < ThreadPerSync && MaxRecv < ThreadPerSync, "Not enough threads to cover all peers");
+
+    int g = tid / ThreadPerSync; // 当前线程属于哪个 “g”
+    int ng = nthreads / ThreadPerSync; // 一共有几个 “g”
+    index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
+    flags = 0;
+    if (g == 0) {
+      if (index < nrecv) flags |= RoleWaitRecv; // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
+      if (index == nrecv) flags |= RoleInput; // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
+    } else if (g == 1) {
+      if (index < nsend) flags |= RoleWaitSend; // 1 * 8 + 0 号线程是 RoleWaitSend 8 
+      if (index == nsend) flags |= RoleOutput; // 1 * 8 + 1 号线程是 RoleOutput 9
+    } else if (g == ng - 2) { // 从 ng - 3 到 ng 都是属于最后一个warp的。
+      if (index < nrecv) flags |= RolePostRecv; // (ng - 2) * 8 + 0 号线程是 RolePostRecv(0x20) 272
+    } else if (g == ng - 1) {
+      if (index < nsend) flags |= RolePostSend; // (ng - 1) * 8 + 0 号线程是 RolePostSend(0x10) 280
+    }
+    // 所以总的来看，有flag的线程不多，事实上只有6个。
+    // 没有任何线程被 **单独** 设置了flag DirectWrite 和 DirectRead
+
+    int peer = 0;
+    if (flags & (RoleWaitRecv|RolePostRecv)) peer = recvPeers[index]; // 有RoleWaitRecv或RolePostRecv标记的线程，设置其peer。虽然我们给线程分配了0-7的index，但是只给index=0的线程分配了recv相关的flag。这个函数同时也会根据conn.direct，为flags追加DirectRead、DirectWrite
+    if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index]; // 同上
+    
+    // OFCCL_LOG_RANK_X_THRD_0_SHMEM(OFCCL_MPI, 0, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, coll_id = %d, peer = %d, connIndex = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, peer, connIndex);
+
+    loadRecvConn(&sharedCollCtx[currUsedSlotId].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
+    loadSendConn(&sharedCollCtx[currUsedSlotId].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
+
+    // inputBuf = sendbuff, outputBuf = recvbuff
+    setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e); // 事实上也是需要被指定了flag的线程才会进行相应的工作
+
+    // 初步观察了下，genericOp里边所有thrd都有活干——上边的load、set函数都是在操作shmem，单个thrd操作，然后真正执行的时候，大家都利用shmem里的信息工作
+  }
+
+  __device__ ~Primitives() {
+    // Ensure sharedCollCtx[currUsedSlotId].groups[].send/recvConns are available
+    if (!(flags & ThreadsSynced)) {
+      #ifdef ARRAY_DEBUG
+        *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      #endif
+      barrier();
+      #ifdef ARRAY_DEBUG
+        *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      #endif
+    }
+    // Save steps for the next operation
+    if (flags & (RolePostSend|RolePostRecv)) {
+      auto *conns = (flags & RolePostSend) ? sharedCollCtx[currUsedSlotId].groups[group].sendConns : sharedCollCtx[currUsedSlotId].groups[group].recvConns;
+      conns[index]->step = step;
+    }
+    
+    // if ((flags & (RolePostRecv))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, step);
+    // }
+    // if ((flags & (RolePostSend))) {
+    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, step);
+    // }
+    // __syncwarp(); // ！！！！！！为了打印log加的！！！！
+
+    // Make sure all threads are done writing back conn->step and done using
+    // sharedCollCtx[currUsedSlotId].groups[group]
+    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 4", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid);
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
+    barrier();
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 1 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
+  }
+
   // inputBuf = sendbuff, outputBuf = recvbuff
   __device__ void setDataPtrs(void const *inputBuf, void *outputBuf, uint64_t redOpArg, struct ncclWorkElemReg* e) {
     if (flags & RoleInput) { // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
@@ -577,99 +698,6 @@ class Primitives<
       *slot = nullptr;
     }
   }
-
-  // 模板参数：Ring AllReduce里边，MaxSend和MaxRecv都是 1，Direct = 1
-  __device__ Primitives(
-      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
-      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint32_t group=0, struct ncclWorkElem* e = nullptr
-    ):
-    tid(tid),
-    genericOpExecCnt(0),
-    currUsedSlotId(blkStatus.currLoadedCollId % NUM_SHMEM_SLOT),
-    stepSize(sharedCollCtx[currUsedSlotId].buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/sizeof(T)) {
-
-    // For send operations, we need an extra warp to overlap the threadfence and the copy
-    this->nthreads = nthreads;
-    this->nworkers = nthreads - (MaxSend > 0 && nthreads-WARP_SIZE >= 64 ? WARP_SIZE : 0); // 这一行的意思是，nthreads足够大的话，就可以剔除出一个warp了，剩下的是worker。
-    this->group = group & (uint16_t)0xFFFF; // 还是 0. ring的情况下，group一直是0。
-    int connIndex = group >> 16; // 还是 0.
-
-    int nrecv=0, nsend=0; // 后边两行代码之后，变成nrecv=1, nsend=1，这也是因为ring AllReduce，上下游只有一个peer吧。
-    while (nrecv < MaxRecv && recvPeers[nrecv] != -1) nrecv++;
-    while (nsend < MaxSend && sendPeers[nsend] != -1) nsend++;
-    this->fan = Fan(nrecv, nsend); // 相当于调用 __device__ FanSymmetric<1>(1, 1)
-
-    constexpr int ThreadPerSync = 8;
-    static_assert(MaxSend < ThreadPerSync && MaxRecv < ThreadPerSync, "Not enough threads to cover all peers");
-
-    int g = tid / ThreadPerSync; // 当前线程属于哪个 “g”
-    int ng = nthreads / ThreadPerSync; // 一共有几个 “g”
-    index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
-    flags = 0;
-    if (g == 0) {
-      if (index < nrecv) flags |= RoleWaitRecv; // 0 * 8 + 0 号线程是 RoleWaitRecv(0x04) 0
-      if (index == nrecv) flags |= RoleInput; // 0 * 8 + 1 号线程是 RoleInput(0x08) 1
-    } else if (g == 1) {
-      if (index < nsend) flags |= RoleWaitSend; // 1 * 8 + 0 号线程是 RoleWaitSend 8 
-      if (index == nsend) flags |= RoleOutput; // 1 * 8 + 1 号线程是 RoleOutput 9
-    } else if (g == ng - 2) { // 从 ng - 3 到 ng 都是属于最后一个warp的。
-      if (index < nrecv) flags |= RolePostRecv; // (ng - 2) * 8 + 0 号线程是 RolePostRecv(0x20) 272
-    } else if (g == ng - 1) {
-      if (index < nsend) flags |= RolePostSend; // (ng - 1) * 8 + 0 号线程是 RolePostSend(0x10) 280
-    }
-    // 所以总的来看，有flag的线程不多，事实上只有6个。
-    // 没有任何线程被 **单独** 设置了flag DirectWrite 和 DirectRead
-
-    int peer = 0;
-    if (flags & (RoleWaitRecv|RolePostRecv)) peer = recvPeers[index]; // 有RoleWaitRecv或RolePostRecv标记的线程，设置其peer。虽然我们给线程分配了0-7的index，但是只给index=0的线程分配了recv相关的flag。这个函数同时也会根据conn.direct，为flags追加DirectRead、DirectWrite
-    if (flags & (RoleWaitSend|RolePostSend)) peer = sendPeers[index]; // 同上
-    
-    loadRecvConn(&sharedCollCtx[currUsedSlotId].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitRecv或RolePostRecv标记的线程直接返回。
-    loadSendConn(&sharedCollCtx[currUsedSlotId].staticCollCtx.devPeers[peer], connIndex, e); // 没有RoleWaitSend或RolePostSend标记的线程直接返回。
-
-    // inputBuf = sendbuff, outputBuf = recvbuff
-    setDataPtrs(inputBuf, outputBuf, redOpArg, (struct ncclWorkElemReg*)e); // 事实上也是需要被指定了flag的线程才会进行相应的工作
-
-    // 初步观察了下，genericOp里边所有thrd都有活干——上边的load、set函数都是在操作shmem，单个thrd操作，然后真正执行的时候，大家都利用shmem里的信息工作
-  }
-
-  __device__ ~Primitives() {
-    // Ensure sharedCollCtx[currUsedSlotId].groups[].send/recvConns are available
-    if (!(flags & ThreadsSynced)) {
-      #ifdef ARRAY_DEBUG
-        *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      #endif
-      barrier();
-      #ifdef ARRAY_DEBUG
-        *(blkStatus.barrierCnt + 0 + 19 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-      #endif
-    }
-    // Save steps for the next operation
-    if (flags & (RolePostSend|RolePostRecv)) {
-      auto *conns = (flags & RolePostSend) ? sharedCollCtx[currUsedSlotId].groups[group].sendConns : sharedCollCtx[currUsedSlotId].groups[group].recvConns;
-      conns[index]->step = step;
-    }
-    
-    // if ((flags & (RolePostRecv))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostRecv>, save step(head) = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, step);
-    // }
-    // if ((flags & (RolePostSend))) {
-    //   OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d-RolePostSend>, save step(tail) = %llu", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, step);
-    // }
-    // __syncwarp(); // ！！！！！！为了打印log加的！！！！
-
-    // Make sure all threads are done writing back conn->step and done using
-    // sharedCollCtx[currUsedSlotId].groups[group]
-    // OFCCL_LOG_WARP_HEAD(OFCCL, "Rank<%d> Blk<%d> Thrd<%d> before barrierCnt 4", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid);
-    #ifdef ARRAY_DEBUG
-      *(blkStatus.barrierCnt + 0 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-    #endif
-    barrier();
-    #ifdef ARRAY_DEBUG
-      *(blkStatus.barrierCnt + 1 + 4 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
-    #endif
-  }
-
 
   __device__ void moveDataPtrs(intptr_t delta) {
     if (flags & (RoleInput|RoleOutput))

@@ -505,7 +505,7 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
     #endif
 
     *unprogressedCnt = 0;
-    // OFCCL_LOG_RANK_X(OFCCL, 0, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for coll_id = %d, reset *unprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId);
+    // OFCCL_LOG(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d>, read SQE for coll_id = %d, reset *unprogressedCnt = 0", thrdCudaDev, blockIdx.x, threadIdx.x, newActiveCollId);
 
     if (bid < blkLimit) {
       CollCtx *globalCollCtx4Blk7Coll = globalBlk2CollId2CollCtx + bid * MAX_LENGTH + newActiveCollId;
@@ -879,6 +879,8 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
         // ***** 然后调用ofcclFunc *****
         int wid = threadIdx.x / WARP_SIZE;
         if (wid < sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.nWarps) {
+          
+          // OFCCL_LOG_THRD_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d>, before running coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId);
 
           #ifdef DEBUG_CLOCK_IO
             if (threadIdx.x == 0) {
@@ -891,6 +893,8 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
           #endif
 
           ofcclFuncs[sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.workElem.header.funcIndex](); // 这里边的调用里不涉及__syncthreads().
+
+          // OFCCL_LOG_THRD_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d>, ofcclFuncs of coll_id = %d returns, blkStatus.collStatusAlign.collStatus[collId] = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId, blkStatus.collStatusAlign.collStatus[collId]);
         }
         ofcclBarrier(3);  // 跑完一个集合通信，同步一下。
         #if defined(SHOW_CNT) || defined(DEBUG_CLOCK_3D)
@@ -923,6 +927,7 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
   
             blkStatus.collTryCntAllign.collTryCnt[collId] = 0;
   
+            // OFCCL_LOG_THRD_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d>, manipulateCQ7ResetDoneColl of coll_id = %d", thrdCudaDev, blockIdx.x, threadIdx.x, collId);
             manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalBlk2CollId2CollCtx);
             // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
           }
@@ -951,6 +956,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
   // int tempRound = 0;
+  
+  // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> send conn info @ %p, send conn tail(RolePostSend) @ %p, send conn head(RoleWaitSend) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.tail, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.head);
+  // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> recv conn info @ %p, recv conn head(RolePostRecv) @ %p, recv conn tail(RoleWaitRecv) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.head, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.tail);
 
   blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters);
 

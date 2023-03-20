@@ -361,6 +361,9 @@ static ncclResult_t SaveProxy(struct ncclChannel* channel, int type, int peer, s
   }
   if (connector->transportComm->proxyProgress == NULL) return ncclSuccess;
 
+ 
+ // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before ncclLocalOpAppend, connector->comm=%p, &connector->proxyConn=%p", getpid(), pthread_self(), connector->comm->rank, &connector->proxyConn, &connector->proxyConn);
+
   NCCLCHECK(ncclLocalOpAppend(connector->comm, &connector->proxyConn, op));
   return ncclSuccess;
 }
@@ -491,6 +494,15 @@ static ncclResult_t progressOps(struct ncclComm* comm, struct ncclProxyProgressS
   while (op) {
     if (op->state == ncclProxyOpNone) return ncclInternalError;
     TIME_START(0); TIME_START(1);
+
+    // int poolIndex, opIndex;
+    // NCCLCHECK(getOpIndex(op, state, &poolIndex, &opIndex));
+    // NCCLCHECK(printProxyOp(op, poolIndex, opIndex));
+    
+   
+    // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> dumpProxyState:", getpid(), pthread_self(), comm->rank);
+    // dumpProxyState(state);
+
     NCCLCHECK(op->progress(comm, op));
     if (op->idle) { TIME_STOP(1); TIME_CANCEL(0); } else { TIME_CANCEL(1); TIME_STOP(0); }
     *idle &= op->idle;
@@ -607,11 +619,15 @@ void* ncclProxyProgress(void *comm_) {
   int lastIdle = 0;
   struct ncclProxyArgs profArgs; // Only used for profiling purposes
   while (state->stop == 0 && *comm->abortFlag == 0) {
+
+    // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> in ncclProxyProgress, state->stop=%d, *comm->abortFlag=%d", getpid(), pthread_self(), comm->rank, state->stop, *comm->abortFlag);
+
     int idle = 1;
     ncclResult_t ret = progressOps(comm, state, state->active, &idle);
     if (ret != ncclSuccess) {
       comm->fatalError = ret;
       INFO(NCCL_ALL,"%s:%d -> %d [Proxy Thread]", __FILE__, __LINE__, ret);
+      // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> ncclProxyProgress error, comm->fatalError=%d", getpid(), pthread_self(), comm->rank, comm->fatalError);
       return NULL;
     }
     if (lastIdle == 0 && idle == 1) ncclProfilingRecord(&profArgs, 0, 0, ncclProxyProfileIdle);
@@ -631,6 +647,7 @@ void* ncclProxyProgress(void *comm_) {
     }
     lastIdle = idle;
   }
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> out of ncclProxyProgress, state->stop=%d, *comm->abortFlag=%d", getpid(), pthread_self(), comm->rank, state->stop, *comm->abortFlag);
   return NULL;
 }
 
@@ -652,6 +669,7 @@ ncclResult_t ncclProxyStart(struct ncclComm* comm) {
 
 ncclResult_t ncclProxyProgressCreate(struct ncclComm* comm) {
   struct ncclProxyProgressState* state = &comm->proxyState.progressState;
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> before pthread_create(&state->thread", getpid(), pthread_self(), comm->rank);
   if (!state->thread) {
     pthread_create(&state->thread, NULL, ncclProxyProgress, comm);
     ncclSetThreadName(state->thread, "NCCL Progress%2d", comm->cudaDev);
@@ -661,6 +679,8 @@ ncclResult_t ncclProxyProgressCreate(struct ncclComm* comm) {
 
 ncclResult_t ncclProxyProgressDestroy(struct ncclComm* comm) {
   struct ncclProxyProgressState* state = &comm->proxyState.progressState;
+
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d> enter ncclProxyProgressDestroy", getpid(), pthread_self(), comm->rank);
 
   // Request the proxy to stop and then wake it
   if (state->opsPool) {
@@ -1047,6 +1067,7 @@ void* ncclProxyService(void* _args) {
       }
     }
   }
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> before ncclProxyProgressDestroy", getpid(), pthread_self());
   // Wait for all operations to complete and stop progress thread before freeing any resource
   if (ncclProxyProgressDestroy(comm) != ncclSuccess) {
     WARN("[Proxy Service] proxyDestroy failed");
@@ -1071,6 +1092,7 @@ ncclResult_t ncclProxyCreate(struct ncclComm* comm) {
   // comm->proxyState.thread is pthread_join()'d by commFree() in init.cc
   pthread_create(&comm->proxyState.thread, NULL, ncclProxyService, comm);
   ncclSetThreadName(comm->proxyState.thread, "NCCL Service %2d", comm->cudaDev);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> after pthread_create NCCL Service %2d", getpid(), pthread_self(), comm->cudaDev);
   return ncclSuccess;
 }
 

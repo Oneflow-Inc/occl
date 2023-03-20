@@ -19,6 +19,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+// #define DEBUG_CLOCK_CPU 1
+#ifdef DEBUG_CLOCK_CPU
+#include <chrono>
+#endif
+
 // #define MAX_ASYNC_PANELS 32
 // #define MAX_ASYNC_OPS 128
 
@@ -56,6 +61,8 @@ inline unsigned long long int CpuLogicSqHead(SQ *sq) {
 extern ncclResult_t ofcclPrepareCollComm(struct ncclInfo *info, int collId, ofcclRankCtx_t rankCtx);
 
 extern int sqWrite(SQ *sq, SQE *sqe, int thrdCudaDev, CallbackFunc callback, void *callbackArgs, ofcclRankCtx_t rankCtx);
+
+extern ncclResult_t ofcclInsert7UpdateProxy(int collId, ofcclRankCtx_t rankCtx);
 
 struct ofcclCommArgs {
   ncclResult_t ret;
@@ -109,6 +116,7 @@ struct ofcclRankCtx {
   pthread_t ofcclPrepareThreads[MAX_LENGTH];
   int collCount;
   std::unordered_set<ncclComm_t> seenComms;
+  std::unordered_map<int, ncclComm_t> collId2Comm;
 
   dim3 daemonKernelGridDim;
   dim3 daemonKernelBlockDim;

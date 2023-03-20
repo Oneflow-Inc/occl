@@ -14,6 +14,7 @@
 
 #ifdef NCCL_DEBUG_CLOCK
   #define CLOCK2US_FACTOR 1695.0
+  #define NCCL_LOG_RANK_X_THRD_0_PURE(FMT, args...) do { if (ncclShmem.comm.rank==1 && threadIdx.x == 0) printf(FMT "\t", args); } while(0)
   inline __device__ long long int calcDeltaClock(long long int start, long long int end) {
     return end > start ? end - start : end + (0xffffffffffffffff - start);
   }
@@ -284,7 +285,7 @@ __device__ void ncclKernel(struct ncclDevComm* comm, ncclWorkElem first)  {
     long long int afterGetSqeAfterPutCqeDeltaClock = calcDeltaClock(kernStart, kernEnd);
     // NCCL_LOG_RANK_0_THRD_0(NCCL, "Rank<%d> Blk<%d> Thrd<%d> kernel run %.2lfus, kernStart=%lld, kernEnd=%lld", ncclShmem.comm.rank, blockIdx.x, tid, afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR, kernStart, kernEnd);
     if (blockIdx.x == 0) {
-      NCCL_LOG_RANK_0_THRD_0_PURE("%.2lf", afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR);
+      NCCL_LOG_RANK_X_THRD_0_PURE("%.2lf", afterGetSqeAfterPutCqeDeltaClock/CLOCK2US_FACTOR);
     }
   #endif
 }

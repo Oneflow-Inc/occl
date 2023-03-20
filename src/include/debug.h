@@ -21,9 +21,12 @@
 #define OFCCL_LOG0(PRE) printf("[%s:%d] <%s> " #PRE "\n", __FILE__, __LINE__, __func__)
 
 #define OFCCL_LOG_RANK_0(PRE, FMT, args...) do { if (thrdCudaDev==0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_RANK_0_SHMEM(PRE, FMT, args...) do { if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank==0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_RANK_0_THRD_0_SHMEM(PRE, FMT, args...) do { if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank==0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
 #define OFCCL_LOG_RANK_X(PRE, X, FMT, args...) do { if (thrdCudaDev==X) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define OFCCL_LOG_RANK_X_SHMEM(PRE, X, FMT, args...) do { if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank==X) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
+#define OFCCL_LOG_RANK_X_THRD_0_SHMEM(PRE, X, FMT, args...) do { if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank==X && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define OFCCL_LOG_RANK_X_THRD_0(PRE, X, FMT, args...) do { if (thrdCudaDev==X && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
 #define OFCCL_LOG_THRD_0(PRE, FMT, args...) do { if (threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
@@ -40,6 +43,7 @@
 
 #define OFCCL_LOG_RANK_0_THRD_0(PRE, FMT, args...) do { if (sharedCollCtx[blkStatus.currLoadedCollId % NUM_SHMEM_SLOT].staticCollCtx.rank==0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 
+#define NCCL_LOG_RANK_0(PRE, FMT, args...) do { if (ncclShmem.comm.rank==0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define NCCL_LOG_RANK_0_THRD_0(PRE, FMT, args...) do { if (ncclShmem.comm.rank==0 && threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define NCCL_LOG_RANK_0_THRD_100(PRE, FMT, args...) do { if (ncclShmem.comm.rank==0 && threadIdx.x == 100) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)
 #define NCCL_LOG_THRD_0(PRE, FMT, args...) do { if (threadIdx.x == 0) printf("[%s:%d] <%s> " #PRE " " FMT "\n", __FILE__, __LINE__, __func__, args); } while(0)

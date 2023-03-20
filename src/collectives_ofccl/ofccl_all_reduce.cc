@@ -21,6 +21,8 @@ ncclResult_t  ofcclRunAllReduce(const void* sendbuff, void* recvbuff, int collId
   int thrdCudaDev;
   checkRuntime(cudaGetDevice(&thrdCudaDev));
 
+  ofcclInsert7UpdateProxy(collId, rankCtx);
+
 
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> ofcclRunAllReduce, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> Enter ofcclRunAllReduce", pthread_self(), thrdCudaDev);

@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "comm.h"
+#include "debug.h"
 #include "net.h"
 #include "graph.h"
 #include "proxy.h"
@@ -12,6 +13,7 @@
 #include "gdrwrap.h"
 #include "shm.h"
 #include "profiler.h"
+#include <pthread.h>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
 
@@ -770,6 +772,7 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
 static_assert(NCCL_STEPS <= NCCL_NET_MAX_REQUESTS, "Not enough net requests to cover for steps");
 
 static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArgs* args) {
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, enter sendProxyProgress, args->nsubs=%d", getpid(), pthread_self(), comm->rank, args->nsubs);
   if (args->state == ncclProxyOpReady) {
     for (int s=0; s<args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs+s;
@@ -794,10 +797,13 @@ static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArg
       char* localBuff = NCCL_NET_MAP_GET_POINTER(&resources->map, cpu, buffs[p]);
       int buffSize = stepSize*args->sliceSteps;
       if (sub->nbytes < buffSize) buffSize = sub->nbytes;
+      
+      // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, at begining, sub->transmitted = %lu, sub->posted = %lu, sub->done = %lu, sub->nbytes=%lu, sub->nsteps=%d, resources->shared=%d", getpid(), pthread_self(), comm->rank, sub->transmitted, sub->posted, sub->done, sub->nbytes, sub->nsteps, resources->shared);
+
       // Post buffers to the GPU
       if (sub->posted < sub->nsteps && sub->posted < sub->done + maxDepth) {
         int buffSlot = (sub->base+sub->posted)%NCCL_STEPS;
-        if (resources->shared) {
+        if (resources->shared) { // 打印出来看到nccl、occl里面的shared都是0
           int sharedBuffSlot = sub->posted%maxDepth;
           int offset;
           NCCLCHECK(sharedBuffersGet(comm, sub->channelId, sharedBuffSlot*args->nsubs+s, &offset));
@@ -809,16 +815,22 @@ static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArg
           if (resources->gdcSync) wc_store_fence(); // Flush out WC write
         } else sub->posted += args->sliceSteps;
         for (uint64_t step=sub->posted-args->sliceSteps; step<sub->posted; step++) {
-          ncclProfilingRecord(args, s, step, ncclProxyProfileSendGPUWait);
+          ncclProfilingRecord(args, s, step, ncclProxyProfileSendGPUWait); // PROFILE_PROXY宏没打开，这里其实是啥也没干。
         }
         args->idle = 0;
-        continue;
+        continue; // 注意这个continue，posted增加的时候，不会执行下面的代码。
       }
       // Check whether we received data from the GPU and send it to the network
       if (sub->transmitted < sub->posted && sub->transmitted < sub->done + NCCL_STEPS) {
+
+        // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, before ncclNetIsend, sub->transmitted = %lu, sub->posted = %lu, sub->done = %lu, sub->base=%lu", getpid(), pthread_self(), comm->rank, sub->transmitted, sub->posted, sub->done, sub->base);
+
         int buffSlot = (sub->base+sub->transmitted)%NCCL_STEPS;
-        volatile int* sizesFifo = resources->recvMem->sizesFifo;
+        volatile int* sizesFifo = resources->recvMem->sizesFifo; // 注意都是volatile，说明可能会被GPU写。
         volatile uint64_t* recvTail = &resources->recvMem->tail;
+
+        // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, before ncclNetIsend, buffSlot = %d, sizesFifo[buffSlot] = %d @ %p, *recvTail = %lu @ %p", getpid(), pthread_self(), comm->rank, buffSlot, sizesFifo[buffSlot], sizesFifo + buffSlot, *recvTail, recvTail);
+
         if (sizesFifo[buffSlot] != -1 && ((*recvTail > (sub->base+sub->transmitted)) || p == NCCL_PROTO_LL)) {
           // We have something to receive, let's check if it's completely ready.
           int size = sizesFifo[buffSlot];
@@ -849,8 +861,14 @@ static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArg
           }
           if (ready) {
             // Data is ready, try to send.
+
+            // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclNetIsend, buff @ %p, size = %d, resources->rank = %d, mhandle @ %p, sub->requests+buffSlot @ %p", getpid(), pthread_self(), buff, size, resources->rank, mhandle, sub->requests+buffSlot);
+
             NCCLCHECK(ncclNetIsend(resources->netSendComm, buff, size, resources->rank, mhandle, sub->requests+buffSlot));
             if (sub->requests[buffSlot] != NULL) {
+
+              // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, sendProxy [%ld/%d] Isend posted, req %p", getpid(), pthread_self(), comm->rank, sub->transmitted, buffSlot, sub->requests[buffSlot]);
+
               TRACE(NCCL_NET, "sendProxy [%ld/%d] Isend posted, req %p", sub->transmitted, buffSlot, sub->requests[buffSlot]);
               sizesFifo[buffSlot] = -1;
               // Make sure size is reset to zero before we update the head.
@@ -858,15 +876,21 @@ static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArg
               sub->transmitted += args->sliceSteps;
               for (uint64_t step=sub->transmitted-args->sliceSteps; step<sub->transmitted; step++) ncclProfilingRecord(args, s, step, ncclProxyProfileSendWait);
               args->idle = 0;
-              continue;
+              continue; // 注意这个continue，每次只干一件事。
             }
           }
         }
       }
+
+      // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, after ncclNetIsend, sub->transmitted = %lu, sub->posted = %lu, sub->done = %lu", getpid(), pthread_self(), comm->rank, sub->transmitted, sub->posted, sub->done);
+
       // Check whether the network has completed some send operations.
       if (sub->done < sub->transmitted) {
         int done;
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
+
+        // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclNetTest", getpid(), pthread_self());
+
         NCCLCHECK(ncclNetTest(sub->requests[buffSlot], &done, NULL));
         if (done) {
           TRACE(NCCL_NET, "sendProxy [%ld/%d] request %p done", sub->done, buffSlot, sub->requests[buffSlot]);
@@ -894,6 +918,7 @@ static ncclResult_t sendProxyProgress(struct ncclComm* comm, struct ncclProxyArg
 }
 
 static ncclResult_t recvProxyProgress(struct ncclComm* comm, struct ncclProxyArgs* args) {
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> Rank<%d>, enter recvProxyProgress", getpid(), pthread_self(), comm->rank);
   if (args->state == ncclProxyOpReady) {
     // Initialize subs and group them by same recvComm.
     void* recvComm;
