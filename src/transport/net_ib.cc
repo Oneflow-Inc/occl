@@ -780,15 +780,6 @@ ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r) {
   return ncclSuccess;
 }
 
-static const char* GetStringFromEnv(const std::string& env_var, const char* default_value) {
-  const char* env_p = std::getenv(env_var.c_str());
-  if (env_p == nullptr) {
-    return default_value;
-  } else {
-    return env_p;
-  }
-}
-
 void print_socket_info(int sock) {
   struct sockaddr_in local_addr, remote_addr;
   socklen_t local_len = sizeof(local_addr);
@@ -809,6 +800,17 @@ void print_socket_info(int sock) {
   // 打印地址信息
   printf("Local IP: %s, Local Port: %d\n", inet_ntoa(local_addr.sin_addr), ntohs(local_addr.sin_port));
   printf("Remote IP: %s, Remote Port: %d\n", inet_ntoa(remote_addr.sin_addr), ntohs(remote_addr.sin_port));
+}
+
+char *get_local_ip(int sock) {
+  struct sockaddr_in local_addr;
+  socklen_t local_len = sizeof(local_addr);
+  // 获取本地地址
+  if (getsockname(sock, (struct sockaddr *)&local_addr, &local_len) == -1) {
+    perror("getsockname");
+    exit(EXIT_FAILURE);
+  }
+  return inet_ntoa(local_addr.sin_addr);
 }
 
 ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
@@ -841,11 +843,12 @@ void print_ip_port(const struct sockaddr_in *addr) {
 ncclResult_t ncclRecvCheck(struct ncclIbRecvComm* comm) {
   // Do not block on this receive, return if not ready.
 
-  auto host = GetStringFromEnv("HOST", "");
-  if (strcmp(host, "oneflow-27") == 0) {
-    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self(), host);
-    print_socket_info(comm->sock.fd);
-  }
+  // char *host = get_local_ip(comm->sock.fd);
+
+  // if (strcmp(host, "11.11.1.27") == 0) {
+  //   OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self(), host);
+  //   print_socket_info(comm->sock.fd);
+  // }
 
   int bytes = 0;
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->ready, sizeof(int), &bytes));
@@ -1016,11 +1019,12 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mhandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
 
-  auto host = GetStringFromEnv("HOST", "");
-  if (strcmp(host, "oneflow-25") == 0) {
-    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s in ncclIbIsend, socket ip & port:", getpid(), pthread_self(), host);
-    print_socket_info(comm->sock.fd);
-  }
+  // char *host = get_local_ip(comm->sock.fd);
+
+  // if (strcmp(host, "11.11.1.25") == 0) {
+  //   OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s in ncclIbIsend, socket ip & port:", getpid(), pthread_self(), host);
+  //   print_socket_info(comm->sock.fd);
+  // }
 
   if (comm->ready == 0) NCCLCHECK(ncclSendCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
@@ -1037,11 +1041,11 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mh
   int idx = comm->fifoHead+1;
 
  
- // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slot=%d, comm->fifoHead+1=%lu", getpid(), pthread_self(), slot, comm->fifoHead+1);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slot=%d, comm->fifoHead+1=%lu", getpid(), pthread_self(), slot, comm->fifoHead+1);
   
   if (slots[0].idx != idx) {
    
- // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slots[0].idx=%lu, comm->fifoHead+1=%lu", getpid(), pthread_self(), slots[0].idx, comm->fifoHead+1);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> slots[0].idx=%lu, comm->fifoHead+1=%lu", getpid(), pthread_self(), slots[0].idx, comm->fifoHead+1);
     *request = NULL;
     return ncclSuccess;
   }
