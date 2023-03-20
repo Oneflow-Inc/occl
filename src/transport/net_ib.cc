@@ -814,12 +814,6 @@ void print_socket_info(int sock) {
 ncclResult_t ncclSendCheck(struct ncclIbSendComm* comm) {
   struct ncclIbQpInfo remQpInfo;
 
-  auto host = GetStringFromEnv("HOST", "");
-  if (strcmp(host, "oneflow-25") == 0) {
-    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclSendCheck, socket ip & port:", getpid(), pthread_self(), host);
-    print_socket_info(comm->sock.fd);
-  }
-
   // Do not block on this receive, return if not ready.
   int bytes = 0;
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &remQpInfo, sizeof(remQpInfo), &bytes));
@@ -1021,6 +1015,13 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
 ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mhandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+
+  auto host = GetStringFromEnv("HOST", "");
+  if (strcmp(host, "oneflow-25") == 0) {
+    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s in ncclIbIsend, socket ip & port:", getpid(), pthread_self(), host);
+    print_socket_info(comm->sock.fd);
+  }
+
   if (comm->ready == 0) NCCLCHECK(ncclSendCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
 
