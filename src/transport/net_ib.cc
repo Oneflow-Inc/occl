@@ -1026,6 +1026,8 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mh
   //   print_socket_info(comm->sock.fd);
   // }
 
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> in ncclIbIsend, comm->ready = %d", getpid(), pthread_self(), comm->ready);
+
   if (comm->ready == 0) NCCLCHECK(ncclSendCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
 
@@ -1173,7 +1175,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, int
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
  
- // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbIrecv, comm->ready=%d", getpid(), pthread_self(), comm->ready);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbIrecv, comm->ready=%d", getpid(), pthread_self(), comm->ready);
   if (comm->ready == 0) NCCLCHECK(ncclRecvCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
