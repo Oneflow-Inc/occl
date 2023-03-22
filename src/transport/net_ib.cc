@@ -843,12 +843,12 @@ void print_ip_port(const struct sockaddr_in *addr) {
 ncclResult_t ncclRecvCheck(struct ncclIbRecvComm* comm) {
   // Do not block on this receive, return if not ready.
 
-  // char *host = get_local_ip(comm->sock.fd);
+  char *host = get_local_ip(comm->sock.fd);
 
-  // if (strcmp(host, "11.11.1.27") == 0) {
-  //   OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self(), host);
-  //   print_socket_info(comm->sock.fd);
-  // }
+  if (strcmp(host, "11.11.1.27") == 0) {
+    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s enter ncclRecvCheck, socket ip & port:", getpid(), pthread_self(), host);
+    print_socket_info(comm->sock.fd);
+  }
 
   int bytes = 0;
   NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &comm->sock, &comm->ready, sizeof(int), &bytes));
@@ -1019,12 +1019,14 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 ncclResult_t ncclIbIsend(void* sendComm, void* data, int size, int tag, void* mhandle, void** request) {
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
 
-  // char *host = get_local_ip(comm->sock.fd);
+  char *host = get_local_ip(comm->sock.fd);
 
-  // if (strcmp(host, "11.11.1.25") == 0) {
-  //   OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s in ncclIbIsend, socket ip & port:", getpid(), pthread_self(), host);
-  //   print_socket_info(comm->sock.fd);
-  // }
+  if (strcmp(host, "11.11.1.25") == 0) {
+    OFCCL_LOG(OFCCL_MPI, "<%d-%lu> %s in ncclIbIsend, socket ip & port:", getpid(), pthread_self(), host);
+    print_socket_info(comm->sock.fd);
+  }
+
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> in ncclIbIsend, comm->ready = %d", getpid(), pthread_self(), comm->ready);
 
   if (comm->ready == 0) NCCLCHECK(ncclSendCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
@@ -1173,7 +1175,7 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, int
 ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, int* sizes, int* tags, void** mhandles, void** request) {
   struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
  
- // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbIrecv, comm->ready=%d", getpid(), pthread_self(), comm->ready);
+  // OFCCL_LOG(OFCCL_MPI, "<%d-%lu> enter ncclIbIrecv, comm->ready=%d", getpid(), pthread_self(), comm->ready);
   if (comm->ready == 0) NCCLCHECK(ncclRecvCheck(comm));
   if (comm->ready == 0) { *request = NULL; return ncclSuccess; }
   if (n > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
