@@ -36,7 +36,7 @@ extern __constant__ int64_t RECV_SUCCESS_THRESHOLD;
 extern __constant__ int64_t NUM_ITER_ENV;
 #endif
 
-#define ARRAY_DEBUG 1
+// #define ARRAY_DEBUG 1
 
 #ifdef DEBUG_CLOCK
   #define CLOCK2US_FACTOR 1695.0

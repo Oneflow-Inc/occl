@@ -325,9 +325,6 @@ class Primitives<
             // __threadfence_block();
             // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, slice = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, slice);
           }
-          if ((flags & (Send*RoleWaitSend))) {
-            sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage = *(sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange);
-          }
 
           // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before barrier 0, genericOp worker wait fail, slice = %d(SlicePerChunk=%d), offset = %d(nelem=%d, sliceSize=%d)", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
           // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before barrier 0, genericOp worker wait fail, slice = %d, offset = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, slice, offset);
@@ -715,6 +712,44 @@ class Primitives<
     #ifdef ARRAY_DEBUG
       *(blkStatus.barrierCnt + 5 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     #endif
+
+    // if (Direct && recvProvider) {
+    //   int spins = 0;
+    //   void *volatile *slot = sharedCollCtx[currUsedSlotId].groups[group].recvConns[index]->ptrExchange;
+    //   // Wait for consumer to consume previous value before trampling it.
+
+    //   #ifdef ARRAY_DEBUG
+    //     *(blkStatus.barrierCnt + 7 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (unsigned long long)slot;
+    //   #endif
+
+    //   while (*slot != nullptr && !checkAbort(spins));
+    //   directBuff = (T*)outputBuf;
+    //   // Encode pointer by XOR'ing against some address they definitely wouldn't send
+    //   // since we want to allow them sending us nullptr while not colliding with
+    //   // the empty slot value. // 这个编码方式没太懂。
+    //   *slot = reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(directBuff) ^ reinterpret_cast<uintptr_t>(slot));
+    // }
+    // if (Direct && sendAcceptor) {
+    //   int spins = 0;
+    //   void *volatile *slot = sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange;
+
+    //   #ifdef ARRAY_DEBUG
+    //     *(blkStatus.barrierCnt + 7 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (unsigned long long)slot;
+    //   #endif
+
+    //   void *ptr;
+    //   while (true) {
+    //     ptr = *slot;
+    //     if (ptr != nullptr || checkAbort(spins)) break;
+    //   }
+    //   directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
+    //               reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
+                  
+    //   sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage = ptr;
+
+    //   *slot = nullptr;
+    // }
+
     // 模板参数 Direct 是 1
     // 如果是从上下文恢复，那就什么也不用做，否则按照原来的流程
     if (Direct && recvProvider && !sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain) {
@@ -736,7 +771,7 @@ class Primitives<
     if (Direct && sendAcceptor) {
       if (sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain) {
         void *ptr = sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage;
-        void **slot = &ptr;
+        void **slot = sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange;
         directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
                     reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
       } else {
@@ -754,6 +789,10 @@ class Primitives<
         }
         directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
                     reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
+
+        // 这个赋值不太好等到发现fail再做，因为下边就直接把*slot设为了nullptr，也就是 *(sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange)被设为了nullptr，所以fail的时候，这个值已经丢失了。
+        sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage = ptr;
+
         *slot = nullptr;
       }
     }

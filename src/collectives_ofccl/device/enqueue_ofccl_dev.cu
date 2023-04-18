@@ -167,7 +167,7 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   for (; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
     
     unsigned long long int oldSlot = atomicCAS_system(cq->buffer + cqWriteSlot, INVALID_CQ_SLOT_MASK, cqSlot);
-    OFCCL_LOG(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
+    // OFCCL_LOG(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
 
     if (oldSlot == INVALID_CQ_SLOT_MASK) {
       ++blkStatus.dynamicBlkStatus.cqCnt[doneCollId]; // 写成功才更新。
