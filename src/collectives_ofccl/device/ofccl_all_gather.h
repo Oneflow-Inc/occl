@@ -19,11 +19,21 @@ namespace {
     const int nranks = sharedCollCtx[currUsedSlotId].staticCollCtx.nRanks;
     const ssize_t loopSize = nChannels*int(chunkSize);
     const ssize_t size = args->count; // send count
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 0 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
 
     T *inputBuf = (T*)args->sendbuff;
     T *outputBuf = (T*)args->recvbuff;
+    
+    // #ifdef ARRAY_DEBUG
+    //   *(blkStatus.barrierCnt + 0 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    // #endif
     Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims
       (tid, nthreads, &sharedCollCtx[currUsedSlotId].staticCollCtx.ringPrev, &sharedCollCtx[currUsedSlotId].staticCollCtx.ringNext, inputBuf, outputBuf, args->redOpArg);
+    // #ifdef ARRAY_DEBUG
+    //   *(blkStatus.barrierCnt + 1 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    // #endif
 
     ssize_t offset = 0;
     int nelem = 0;
@@ -64,8 +74,15 @@ namespace {
           // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directSend. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
           prims.directSend(chunkOffset, offset, nelem);
         } else {
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directCopySend. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directCopySend. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directCopySend", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+          // #ifdef ARRAY_DEBUG
+          //   *(blkStatus.barrierCnt + 2 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          // #endif
           prims.directCopySend(chunkOffset, offset, offset, nelem);
+          // #ifdef ARRAY_DEBUG
+          //   *(blkStatus.barrierCnt + 3 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          // #endif
         }
         if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
           goto run_ring_end;
@@ -79,8 +96,15 @@ namespace {
           rankDest = ringRanks[nranks-j];
           offset = chunkOffset + rankDest * size;
 
-          // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvCopySend. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvCopySend. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+          // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecvCopySend", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+          // #ifdef ARRAY_DEBUG
+          //   *(blkStatus.barrierCnt + 4 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          // #endif
           prims.directRecvCopySend(offset, offset, nelem);
+          // #ifdef ARRAY_DEBUG
+          //   *(blkStatus.barrierCnt + 5 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+          // #endif
 
           if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
             goto run_ring_end;
@@ -95,8 +119,15 @@ namespace {
         offset = chunkOffset + rankDest * size;
 
         // Final wait/copy.
-        // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecv. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+        // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecv. gridOffset=%ld, currentStep=%d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, gridOffset, currentStep);
+        // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, before prims.directRecv.", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId);
+        // #ifdef ARRAY_DEBUG
+        //   *(blkStatus.barrierCnt + 6 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+        // #endif
         prims.directRecv(offset, nelem);
+        // #ifdef ARRAY_DEBUG
+        //   *(blkStatus.barrierCnt + 7 + 18 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+        // #endif
         if (sharedCollCtx[currUsedSlotId].saveCtx7Quit == 1) {
           goto run_ring_end;          
         }
@@ -119,6 +150,10 @@ namespace {
         blkStatus.collStatusAlign.collStatus[blkStatus.currLoadedCollId] = 2;
       }
     }
+    
+    #ifdef ARRAY_DEBUG
+      *(blkStatus.barrierCnt + 1 + 14 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+    #endif
   }
 }
 

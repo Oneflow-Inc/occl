@@ -167,7 +167,7 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   for (; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
     
     unsigned long long int oldSlot = atomicCAS_system(cq->buffer + cqWriteSlot, INVALID_CQ_SLOT_MASK, cqSlot);
-    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
+    OFCCL_LOG(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
 
     if (oldSlot == INVALID_CQ_SLOT_MASK) {
       ++blkStatus.dynamicBlkStatus.cqCnt[doneCollId]; // 写成功才更新。
@@ -471,6 +471,12 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       return;
     }
 
+    #ifdef ARRAY_DEBUG
+      if (threadIdx.x == 0) {
+        *(blkStatus.barrierCnt + 2 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      }
+    #endif
+
     // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
     int newActiveCollId = target.collId;
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[newActiveCollId]; // 需要参与新读到的coll的block才会进行后续操作。
@@ -573,6 +579,9 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
 static __device__ void loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int tid = threadIdx.x;
+  #ifdef ARRAY_DEBUG
+    *(blkStatus.barrierCnt + 0 + 16 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  #endif
 
   // TODO: 考虑让所有线程都执行常数初始化。
   ONE_THRD_DO
@@ -586,6 +595,9 @@ static __device__ void loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7C
   copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, &globalCollCtx4Blk7Coll->dynamicCollCtx, sizeof(DynamicCollCtx));
   copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].staticCollCtx, &globalCollCtx4Blk7Coll->staticCollCtx, sizeof(StaticCollCtx));
 
+  #ifdef ARRAY_DEBUG
+    *(blkStatus.barrierCnt + 1 + 16 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  #endif
   return;
 }
 
@@ -797,6 +809,13 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       while (cqWrite(cq, doneCollId, thrdCudaDev, nullptr) == -1) {
       }
     #endif
+
+    #ifdef ARRAY_DEBUG
+      if (threadIdx.x == 0) {
+        *(blkStatus.barrierCnt + 3 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      }
+    #endif
+
     // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
 
     #ifdef DEBUG_CLOCK
