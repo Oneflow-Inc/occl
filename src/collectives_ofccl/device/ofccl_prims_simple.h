@@ -122,6 +122,7 @@ class Primitives<
         //if (spins == 0) printf("r=%d b=%d t=%d SPUN OUT got=%d want=%d\n", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, threadIdx.x, int(connStepCache + (isSendNotRecv ? NCCL_STEPS : 0)), int(step+StepPerSlice));
         
         if (ctxSwitchCounter++ >= sharedCollCtx[currUsedSlotId].ctxSwitchThreshold) {
+          // 这里虽然可能会有两个线程都进来，但是进来之后都会设置saveCtx7Quit = 1，然后退出，所以不会有问题；再一个一般来说，也只有waitRecv线程会进来。
           sharedCollCtx[currUsedSlotId].saveCtx7Quit = 1;
           sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain = 1;
           
@@ -324,6 +325,10 @@ class Primitives<
             // __threadfence_block();
             // OFCCL_LOG(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, coll_id = %d, offset = %d, slice = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, blkStatus.currLoadedCollId, offset, slice);
           }
+          if ((flags & (Send*RoleWaitSend))) {
+            sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage = *(sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange);
+          }
+
           // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before barrier 0, genericOp worker wait fail, slice = %d(SlicePerChunk=%d), offset = %d(nelem=%d, sliceSize=%d)", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, slice, SlicePerChunk, offset, nelem, sliceSize);
           // OFCCL_LOG_RANK_0_WARP_HEAD_SHMEM(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before barrier 0, genericOp worker wait fail, slice = %d, offset = %d", sharedCollCtx[currUsedSlotId].staticCollCtx.rank, blockIdx.x, tid, slice, offset);
           #ifdef ARRAY_DEBUG
@@ -711,7 +716,8 @@ class Primitives<
       *(blkStatus.barrierCnt + 5 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     #endif
     // 模板参数 Direct 是 1
-    if (Direct && recvProvider) {
+    // 如果是从上下文恢复，那就什么也不用做，否则按照原来的流程
+    if (Direct && recvProvider && !sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain) {
       int spins = 0;
       void *volatile *slot = sharedCollCtx[currUsedSlotId].groups[group].recvConns[index]->ptrExchange;
       // Wait for consumer to consume previous value before trampling it.
@@ -724,25 +730,32 @@ class Primitives<
       directBuff = (T*)outputBuf;
       // Encode pointer by XOR'ing against some address they definitely wouldn't send
       // since we want to allow them sending us nullptr while not colliding with
-      // the empty slot value.
+      // the empty slot value. // 这个编码方式没太懂。
       *slot = reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(directBuff) ^ reinterpret_cast<uintptr_t>(slot));
     }
     if (Direct && sendAcceptor) {
-      int spins = 0;
-      void *volatile *slot = sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange;
+      if (sharedCollCtx[currUsedSlotId].dynamicCollCtx.loadAgain) {
+        void *ptr = sharedCollCtx[currUsedSlotId].dynamicCollCtx.sendConnPtrExchage;
+        void **slot = &ptr;
+        directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
+                    reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
+      } else {
+        int spins = 0;
+        void *volatile *slot = sharedCollCtx[currUsedSlotId].groups[group].sendConns[index]->ptrExchange;
 
-      #ifdef ARRAY_DEBUG
-        *(blkStatus.barrierCnt + 7 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (unsigned long long)slot;
-      #endif
+        #ifdef ARRAY_DEBUG
+          *(blkStatus.barrierCnt + 7 + 7 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) = (unsigned long long)slot;
+        #endif
 
-      void *ptr;
-      while (true) {
-        ptr = *slot;
-        if (ptr != nullptr || checkAbort(spins)) break;
+        void *ptr;
+        while (true) {
+          ptr = *slot;
+          if (ptr != nullptr || checkAbort(spins)) break;
+        }
+        directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
+                    reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
+        *slot = nullptr;
       }
-      directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
-                   reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
-      *slot = nullptr;
     }
     if (Direct && sendProvider) {
       int spins = 0;
