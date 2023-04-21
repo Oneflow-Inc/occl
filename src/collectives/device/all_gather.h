@@ -55,6 +55,9 @@ namespace {
       if (inputBuf + chunkOffset == outputBuf + offset) { // In place
         prims.directSend(chunkOffset, offset, nelem);
       } else {
+
+        // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directCopySend, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[0].srcs[0]);
+
         prims.directCopySend(chunkOffset, offset, offset, nelem);
       }
 
@@ -62,6 +65,8 @@ namespace {
       for (int j=1; j<nranks-1; ++j) {
         rankDest = ringRanks[nranks-j];
         offset = chunkOffset + rankDest * size;
+
+        // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directRecvCopySend, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[0].srcs[0]);
 
         prims.directRecvCopySend(offset, offset, nelem);
       }
@@ -71,6 +76,9 @@ namespace {
       offset = chunkOffset + rankDest * size;
 
       // Final wait/copy.
+
+      // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, before prims.directRecv, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[0].srcs[0]);
+
       prims.directRecv(offset, nelem);
     }
   }

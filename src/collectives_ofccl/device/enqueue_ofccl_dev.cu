@@ -167,7 +167,7 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
   for (; cqWriteSlot < NUM_CQ_SLOT; ++cqWriteSlot) {
     
     unsigned long long int oldSlot = atomicCAS_system(cq->buffer + cqWriteSlot, INVALID_CQ_SLOT_MASK, cqSlot);
-    // OFCCL_LOG_RANK_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
+    // OFCCL_LOG(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after CAS oldSlot = 0x%llx, cqCnt = %u, doneCollId = %d", thrdCudaDev, blockIdx.x, threadIdx.x, oldSlot, blkStatus.dynamicBlkStatus.cqCnt[doneCollId], doneCollId);
 
     if (oldSlot == INVALID_CQ_SLOT_MASK) {
       ++blkStatus.dynamicBlkStatus.cqCnt[doneCollId]; // 写成功才更新。
@@ -471,6 +471,12 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
       return;
     }
 
+    #ifdef ARRAY_DEBUG
+      if (threadIdx.x == 0) {
+        *(blkStatus.barrierCnt + 2 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+      }
+    #endif
+
     // 正常读到了SQE的话，需要往global的globalBlk2CollId2CollCtx表项里边写入，更新blkStatus.numActiveColls
     int newActiveCollId = target.collId;
     int blkLimit = sharedBlkCount4CollAlign.blkCount4Coll[newActiveCollId]; // 需要参与新读到的coll的block才会进行后续操作。
@@ -573,6 +579,9 @@ static __device__ void checkSQ7TidyTaskQ(int thrdCudaDev, SQ *sq, CollCtx *globa
 
 static __device__ void loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId, int64_t BASE_CTX_SWITCH_THRESHOLD) {
   int tid = threadIdx.x;
+  // #ifdef ARRAY_DEBUG
+  //   *(blkStatus.barrierCnt + 0 + 16 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  // #endif
 
   // TODO: 考虑让所有线程都执行常数初始化。
   ONE_THRD_DO
@@ -586,6 +595,9 @@ static __device__ void loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7C
   copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, &globalCollCtx4Blk7Coll->dynamicCollCtx, sizeof(DynamicCollCtx));
   copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].staticCollCtx, &globalCollCtx4Blk7Coll->staticCollCtx, sizeof(StaticCollCtx));
 
+  // #ifdef ARRAY_DEBUG
+  //   *(blkStatus.barrierCnt + 1 + 16 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+  // #endif
   return;
 }
 
@@ -797,6 +809,8 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
       while (cqWrite(cq, doneCollId, thrdCudaDev, nullptr) == -1) {
       }
     #endif
+
+
     // *(blkStatus.collCounters + 1 + doneCollId * COLL_COUNTER_INNER_SIZE + blockIdx.x * MAX_LENGTH * COLL_COUNTER_INNER_SIZE) += 1;
 
     #ifdef DEBUG_CLOCK
@@ -837,6 +851,13 @@ static __device__ void manipulateCQ7ResetDoneColl(int thrdCudaDev, int doneCollI
   // bugfix: 但是也得判断那个slot装的是不是自己。
   if (sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].staticCollCtx.collId == doneCollId) {
     sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].staticCollCtx.collId = -1;
+
+    int group = 0; // this->group = group & (uint16_t)0xFFFF; // 还是 0. ring的情况下，group一直是0。
+    int index = 0; // TODO: 这样的指定或许是有问题的。// index = tid % ThreadPerSync; // 当前线程在 “g” 里的位置 // Peer index I'm responsible for
+    void **slot = sharedCollCtx[doneCollId % NUM_SHMEM_SLOT].groups[group].sendConns[index]->ptrExchange;
+    if (slot != nullptr) {
+      *slot = nullptr; // bugfix：应该把这个重置放到coll完成的时候，来实现一种peer间的同步。
+    }
   }
 
   blkStatus.collStatusAlign.collStatus[doneCollId] = 0;
@@ -922,7 +943,7 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
           }
         #endif
         if (blkStatus.collStatusAlign.collStatus[collId] == 2) {
-          if (threadIdx.x == 0) {
+          if (threadIdx.x == 8) { // bugfix: 调整为8号线程写cqe，为的是在里边把ptrExchange处理了。
             *unprogressedCnt = 0;
   
             blkStatus.collTryCntAllign.collTryCnt[collId] = 0;
@@ -931,10 +952,17 @@ static __device__ void traverseTaskQ(int thrdCudaDev, CollCtx *globalBlk2CollId2
             manipulateCQ7ResetDoneColl(thrdCudaDev, collId, cq, globalCqes, globalBlk2CollId2CollCtx);
             // 对于完成执行的集合通信应该不用把shmem里的collCtx写回到global mem里边，sendbuff/recvbuff等下次的SQE传过来，剩下的其他都是些静态配置项。
           }
+          
+          #ifdef ARRAY_DEBUG
+            if (threadIdx.x == 0) {
+              *(blkStatus.barrierCnt + 3 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
+            }
+          #endif
+
           break;
         }
       }
-      ofcclBarrier(3);
+      ofcclBarrier(3); // 放在这里不太好看，但是应该没啥问题。
     }
   }
 
@@ -1065,6 +1093,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (blkStatus.finallyQuit == 1) { // TODO: 还是不要在这里读host mem
         #ifdef SHOW_CNT
           // OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu (avg totalCtxSaveCnt: %llu), totalCtxLoadCnt=%llu (avg totalCtxLoadCnt: %llu), totalSwitchCntAfterRecvSuccess=%llu (avg totalSwitchCntAfterRecvSuccess: %llu), totalSwitchCntBeforeRecvSuccess=%llu (avg totalSwitchCntBeforeRecvSuccess: %llu), totalUnprogressedQuitCnt=%llu (avg totalUnprogressedQuitCnt: %llu)", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxSaveCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalSwitchCntAfterRecvSuccess, blkStatus.dynamicBlkStatus.totalSwitchCntAfterRecvSuccess / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalSwitchCntBeforeRecvSuccess, blkStatus.dynamicBlkStatus.totalSwitchCntBeforeRecvSuccess / NUM_ITER_ENV, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt / NUM_ITER_ENV);
+
           OFCCL_LOG_THRD_0(OFCCL_FINAL_QUIT, "Rank<%d> Blk<%d> Thrd<%d> totalCtxSaveCnt=%llu, totalCtxLoadCnt=%llu, totalSwitchCntAfterRecvSuccess=%llu, totalSwitchCntBeforeRecvSuccess=%llu, totalUnprogressedQuitCnt=%llu", thrdCudaDev, bid, tid, blkStatus.dynamicBlkStatus.totalCtxSaveCnt, blkStatus.dynamicBlkStatus.totalCtxLoadCnt, blkStatus.dynamicBlkStatus.totalSwitchCntAfterRecvSuccess, blkStatus.dynamicBlkStatus.totalSwitchCntBeforeRecvSuccess, blkStatus.dynamicBlkStatus.totalUnprogressedQuitCnt);
         #endif
 
