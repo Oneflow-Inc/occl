@@ -693,7 +693,7 @@ class Primitives<
       *(blkStatus.barrierCnt + 3 + 17 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
     #endif
   
-    ofcclBarrier(6); // TODO: 可删。
+    // ofcclBarrier(6); // TODO: 可删。
   }
 
   __device__ ~Primitives() {
