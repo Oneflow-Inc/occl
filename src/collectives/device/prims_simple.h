@@ -10,6 +10,7 @@
 //                                                SlicePerChunk=2                     StepPerSlice=2
 // Unroll 在primitives.h 里有默认值 COLL_UNROLL=4
 // P2p=0
+#include "common.h"
 #include "debug.h"
 template<typename T, typename RedOp, typename Fan, int Direct,
          int SlicePerChunk, int StepPerSlice, int Unroll, int P2p>
@@ -120,6 +121,7 @@ class Primitives<
           ptrs[index] = directBuff + remoteIx + offset;
         } else if (flags & DirectWrite) {
           ptrs[index] = directBuff + dstIx + offset;  // send to next from my output buffer
+          // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, update srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
         } else {
           ptrs[index] = connEltsFifo + (step%NCCL_STEPS)*stepSize;
         }
@@ -204,11 +206,24 @@ class Primitives<
       #endif
       do {
         sliceSize = sliceSize < nelem-offset ? sliceSize : nelem-offset;
-        if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)))
+
+        // if (tid == 1) {
+        //   NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before assigning src/dst, srcs[0]=%p, srcs[0]@%p, Src=%d, SrcBuf=%d, Input=%d, Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput))=%d", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].srcs, Src, SrcBuf, Input, Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput)));
+        // } else if (tid == 9) {
+        //   NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d> before assigning src/dst, srcs[0]=%p, srcs[0]@%p, Dst=%d, DstBuf=%d, Input=%d, Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput))=%d", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].srcs, Dst, DstBuf, Input, Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)));
+        // }
+
+        if (Src && (flags & (SrcBuf==Input ? RoleInput : RoleOutput))) {
           ncclShmem.groups[group].srcs[0] = userBuff + srcIx + offset; // 传给srcIx形参其实也是个offset
-        if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput)))
+
+          // NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, userBuff = %p, srcIx = 0x%lx, offset = 0x%x, srcs[0]=%p, srcs[0]@%p", ncclShmem.comm.rank, blockIdx.x, tid, userBuff, srcIx, offset, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].srcs);
+        }
+        if (Dst && (flags & (DstBuf==Input ? RoleInput : RoleOutput))) {
           ncclShmem.groups[group].dsts[0] = userBuff + dstIx + offset;
+          // NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, userBuff = %p, dstIx = 0x%lx, offset = 0x%x, dsts[0]=%p, dsts[0]@%p, srcs[0]=%p, srcs[0]@%p", ncclShmem.comm.rank, blockIdx.x, tid, userBuff, dstIx, offset, ncclShmem.groups[group].dsts[0], ncclShmem.groups[group].dsts, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].srcs);
+        }
         
+        // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, before waitPeer, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
         // if ((flags & (Recv*RoleWaitRecv))) {
         //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitRecv>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
         // }
@@ -216,16 +231,34 @@ class Primitives<
         //   NCCL_LOG_RANK_0(OFCCL_MPI, "Rank<%d> Blk<%d> Thrd<%d-RoleWaitSend>, upper enter waitPeer", ncclShmem.comm.rank, blockIdx.x, tid);
         // }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(dstIx, remoteIx, offset, sliceSize);
+
+        // if (tid == 1 || tid == 9 || tid == 0) {
+        //   NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after waitPeer before subBarrier, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
+        // }
+        
+        // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after waitPeer before subBarrier, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
         subBarrier();
+        if (tid == 1 || tid == 9) {
+          // NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after subBarrier, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
+        }
+        // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after subBarrier, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
         if (DirectRecv && ncclShmem.groups[group].srcs[0] == ncclShmem.groups[group].dsts[0]) {
+
+          // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, case 1, DirectRecv = %d, srcs[0]=%p, dsts[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, DirectRecv, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].dsts[0]);
+          
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send) {
+
+            // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, case 1 inner, Send = %d", ncclShmem.comm.rank, blockIdx.x, tid, Send);
+
             // (1-Send) is only there to avoid compilation errors in case MaxSend=0 (and Send=0).
             ReduceOrCopyMulti<Unroll, RedOp, T, 1, 1, 1, (1-Send)+MaxSend, 0>
               (tid, nworkers, nullptr, false,
                1, (T const**)ncclShmem.groups[group].srcs,
                fan.nsend(), (T**)ncclShmem.groups[group].dsts+1,
                sliceSize);
+
+            // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after case 1, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
           }
         } else if (DirectSend && !DirectRecv && SrcBuf != Input && ncclShmem.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
@@ -235,6 +268,9 @@ class Primitives<
              Dst, (T**)ncclShmem.groups[group].dsts,
              sliceSize);
         } else {
+
+          // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, case 3, DirectRecv = %d, srcs[0]=%p, dsts[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, DirectRecv, ncclShmem.groups[group].srcs[0], ncclShmem.groups[group].dsts[0]);
+
           constexpr int PreOpN = SrcBuf != Input ? 0 :
                                  DirectRecv*MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1+NCCL_MAX_DIRECT_ARITY) : 1;
           ReduceOrCopyMulti<Unroll, RedOp, T, Recv+Src, Recv*MaxRecv+Src, Send+Dst, Send*MaxSend+Dst, PreOpN>
@@ -242,6 +278,8 @@ class Primitives<
              Recv*fan.nrecv()+Src, (T const**)ncclShmem.groups[group].srcs,
              Send*fan.nsend()+Dst, (T**)ncclShmem.groups[group].dsts,
              sliceSize);
+
+          // NCCL_LOG_RANK_0_THRD_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, after case 3, srcs[0]=%p", ncclShmem.comm.rank, blockIdx.x, tid, ncclShmem.groups[group].srcs[0]);
         }
         barrier(); // This barrier has a counterpart in following loop
         if (Send && (flags & RolePostSend) && index == 0) __threadfence_system();
@@ -554,6 +592,8 @@ class Primitives<
       // since we want to allow them sending us nullptr while not colliding with
       // the empty slot value.
       *slot = reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(directBuff) ^ reinterpret_cast<uintptr_t>(slot));
+      
+      // NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, encode directBuff=%p to *(recvConns[index]->ptrExchange)=%p, in recvConns[index]->ptrExchange@%p", ncclShmem.comm.rank, blockIdx.x, tid, directBuff, *slot, slot);
     }
     if (Direct && sendAcceptor) {
       int spins = 0;
@@ -565,6 +605,9 @@ class Primitives<
       }
       directBuff = regUsed ? (T*)(e->dnOutputs[index]) :
                    reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(ptr) ^ reinterpret_cast<uintptr_t>(slot));
+
+      // NCCL_LOG_RANK_0(OFCCL_P2P, "Rank<%d> Blk<%d> Thrd<%d>, init *(sendConns[index]->ptrExchange)=%p with peer, directBuff=%p, sendConns[index]->ptrExchange@%p", ncclShmem.comm.rank, blockIdx.x, tid, ptr, directBuff, ncclShmem.groups[group].sendConns[index]->ptrExchange);
+
       *slot = nullptr;
     }
     if (Direct && sendProvider) {

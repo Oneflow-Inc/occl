@@ -15,5 +15,10 @@ ncclResult_t ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcoun
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
     ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS };
+
+  // int thrdCudaDev;
+  // checkRuntime(cudaGetDevice(&thrdCudaDev));
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> ncclAllGather, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
+
   return ncclEnqueueCheck(&info);
 }

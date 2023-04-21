@@ -29,7 +29,7 @@ struct RunWorkElement {
   }
 };
 
-// Don't use barrier 0 as it's used by the final sync
+// Don't use barrier 0 as it's used by the final sync，8和15也都被占了。
 inline __device__ void ofcclBarrier(int barId, int numThreads=blockDim.x) {
   asm volatile("bar.sync %0, %1;" :: "r"(barId), "r"(numThreads));
 }
