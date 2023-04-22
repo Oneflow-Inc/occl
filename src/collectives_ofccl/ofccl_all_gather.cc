@@ -23,7 +23,7 @@ ncclResult_t  ofcclRunAllGather(const void* sendbuff, void* recvbuff, int collId
 
   ofcclInsert7UpdateProxy(collId, rankCtx);
 
-  OFCCL_LOG(OFCCL, "<%lu> Rank<%d> ofcclRunAllGather, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
+  // OFCCL_LOG(OFCCL, "<%lu> Rank<%d> ofcclRunAllGather, sendbuff @ %p, recvbuff @ %p", pthread_self(), thrdCudaDev, sendbuff, recvbuff);
   // OFCCL_LOG_RANK_0(OFCCL, "<%lu> Rank<%d> Enter ofcclRunAllGather", pthread_self(), thrdCudaDev);
 
   while (sqWrite(rankCtx->sq, &sqe, thrdCudaDev, callback, callbackArgs, rankCtx) == -1) {}
