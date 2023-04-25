@@ -1273,7 +1273,8 @@ void *startBarrierCntPrinter(void *args) {
     file << std::endl << std::endl << std::endl;
 
     // sleep(1);
-    usleep(5);
+    // usleep(5);
+    usleep(50 * 1000);
   }
   file.close();
   return nullptr;
