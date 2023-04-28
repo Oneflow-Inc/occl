@@ -101,7 +101,7 @@ extern __constant__ int64_t NUM_ITER_ENV;
     }
   #endif
 #else
-  #define MAX_LENGTH 1000LL // 受到0xc000 shmem的限制
+  #define MAX_LENGTH 2000LL // 受到0xc000 shmem的限制
   #define NUM_SHMEM_SLOT 1
 #endif
 
