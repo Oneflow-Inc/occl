@@ -185,7 +185,7 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
   int tid = threadIdx.x;
   int nthreads = blockDim.x;
   
-
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 1", thrdCudaDev, blockIdx.x, threadIdx.x);
   ONE_THRD_DO
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;
@@ -205,10 +205,13 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     cqWriteSlot = 0;
   ONE_THRD_DO_END
   
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 2", thrdCudaDev, blockIdx.x, threadIdx.x);
   // 不需要初始化DEBUG_CLOCK里的数组，因为这些数组使用的时候都是直接赋值的。
 
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
   int hasQuitted = myGlobalBlkStatus->hasQuitted; // 每个线程都读。
+
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 3", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   // 第一次启动之前，rankCtx->hostBlkStatus是calloc的，然后复制到globalMem上，所以blkStatus.collStatusAlign.collStatus应该是全0，但是之后的启动可能导致collStatus数组是混乱的，还是重置一下。
   int csTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
@@ -218,6 +221,8 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     set16B(tid, (char *)(blkStatus.collStatusAlign.collStatus) + csDoneBytes, &zeros, targetBytes);
     csDoneBytes += targetBytes;
   }
+
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 4", thrdCudaDev, blockIdx.x, threadIdx.x);
   
   // 每次kernel启动的时候，都把各个coll的尝试次数重置。
   int ctcTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
@@ -227,10 +232,14 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     set16B(tid, (char *)(blkStatus.collTryCntAllign.collTryCnt) + ctcDoneBytes, &zeros, targetBytes);
     ctcDoneBytes += targetBytes;
   }
+  
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 5", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   if (hasQuitted == 0) {
     set16B(tid, &blkStatus.dynamicBlkStatus, &zeros, sizeof(DynamicBlkStatus));
       
+    OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 6", thrdCudaDev, blockIdx.x, threadIdx.x);
+
     #ifdef DEBUG_CLOCK
       // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
       ONE_THRD_DO
@@ -408,6 +417,8 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     #endif
   }
 
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 7", thrdCudaDev, blockIdx.x, threadIdx.x);
+
   int bcTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE); // 这里不应该用collCount，因为blkCount4Coll相当于是数组模拟的map，我们不应该假设coll_id连续增长。
   int bcDoneBytes = 0;
   while (bcDoneBytes < bcTotalBytes) {
@@ -416,7 +427,15 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     bcDoneBytes += targetBytes;
   }
 
+  OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclBarrier(1)", thrdCudaDev, blockIdx.x, threadIdx.x);
+
   ofcclBarrier(1); // 为了下边读取blkStatus.dynamicBlkStatus.numActiveColls
+
+  OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, after ofcclBarrier(1)", thrdCudaDev, blockIdx.x, threadIdx.x);
+
+  OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 8", thrdCudaDev, blockIdx.x, threadIdx.x);
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 9", thrdCudaDev, blockIdx.x, threadIdx.x);
+  OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 10", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   int acTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
   int acDoneBytes = 0;
@@ -426,6 +445,8 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     copy16B(tid, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + acDoneBytes, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + acDoneBytes, targetBytes);
     acDoneBytes += targetBytes;
   }
+
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 11", thrdCudaDev, blockIdx.x, threadIdx.x);
   return;
 }
 
@@ -980,7 +1001,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   int tid = threadIdx.x;
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.dynamicBlkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.dynamicBlkStatus.numActiveColls);
-  // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
   // int tempRound = 0;
@@ -988,7 +1009,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> send conn info @ %p, send conn tail(RolePostSend) @ %p, send conn head(RoleWaitSend) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.tail, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.head);
   // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> recv conn info @ %p, recv conn head(RolePostRecv) @ %p, recv conn tail(RoleWaitRecv) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.head, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.tail);
 
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before blockInit", thrdCudaDev, blockIdx.x, threadIdx.x);
   blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters);
+  OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, after blockInit", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
@@ -1005,7 +1028,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
       if (blkStatus.dynamicBlkStatus.numActiveColls == 0) {
         break;
       }
+      OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before traverseTaskQ", thrdCudaDev, blockIdx.x, threadIdx.x);
       traverseTaskQ(thrdCudaDev, globalBlk2CollId2CollCtx, collCount, cq, globalCqes, &unprogressedCnt, BASE_CTX_SWITCH_THRESHOLD);
+      OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, after traverseTaskQ", thrdCudaDev, blockIdx.x, threadIdx.x);
 
       if (tid == 0) { // 遍历完一次之后，当前activeColl的后续工作，
         // 只有完成一个集合通信，才有必要操作taskQ
@@ -1049,7 +1074,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
     if (tid == 0) {
       blkStatus.willingnessToGetSqe = 0;
     
+      OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ7TidyTaskQ", thrdCudaDev, blockIdx.x, threadIdx.x);
       checkSQ7TidyTaskQ(thrdCudaDev, sq, globalBlk2CollId2CollCtx, finallyQuit, &unprogressedCnt);
+      OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before checkSQ7TidyTaskQ", thrdCudaDev, blockIdx.x, threadIdx.x);
 
       // 只有0号线程才会执行checkSQ7TidyTaskQ，自然只有0号线程才会更改checkSQ7TidyTaskQFailCnt，并且进行相应调整。
 
