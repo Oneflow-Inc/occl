@@ -19,6 +19,26 @@ inline __device__ void set16B(int tid, void* dst, void const* src, int bytes) {
   }
 }
 
+inline __device__ void copy16BLoop(int tid, void* dst, void const* src, int totolBytes) {
+  int offset = 16*tid;
+  while (offset < totolBytes) {
+    uint64_t a=0, b=0;
+    asm("ld.v2.u64 {%0,%1},[%2];" : "=l"(a),"=l"(b) : "l"((char const*)src + offset));
+    asm volatile("st.v2.u64 [%0],{%1,%2};" :: "l"((char*)dst + offset), "l"(a), "l"(b));
+    offset += 16*blockDim.x;
+  }
+}
+
+inline __device__ void set16BLoop(int tid, void* dst, void const* src, int totolBytes) {
+  int offset = 16*tid;
+  while (offset < totolBytes) {
+    uint64_t a=0, b=0;
+    asm("ld.v2.u64 {%0,%1},[%2];" : "=l"(a),"=l"(b) : "l"((char const*)src));
+    asm volatile("st.v2.u64 [%0],{%1,%2};" :: "l"((char*)dst + offset), "l"(a), "l"(b));
+    offset += 16*blockDim.x;
+  }
+}
+
 // share mem用超了。
 // TODO: 可以不同的algo、proto使用不同的数据类型，不过可以看看是不是有意义
 __shared__ CollCtx sharedCollCtx[NUM_SHMEM_SLOT]; // 不能static，primitives要用
@@ -183,9 +203,9 @@ static __device__ int cqWrite(CQ *cq, int doneCollId, int thrdCudaDev, unsigned 
 static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlkCount4Coll, int *globalThrdCount4Coll, short *globalCollIds, DevComm7WorkElem *globalDevComm7WorkElems, CollCtx *globalBlk2CollId2CollCtx, BlkStatus *globalBlkStatus, unsigned long long int *barrierCnt, unsigned long long int *collCounters) {
   int bid = blockIdx.x;
   int tid = threadIdx.x;
-  int nthreads = blockDim.x;
+  // int nthreads = blockDim.x;
   
-
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 1", thrdCudaDev, blockIdx.x, threadIdx.x);
   ONE_THRD_DO
     #ifdef ARRAY_DEBUG
       blkStatus.barrierCnt = barrierCnt;
@@ -205,32 +225,45 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     cqWriteSlot = 0;
   ONE_THRD_DO_END
   
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 2", thrdCudaDev, blockIdx.x, threadIdx.x);
   // 不需要初始化DEBUG_CLOCK里的数组，因为这些数组使用的时候都是直接赋值的。
 
   BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
   int hasQuitted = myGlobalBlkStatus->hasQuitted; // 每个线程都读。
 
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 3", thrdCudaDev, blockIdx.x, threadIdx.x);
+
   // 第一次启动之前，rankCtx->hostBlkStatus是calloc的，然后复制到globalMem上，所以blkStatus.collStatusAlign.collStatus应该是全0，但是之后的启动可能导致collStatus数组是混乱的，还是重置一下。
   int csTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
-  int csDoneBytes = 0;
-  while (csDoneBytes < csTotalBytes) {
-    int targetBytes = min(nthreads * COPY_ELEM_SIZE, csTotalBytes - csDoneBytes);
-    set16B(tid, (char *)(blkStatus.collStatusAlign.collStatus) + csDoneBytes, &zeros, targetBytes);
-    csDoneBytes += targetBytes;
-  }
+  set16BLoop(tid, blkStatus.collStatusAlign.collStatus, zeros, csTotalBytes);
+  
+  // int csDoneBytes = 0;
+  // while (csDoneBytes < csTotalBytes) {
+  //   int targetBytes = min(nthreads * COPY_ELEM_SIZE, csTotalBytes - csDoneBytes);
+  //   set16B(tid, (char *)(blkStatus.collStatusAlign.collStatus) + csDoneBytes, zeros, targetBytes);
+  //   csDoneBytes += targetBytes;
+  // }
+
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 4", thrdCudaDev, blockIdx.x, threadIdx.x);
   
   // 每次kernel启动的时候，都把各个coll的尝试次数重置。
   int ctcTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE);
-  int ctcDoneBytes = 0;
-  while (ctcDoneBytes < ctcTotalBytes) {
-    int targetBytes = min(nthreads * COPY_ELEM_SIZE, ctcTotalBytes - ctcDoneBytes);
-    set16B(tid, (char *)(blkStatus.collTryCntAllign.collTryCnt) + ctcDoneBytes, &zeros, targetBytes);
-    ctcDoneBytes += targetBytes;
-  }
+  set16BLoop(tid, blkStatus.collTryCntAllign.collTryCnt, zeros, ctcTotalBytes);
+  // int ctcDoneBytes = 0;
+  // while (ctcDoneBytes < ctcTotalBytes) {
+  //   int targetBytes = min(nthreads * COPY_ELEM_SIZE, ctcTotalBytes - ctcDoneBytes);
+  //   set16B(tid, (char *)(blkStatus.collTryCntAllign.collTryCnt) + ctcDoneBytes, zeros, targetBytes);
+  //   ctcDoneBytes += targetBytes;
+  // }
+  
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 5, blkStatus.dynamicBlkStatus.numActiveColls=%d, sizeof(DynamicBlkStatus)=%lu, 16*blockDim.x=%d, sizeof(StaticCollCtx)=%lu, sizeof(DynamicCollCtx)=%lu, hasQuitted=%d, &zeros=%p, zeros=%p, zeros+1=%p, zeros[0]=%llu, zeros[1]=%llu", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.dynamicBlkStatus.numActiveColls, sizeof(DynamicBlkStatus), 16*blockDim.x, sizeof(StaticCollCtx), sizeof(DynamicCollCtx), hasQuitted, &zeros, zeros, zeros+1, *zeros, *(zeros+1));
 
   if (hasQuitted == 0) {
-    set16B(tid, &blkStatus.dynamicBlkStatus, &zeros, sizeof(DynamicBlkStatus));
+    set16BLoop(tid, &blkStatus.dynamicBlkStatus, zeros, sizeof(DynamicBlkStatus));
+    // blkStatus.dynamicBlkStatus.numActiveColls = 0;
       
+    // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 6, blkStatus.dynamicBlkStatus.numActiveColls=%d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.dynamicBlkStatus.numActiveColls);
+
     #ifdef DEBUG_CLOCK
       // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
       ONE_THRD_DO
@@ -319,7 +352,7 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     #endif
 
   } else {
-    copy16B(tid, &blkStatus.dynamicBlkStatus, &myGlobalBlkStatus->dynamicBlkStatus, sizeof(DynamicBlkStatus));
+    copy16BLoop(tid, &blkStatus.dynamicBlkStatus, &myGlobalBlkStatus->dynamicBlkStatus, sizeof(DynamicBlkStatus));
       
     #ifdef DEBUG_CLOCK
       // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
@@ -408,24 +441,40 @@ static __device__ void blockInit(int thrdCudaDev, int collCount, char *globalBlk
     #endif
   }
 
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 7", thrdCudaDev, blockIdx.x, threadIdx.x);
+
   int bcTotalBytes = roundUp(MAX_LENGTH * CHAR_ELEM_SIZE, COPY_ELEM_SIZE); // 这里不应该用collCount，因为blkCount4Coll相当于是数组模拟的map，我们不应该假设coll_id连续增长。
-  int bcDoneBytes = 0;
-  while (bcDoneBytes < bcTotalBytes) {
-    int targetBytes = min(nthreads * COPY_ELEM_SIZE, bcTotalBytes - bcDoneBytes);
-    copy16B(tid, (char *)(sharedBlkCount4CollAlign.blkCount4Coll) + bcDoneBytes, (char *)globalBlkCount4Coll + bcDoneBytes, targetBytes);
-    bcDoneBytes += targetBytes;
-  }
+  copy16BLoop(tid, sharedBlkCount4CollAlign.blkCount4Coll, globalBlkCount4Coll, bcTotalBytes);
+  // int bcDoneBytes = 0;
+  // while (bcDoneBytes < bcTotalBytes) {
+  //   int targetBytes = min(nthreads * COPY_ELEM_SIZE, bcTotalBytes - bcDoneBytes);
+  //   copy16B(tid, (char *)(sharedBlkCount4CollAlign.blkCount4Coll) + bcDoneBytes, (char *)globalBlkCount4Coll + bcDoneBytes, targetBytes);
+  //   bcDoneBytes += targetBytes;
+  // }
+
+  // OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before ofcclBarrier(1)", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   ofcclBarrier(1); // 为了下边读取blkStatus.dynamicBlkStatus.numActiveColls
 
+  // OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, after ofcclBarrier(1)", thrdCudaDev, blockIdx.x, threadIdx.x);
+
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 8, blkStatus.dynamicBlkStatus.numActiveColls=%d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.dynamicBlkStatus.numActiveColls);
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 8, blkStatus.dynamicBlkStatus.numActiveColls=%d", thrdCudaDev, blockIdx.x, threadIdx.x, blkStatus.dynamicBlkStatus.numActiveColls);
+
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 9", thrdCudaDev, blockIdx.x, threadIdx.x);
+
   int acTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
-  int acDoneBytes = 0;
-  // 这个要不要复制，需要读取numActiveColls，所以必须得上边做完，加一个barrier之后才可以。
-  while (acDoneBytes < acTotalBytes) {
-    int targetBytes = min(nthreads * COPY_ELEM_SIZE, acTotalBytes - acDoneBytes);
-    copy16B(tid, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + acDoneBytes, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + acDoneBytes, targetBytes);
-    acDoneBytes += targetBytes;
-  }
+  copy16BLoop(tid, blkStatus.activeCollIdsAlign.activeCollIds, myGlobalBlkStatus->activeCollIdsAlign.activeCollIds, acTotalBytes);
+  // OFCCL_LOG(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 10, acTotalBytes=%d", thrdCudaDev, blockIdx.x, threadIdx.x, acTotalBytes);
+  // int acDoneBytes = 0;
+  // // 这个要不要复制，需要读取numActiveColls，所以必须得上边做完，加一个barrier之后才可以。
+  // while (acDoneBytes < acTotalBytes) {
+  //   int targetBytes = min(nthreads * COPY_ELEM_SIZE, acTotalBytes - acDoneBytes);
+  //   copy16B(tid, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + acDoneBytes, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + acDoneBytes, targetBytes);
+  //   acDoneBytes += targetBytes;
+  // }
+
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, flag 11", thrdCudaDev, blockIdx.x, threadIdx.x);
   return;
 }
 
@@ -592,8 +641,8 @@ static __device__ void loadCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7C
     sharedCollCtx[collId % NUM_SHMEM_SLOT].progressed = 0;
   ONE_THRD_DO_END
 
-  copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, &globalCollCtx4Blk7Coll->dynamicCollCtx, sizeof(DynamicCollCtx));
-  copy16B(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].staticCollCtx, &globalCollCtx4Blk7Coll->staticCollCtx, sizeof(StaticCollCtx));
+  copy16BLoop(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, &globalCollCtx4Blk7Coll->dynamicCollCtx, sizeof(DynamicCollCtx));
+  copy16BLoop(tid, &sharedCollCtx[collId % NUM_SHMEM_SLOT].staticCollCtx, &globalCollCtx4Blk7Coll->staticCollCtx, sizeof(StaticCollCtx));
 
   // #ifdef ARRAY_DEBUG
   //   *(blkStatus.barrierCnt + 1 + 16 * BARCNT_INNER_SIZE + tid * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
@@ -609,7 +658,7 @@ static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollC
       blkStatus.dynamicBlkStatus.totalCtxSaveCnt++;
     ONE_THRD_DO_END
   #endif
-  copy16B(tid, &globalCollCtx4Blk7Coll->dynamicCollCtx, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, sizeof(DynamicCollCtx));
+  copy16BLoop(tid, &globalCollCtx4Blk7Coll->dynamicCollCtx, &sharedCollCtx[collId % NUM_SHMEM_SLOT].dynamicCollCtx, sizeof(DynamicCollCtx));
 }
 #else
 static __device__ void saveExcutingCollCtx(int thrdCudaDev, CollCtx *globalCollCtx4Blk7Coll, int collId) {
@@ -980,7 +1029,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   int tid = threadIdx.x;
 
   // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts, blkStatus.dynamicBlkStatus.numActiveColls = %d", thrdCudaDev, blockIdx.x, tid, blkStatus.dynamicBlkStatus.numActiveColls);
-  // OFCCL_LOG_THRD_0(OFCCL_CQE, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel starts", thrdCudaDev, blockIdx.x, tid);
   // __syncwarp(); // ！！！！！！为了打印log加的！！！！
 
   // int tempRound = 0;
@@ -988,7 +1037,9 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
   // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> send conn info @ %p, send conn tail(RolePostSend) @ %p, send conn head(RoleWaitSend) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.tail, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].send[0].conn.head);
   // OFCCL_LOG_RANK_X_THRD_0(OFCCL_MPI, 0, "Rank<%d> Blk<%d> recv conn info @ %p, recv conn head(RolePostRecv) @ %p, recv conn tail(RoleWaitRecv) @ %p,", thrdCudaDev, bid, &(globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.head, (globalBlk2CollId2CollCtx + bid * MAX_LENGTH + 0)->staticCollCtx.devPeers[(thrdCudaDev + 1) % 2].recv[0].conn.tail);
 
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, before blockInit", thrdCudaDev, blockIdx.x, threadIdx.x);
   blockInit(thrdCudaDev, collCount, globalBlkCount4Coll, globalThrdCount4Coll, globalCollIds, globalDevComm7WorkElems, globalBlk2CollId2CollCtx, globalBlkStatus, barrierCnt, collCounters);
+  // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, after blockInit", thrdCudaDev, blockIdx.x, threadIdx.x);
 
   #ifdef ARRAY_DEBUG
     if (tid == 0) {
@@ -1322,15 +1373,16 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
 
       } else {
         int acTotalBytes = roundUp(blkStatus.dynamicBlkStatus.numActiveColls * SHORT_ELEM_SIZE, COPY_ELEM_SIZE);
-        int acDoneBytes = 0;
         BlkStatus *myGlobalBlkStatus = globalBlkStatus + bid;
-        int nthreads = blockDim.x;
-        while (acDoneBytes < acTotalBytes) {
-          int targetBytes = min(nthreads * COPY_ELEM_SIZE, acTotalBytes - acDoneBytes);
-          copy16B(tid, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + acDoneBytes, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + acDoneBytes, targetBytes);
-          acDoneBytes += targetBytes;
-        }
-        copy16B(tid, &myGlobalBlkStatus->dynamicBlkStatus, &blkStatus.dynamicBlkStatus, sizeof(DynamicBlkStatus));
+        copy16BLoop(tid, myGlobalBlkStatus->activeCollIdsAlign.activeCollIds, blkStatus.activeCollIdsAlign.activeCollIds, acTotalBytes);
+        // int acDoneBytes = 0;
+        // int nthreads = blockDim.x;
+        // while (acDoneBytes < acTotalBytes) {
+        //   int targetBytes = min(nthreads * COPY_ELEM_SIZE, acTotalBytes - acDoneBytes);
+        //   copy16B(tid, (char *)(&myGlobalBlkStatus->activeCollIdsAlign.activeCollIds) + acDoneBytes, (char *)(blkStatus.activeCollIdsAlign.activeCollIds) + acDoneBytes, targetBytes);
+        //   acDoneBytes += targetBytes;
+        // }
+        copy16BLoop(tid, &myGlobalBlkStatus->dynamicBlkStatus, &blkStatus.dynamicBlkStatus, sizeof(DynamicBlkStatus));
 
         #ifdef DEBUG_CLOCK
           // 可以并行优化，看看有没有必要吧，每次循环的增量是blockDim.x
@@ -1419,7 +1471,7 @@ __global__ void daemonKernel(SQ *sq, CQ *cq, int thrdCudaDev, int collCount, CQE
         #endif
       }
 
-      // OFCCL_LOG_THRD_0(OFCCL, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits", thrdCudaDev, blockIdx.x, tid);
+      // OFCCL_LOG_THRD_0(OFCCL_RESNET, "Rank<%d> Blk<%d> Thrd<%d>, daemonKernel quits, blkStatus.dynamicBlkStatus.numActiveColls=%d", thrdCudaDev, blockIdx.x, tid, blkStatus.dynamicBlkStatus.numActiveColls);
       #ifdef ARRAY_DEBUG
         if (tid == 0) {
           *(blkStatus.barrierCnt + 1 + 5 * BARCNT_INNER_SIZE + threadIdx.x * NUM_BARRIERS * BARCNT_INNER_SIZE + blockIdx.x * blockDim.x * NUM_BARRIERS * BARCNT_INNER_SIZE) += 1;
